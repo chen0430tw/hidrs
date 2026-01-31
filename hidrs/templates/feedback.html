@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>决策反馈 - 全息互联网动态实时搜索系统</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+    <style>
+        body { padding-top: 2rem; }
+        .feedback-card {
+            margin-bottom: 1.5rem;
+        }
+        .recommendation-item {
+            margin-bottom: 1rem;
+            padding: 1rem;
+            border-radius: 0.5rem;
+        }
+        .severity-high {
+            border-left: 4px solid #dc3545;
+        }
+        .severity-medium {
+            border-left: 4px solid #ffc107;
+        }
+        .severity-low {
+            border-left: 4px solid #0dcaf0;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 2rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header mb-4">
+            <h1>决策反馈</h1>
+            <p class="lead">系统自动生成的优化建议与决策支持</p>
+        </div>
+        
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <nav class="navbar navbar-expand-lg navbar-light bg-light rounded">
+                    <div class="container-fluid">
+                        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                            <span class="navbar-toggler-icon"></span>
+                        </button>
+                        <div class="collapse navbar-collapse" id="navbarNav">
+                            <ul class="navbar-nav">
+                                <li class="nav-item">
+                                    <a class="nav-link" href="/">首页</a>
+                                </li>
+                                <li class="nav-item">
+                                    <a class="nav-link" href="/search">搜索</a>
+                                </li>
+                                <li class="nav-item">
+                                    <a class="nav-link" href="/network">网络拓扑</a>
+                                </li>
+                                <li class="nav-item">
+                                    <a class="nav-link" href="/dashboard">仪表盘</a>
+                                </li>
+                                <li class="nav-item">
+                                    <a class="nav-link active" href="/feedback">决策反馈</a>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </nav>
+            </div>
+        </div>
+        
+        <div class="feedback-header d-flex justify-content-between align-items-center mb-4">
+            <h3>系统决策反馈</h3>
+            <button id="refresh-btn" class="btn btn-primary">刷新反馈</button>
+        </div>
+        
+        <div class="loading" id="loading">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">加载决策反馈，请稍候...</p>
+        </div>
+        
+        <div id="feedback-container">
+            <div class="alert alert-info">
+                点击"刷新反馈"按钮加载最新决策反馈。
+            </div>
+        </div>
+        
+        <div class="mt-5 pt-3 text-center">
+            <p class="text-muted">© 2023 全息互联网动态实时搜索系统</p>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const refreshBtn = document.getElementById('refresh-btn');
+            const loading = document.getElementById('loading');
+            const feedbackContainer = document.getElementById('feedback-container');
+            
+            function loadFeedback() {
+                // 显示加载状态
+                loading.style.display = 'block';
+                feedbackContainer.innerHTML = '';
+                
+                // 请求最近的决策反馈
+                fetch('/api/feedback/recent?limit=5')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.length === 0) {
+                            feedbackContainer.innerHTML = `
+                                <div class="alert alert-info">
+                                    当前没有可用的决策反馈。系统将根据监控数据自动生成建议。
+                                </div>
+                            `;
+                        } else {
+                            let feedbackHtml = '';
+                            
+                            data.forEach((feedback, index) => {
+                                // 创建建议列表
+                                let recommendationsHtml = '';
+                                if (feedback.recommendations && feedback.recommendations.length > 0) {
+                                    feedback.recommendations.forEach(rec => {
+                                        recommendationsHtml += `
+                                            <div class="recommendation-item bg-light severity-${rec.severity}">
+                                                <div class="d-flex justify-content-between">
+                                                    <h5 class="mb-2">${rec.message}</h5>
+                                                    <span class="badge bg-${getSeverityColor(rec.severity)}">${getSeverityText(rec.severity)}</span>
+                                                </div>
+                                                <h6>建议操作：</h6>
+                                                <ul>
+                                                    ${rec.suggested_actions.map(action => `<li>${action}</li>`).join('')}
+                                                </ul>
+                                            </div>
+                                        `;
+                                    });
+                                } else {
+                                    recommendationsHtml = '<div class="alert alert-info">没有建议</div>';
+                                }
+                                
+                                // 格式化时间
+                                const timestamp = new Date(feedback.timestamp);
+                                const formattedDate = timestamp.toLocaleString();
+                                
+                                // 创建反馈卡片
+                                feedbackHtml += `
+                                    <div class="card feedback-card">
+                                        <div class="card-header d-flex justify-content-between align-items-center">
+                                            <h5 class="mb-0">决策反馈 #${index + 1}</h5>
+                                            <span class="text-muted">${formattedDate}</span>
+                                        </div>
+                                        <div class="card-body">
+                                            <h5 class="card-title mb-3">系统建议</h5>
+                                            ${recommendationsHtml}
+                                        </div>
+                                    </div>
+                                `;
+                            });
+                            
+                            feedbackContainer.innerHTML = feedbackHtml;
+                        }
+                        
+                        // 隐藏加载状态
+                        loading.style.display = 'none';
+                    })
+                    .catch(error => {
+                        console.error('Error loading feedback:', error);
+                        feedbackContainer.innerHTML = `
+                            <div class="alert alert-danger">
+                                加载决策反馈出错: ${error.message}
+                            </div>
+                        `;
+                        loading.style.display = 'none';
+                    });
+            }
+            
+            // 辅助函数：获取严重性级别颜色
+            function getSeverityColor(severity) {
+                switch (severity) {
+                    case 'high': return 'danger';
+                    case 'medium': return 'warning';
+                    case 'low': return 'info';
+                    default: return 'secondary';
+                }
+            }
+            
+            // 辅助函数：获取严重性级别文本
+            function getSeverityText(severity) {
+                switch (severity) {
+                    case 'high': return '高';
+                    case 'medium': return '中';
+                    case 'low': return '低';
+                    default: return '未知';
+                }
+            }
+            
+            // 刷新按钮事件
+            refreshBtn.addEventListener('click', loadFeedback);
+            
+            // 初始加载
+            loadFeedback();
+        });
+    </script>
+</body>
+</html>

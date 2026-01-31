@@ -1,0 +1,7 @@
+{
+    "use_umap_layout": true,
+    "umap_n_neighbors": 15,
+    "umap_min_dist": 0.1,
+    "max_nodes_for_labels": 100,
+    "max_label_length": 20
+}

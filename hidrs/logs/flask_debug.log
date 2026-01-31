@@ -1,0 +1,12 @@
+2025-03-19 13:28:48,881 - DEBUG - Flask template folder: /app/templates
+2025-03-19 13:28:48,882 - DEBUG - Template loader: <jinja2.loaders.FileSystemLoader object at 0x7f5308385580>
+2025-03-19 13:28:48,884 - DEBUG - Template exists!
+2025-03-19 13:29:55,353 - DEBUG - Flask template folder: /app/templates
+2025-03-19 13:29:55,383 - DEBUG - Template loader: <jinja2.loaders.FileSystemLoader object at 0x7f19237ef430>
+2025-03-19 13:29:55,397 - DEBUG - Template exists!
+2025-03-19 13:40:44,509 - DEBUG - Flask template folder: /app/templates
+2025-03-19 13:40:44,511 - DEBUG - Template loader: <jinja2.loaders.FileSystemLoader object at 0x7f88c0182400>
+2025-03-19 13:40:44,513 - DEBUG - Template exists!
+2025-03-19 14:05:45,187 - DEBUG - Flask template folder: /app/templates
+2025-03-19 14:05:45,189 - DEBUG - Template loader: <jinja2.loaders.FileSystemLoader object at 0x7f0b9d99d1f0>
+2025-03-19 14:05:45,190 - DEBUG - Template exists!
