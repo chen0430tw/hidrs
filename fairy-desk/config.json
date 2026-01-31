@@ -1,0 +1,116 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "debug": true
+  },
+  "hidrs": {
+    "endpoint": "http://localhost:5000",
+    "auto_detect": true,
+    "check_interval": 30
+  },
+  "left_screen": {
+    "default_tab": "cctv",
+    "tabs": [
+      {
+        "id": "cctv",
+        "name": "CCTV",
+        "icon": "📹",
+        "url": "https://www.earthcam.com/",
+        "category": "monitor",
+        "loadStrategy": "background",
+        "builtIn": true
+      },
+      {
+        "id": "map",
+        "name": "地图",
+        "icon": "🗺️",
+        "url": "https://www.openstreetmap.org/",
+        "category": "monitor",
+        "loadStrategy": "background",
+        "builtIn": true
+      },
+      {
+        "id": "flights",
+        "name": "航班",
+        "icon": "✈️",
+        "url": "https://globe.adsbexchange.com/",
+        "category": "monitor",
+        "loadStrategy": "background",
+        "builtIn": true
+      },
+      {
+        "id": "marine",
+        "name": "船舶",
+        "icon": "🚢",
+        "url": "https://www.vesselfinder.com/",
+        "category": "monitor",
+        "loadStrategy": "smart",
+        "builtIn": true
+      },
+      {
+        "id": "cyberattack",
+        "name": "攻击",
+        "icon": "🔥",
+        "url": "https://cybermap.kaspersky.com/",
+        "category": "monitor",
+        "loadStrategy": "background",
+        "builtIn": true
+      }
+    ]
+  },
+  "center_screen": {
+    "terminal_command": "claude",
+    "refresh_interval": 5,
+    "show_gpu": true
+  },
+  "right_screen": {
+    "social": {
+      "url": "https://x.com/home",
+      "api_key": "",
+      "use_embed": false
+    },
+    "news": {
+      "refresh_interval": 60,
+      "max_items": 20,
+      "feeds": [
+        {
+          "name": "BBC World",
+          "url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+          "enabled": true
+        },
+        {
+          "name": "Reuters",
+          "url": "https://www.reutersagency.com/feed/?best-regions=asia&post_type=best",
+          "enabled": true
+        },
+        {
+          "name": "NHK World",
+          "url": "https://www3.nhk.or.jp/rss/news/cat0.xml",
+          "enabled": true
+        }
+      ],
+      "highlight_keywords": ["breaking", "urgent", "alert", "warning", "震", "地震", "台风", "战争"]
+    },
+    "stocks": {
+      "provider": "tradingview",
+      "theme": "dark",
+      "symbols": ["AAPL", "GOOGL", "BTCUSD", "ETHUSD"],
+      "show_ticker": true
+    },
+    "alerts": {
+      "max_items": 50,
+      "auto_scroll": true,
+      "sound_enabled": false
+    }
+  },
+  "theme": {
+    "name": "cyberpunk",
+    "primary_color": "#00f0ff",
+    "secondary_color": "#ff00ff",
+    "background_color": "#0a0e17",
+    "panel_color": "#111827",
+    "text_color": "#e5e7eb",
+    "terminal_color": "#4ade80"
+  }
+}

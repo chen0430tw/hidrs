@@ -1,0 +1,507 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+FAIRY-DESK - 妖精桌面情报台
+三联屏网页化指挥桌面 + Agent
+
+独立运行，HIDRS 作为可选增强模块
+"""
+
+import json
+import os
+import time
+import logging
+from datetime import datetime
+from pathlib import Path
+
+import psutil
+import requests
+import feedparser
+from flask import Flask, render_template, jsonify, request, Response
+from flask_cors import CORS
+
+# ============================================================
+# 配置与初始化
+# ============================================================
+
+# 日志配置
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
+# Flask 应用
+app = Flask(__name__)
+CORS(app)
+
+# 配置文件路径
+CONFIG_PATH = Path(__file__).parent / 'config.json'
+
+# 全局配置
+config = {}
+
+# 系统日志缓存（用于 SSE）
+system_logs = []
+MAX_LOG_ENTRIES = 100
+
+
+def load_config():
+    """加载配置文件"""
+    global config
+    try:
+        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        logger.info("配置文件加载成功")
+    except FileNotFoundError:
+        logger.warning("配置文件不存在，使用默认配置")
+        config = get_default_config()
+        save_config()
+    except json.JSONDecodeError as e:
+        logger.error(f"配置文件解析失败: {e}")
+        config = get_default_config()
+    return config
+
+
+def save_config():
+    """保存配置文件"""
+    try:
+        with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        logger.info("配置文件保存成功")
+        return True
+    except Exception as e:
+        logger.error(f"配置文件保存失败: {e}")
+        return False
+
+
+def get_default_config():
+    """返回默认配置"""
+    return {
+        "server": {"host": "0.0.0.0", "port": 8080, "debug": True},
+        "hidrs": {"endpoint": "http://localhost:5000", "auto_detect": True, "check_interval": 30},
+        "left_screen": {"default_tab": "cctv", "tabs": []},
+        "center_screen": {"terminal_command": "claude", "refresh_interval": 5},
+        "right_screen": {
+            "social": {"url": "https://x.com/home"},
+            "news": {"feeds": [], "refresh_interval": 60},
+            "stocks": {"provider": "tradingview", "symbols": ["AAPL", "BTCUSD"]},
+            "alerts": {"max_items": 50}
+        },
+        "theme": {"name": "cyberpunk", "primary_color": "#00f0ff"}
+    }
+
+
+def add_system_log(level, message):
+    """添加系统日志"""
+    global system_logs
+    entry = {
+        "time": datetime.now().isoformat(),
+        "level": level,
+        "message": message
+    }
+    system_logs.append(entry)
+    if len(system_logs) > MAX_LOG_ENTRIES:
+        system_logs = system_logs[-MAX_LOG_ENTRIES:]
+    logger.log(getattr(logging, level.upper(), logging.INFO), message)
+
+
+# ============================================================
+# 页面路由
+# ============================================================
+
+@app.route('/')
+def index():
+    """主入口页面"""
+    return render_template('index.html', config=config)
+
+
+@app.route('/left')
+def left_screen():
+    """左屏：态势监控"""
+    return render_template('left.html', config=config)
+
+
+@app.route('/center')
+def center_screen():
+    """中屏：控制台"""
+    return render_template('center.html', config=config)
+
+
+@app.route('/right')
+def right_screen():
+    """右屏：情报视窗"""
+    return render_template('right.html', config=config)
+
+
+@app.route('/settings')
+def settings_page():
+    """设置页面"""
+    return render_template('settings.html', config=config)
+
+
+# ============================================================
+# 系统监控 API
+# ============================================================
+
+@app.route('/api/system/stats')
+def system_stats():
+    """获取系统状态（CPU/内存/网络/GPU）"""
+    try:
+        # CPU
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        cpu_count = psutil.cpu_count()
+        cpu_freq = psutil.cpu_freq()
+
+        # 内存
+        memory = psutil.virtual_memory()
+
+        # 网络
+        net_io = psutil.net_io_counters()
+        net_connections = len(psutil.net_connections())
+
+        # 磁盘
+        disk = psutil.disk_usage('/')
+
+        result = {
+            "cpu": {
+                "percent": cpu_percent,
+                "cores": cpu_count,
+                "freq_mhz": cpu_freq.current if cpu_freq else 0
+            },
+            "memory": {
+                "total_gb": round(memory.total / (1024**3), 2),
+                "used_gb": round(memory.used / (1024**3), 2),
+                "percent": memory.percent
+            },
+            "network": {
+                "bytes_sent": net_io.bytes_sent,
+                "bytes_recv": net_io.bytes_recv,
+                "connections": net_connections
+            },
+            "disk": {
+                "total_gb": round(disk.total / (1024**3), 2),
+                "used_gb": round(disk.used / (1024**3), 2),
+                "percent": round(disk.percent, 1)
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+
+        # GPU（可选）
+        try:
+            import GPUtil
+            gpus = GPUtil.getGPUs()
+            if gpus:
+                gpu = gpus[0]
+                result["gpu"] = {
+                    "name": gpu.name,
+                    "util_percent": gpu.load * 100,
+                    "memory_used_mb": gpu.memoryUsed,
+                    "memory_total_mb": gpu.memoryTotal,
+                    "temperature": gpu.temperature
+                }
+        except ImportError:
+            result["gpu"] = None
+        except Exception:
+            result["gpu"] = None
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"获取系统状态失败: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/system/logs')
+def system_logs_sse():
+    """系统日志 SSE 流"""
+    def generate():
+        last_index = 0
+        while True:
+            if len(system_logs) > last_index:
+                for log in system_logs[last_index:]:
+                    yield f"data: {json.dumps(log, ensure_ascii=False)}\n\n"
+                last_index = len(system_logs)
+            time.sleep(1)
+
+    return Response(generate(), mimetype='text/event-stream')
+
+
+@app.route('/api/system/logs/history')
+def system_logs_history():
+    """获取历史日志"""
+    limit = request.args.get('limit', 50, type=int)
+    return jsonify(system_logs[-limit:])
+
+
+# ============================================================
+# HIDRS 集成 API
+# ============================================================
+
+@app.route('/api/hidrs/status')
+def hidrs_status():
+    """检测 HIDRS 连接状态"""
+    endpoint = config.get('hidrs', {}).get('endpoint', 'http://localhost:5000')
+    try:
+        resp = requests.get(f"{endpoint}/health", timeout=3)
+        if resp.ok:
+            return jsonify({
+                "connected": True,
+                "endpoint": endpoint,
+                "message": "HIDRS 已连接"
+            })
+    except requests.exceptions.RequestException:
+        pass
+
+    return jsonify({
+        "connected": False,
+        "endpoint": endpoint,
+        "message": "HIDRS 未连接 - 开启可获得更多功能",
+        "features": [
+            "网络拓扑实时监控",
+            "Fiedler 值异常检测",
+            "全息搜索功能",
+            "AI 决策反馈"
+        ]
+    })
+
+
+@app.route('/api/hidrs/proxy/<path:path>')
+def hidrs_proxy(path):
+    """代理 HIDRS API 请求"""
+    endpoint = config.get('hidrs', {}).get('endpoint', 'http://localhost:5000')
+    try:
+        resp = requests.get(
+            f"{endpoint}/{path}",
+            params=request.args,
+            timeout=10
+        )
+        return jsonify(resp.json()), resp.status_code
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": f"HIDRS 请求失败: {e}"}), 503
+
+
+# ============================================================
+# 新闻 RSS API
+# ============================================================
+
+@app.route('/api/feeds/news')
+def news_feeds():
+    """获取 RSS 新闻聚合"""
+    feeds_config = config.get('right_screen', {}).get('news', {}).get('feeds', [])
+    max_items = request.args.get('limit', 20, type=int)
+
+    all_items = []
+
+    for feed_cfg in feeds_config:
+        if not feed_cfg.get('enabled', True):
+            continue
+
+        try:
+            feed = feedparser.parse(feed_cfg['url'])
+            for entry in feed.entries[:10]:  # 每个源最多10条
+                all_items.append({
+                    "source": feed_cfg['name'],
+                    "title": entry.get('title', ''),
+                    "link": entry.get('link', ''),
+                    "published": entry.get('published', ''),
+                    "summary": entry.get('summary', '')[:200] if entry.get('summary') else ''
+                })
+        except Exception as e:
+            logger.warning(f"获取 RSS 失败 [{feed_cfg['name']}]: {e}")
+
+    # 按时间排序（简单处理）
+    all_items.sort(key=lambda x: x.get('published', ''), reverse=True)
+
+    return jsonify(all_items[:max_items])
+
+
+# ============================================================
+# 配置管理 API
+# ============================================================
+
+@app.route('/api/config', methods=['GET'])
+def get_config():
+    """获取当前配置"""
+    return jsonify(config)
+
+
+@app.route('/api/config', methods=['POST'])
+def update_config():
+    """更新配置"""
+    global config
+    try:
+        new_config = request.get_json()
+        if not new_config:
+            return jsonify({"error": "无效的配置数据"}), 400
+
+        config = new_config
+        if save_config():
+            add_system_log("info", "配置已更新")
+            return jsonify({"success": True, "message": "配置已保存"})
+        else:
+            return jsonify({"error": "配置保存失败"}), 500
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route('/api/config/tabs', methods=['GET'])
+def get_tabs():
+    """获取左屏 Tab 配置"""
+    tabs = config.get('left_screen', {}).get('tabs', [])
+    return jsonify(tabs)
+
+
+@app.route('/api/config/tabs', methods=['POST'])
+def add_tab():
+    """添加新 Tab"""
+    try:
+        tab_data = request.get_json()
+        if not tab_data or not tab_data.get('name') or not tab_data.get('url'):
+            return jsonify({"error": "缺少必要字段 (name, url)"}), 400
+
+        # 生成 ID
+        tab_id = tab_data.get('id') or tab_data['name'].lower().replace(' ', '_')
+
+        new_tab = {
+            "id": tab_id,
+            "name": tab_data['name'],
+            "icon": tab_data.get('icon', '🌐'),
+            "url": tab_data['url'],
+            "category": tab_data.get('category', 'custom'),
+            "loadStrategy": tab_data.get('loadStrategy', 'lazy'),
+            "builtIn": False
+        }
+
+        if 'left_screen' not in config:
+            config['left_screen'] = {'tabs': []}
+        if 'tabs' not in config['left_screen']:
+            config['left_screen']['tabs'] = []
+
+        config['left_screen']['tabs'].append(new_tab)
+        save_config()
+
+        add_system_log("info", f"添加新 Tab: {new_tab['name']}")
+        return jsonify({"success": True, "tab": new_tab})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route('/api/config/tabs/<tab_id>', methods=['DELETE'])
+def delete_tab(tab_id):
+    """删除 Tab"""
+    tabs = config.get('left_screen', {}).get('tabs', [])
+
+    for i, tab in enumerate(tabs):
+        if tab['id'] == tab_id:
+            if tab.get('builtIn'):
+                return jsonify({"error": "无法删除内置 Tab"}), 400
+            tabs.pop(i)
+            save_config()
+            add_system_log("info", f"删除 Tab: {tab['name']}")
+            return jsonify({"success": True})
+
+    return jsonify({"error": "Tab 不存在"}), 404
+
+
+@app.route('/api/config/tabs/<tab_id>', methods=['PUT'])
+def update_tab(tab_id):
+    """更新 Tab 配置"""
+    tabs = config.get('left_screen', {}).get('tabs', [])
+    tab_data = request.get_json()
+
+    for tab in tabs:
+        if tab['id'] == tab_id:
+            # 更新允许的字段
+            for key in ['name', 'icon', 'url', 'loadStrategy', 'category']:
+                if key in tab_data:
+                    tab[key] = tab_data[key]
+            save_config()
+            add_system_log("info", f"更新 Tab: {tab['name']}")
+            return jsonify({"success": True, "tab": tab})
+
+    return jsonify({"error": "Tab 不存在"}), 404
+
+
+# ============================================================
+# 事件流 API（告警）
+# ============================================================
+
+# 事件缓存
+events = []
+MAX_EVENTS = 100
+
+
+@app.route('/api/events', methods=['POST'])
+def add_event():
+    """添加事件"""
+    global events
+    try:
+        event = request.get_json()
+        event['timestamp'] = datetime.now().isoformat()
+        events.append(event)
+        if len(events) > MAX_EVENTS:
+            events = events[-MAX_EVENTS:]
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route('/api/events/stream')
+def events_stream():
+    """事件流 SSE"""
+    def generate():
+        last_index = 0
+        while True:
+            if len(events) > last_index:
+                for event in events[last_index:]:
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                last_index = len(events)
+            time.sleep(1)
+
+    return Response(generate(), mimetype='text/event-stream')
+
+
+@app.route('/api/events/history')
+def events_history():
+    """获取历史事件"""
+    limit = request.args.get('limit', 50, type=int)
+    return jsonify(events[-limit:])
+
+
+# ============================================================
+# 健康检查
+# ============================================================
+
+@app.route('/health')
+def health_check():
+    """健康检查端点"""
+    return jsonify({
+        "status": "ok",
+        "service": "FAIRY-DESK",
+        "timestamp": datetime.now().isoformat()
+    })
+
+
+# ============================================================
+# 启动
+# ============================================================
+
+if __name__ == '__main__':
+    # 加载配置
+    load_config()
+
+    # 启动日志
+    add_system_log("info", "FAIRY-DESK 启动中...")
+    add_system_log("info", f"监听地址: {config['server']['host']}:{config['server']['port']}")
+
+    # 启动 Flask
+    app.run(
+        host=config.get('server', {}).get('host', '0.0.0.0'),
+        port=config.get('server', {}).get('port', 8080),
+        debug=config.get('server', {}).get('debug', True),
+        threaded=True
+    )

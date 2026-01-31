@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FAIRY-DESK - 右屏 · 情报视窗</title>
+  <link rel="stylesheet" href="/static/css/theme.css">
+  <style>
+    .right-layout {
+      height: calc(100vh - 32px);
+      display: flex;
+    }
+
+    .four-column-layout {
+      flex: 1;
+      display: flex;
+      gap: 1px;
+      background: var(--border-color);
+    }
+
+    .column {
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-primary);
+      min-width: 0;
+    }
+
+    .column:nth-child(1) { flex: 2.5; }  /* 社媒 */
+    .column:nth-child(2) { flex: 2.5; }  /* 新闻 */
+    .column:nth-child(3) { flex: 2; }    /* 股票 */
+    .column:nth-child(4) { flex: 3; }    /* 告警 */
+
+    .column-header {
+      height: 32px;
+      background: var(--bg-tertiary);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 10px;
+      font-size: 11px;
+      color: var(--neon-cyan);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      flex-shrink: 0;
+    }
+
+    .column-header .col-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .column-header .col-actions {
+      display: flex;
+      gap: 4px;
+    }
+
+    .column-header .col-actions button {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 2px 4px;
+      font-size: 12px;
+    }
+
+    .column-header .col-actions button:hover {
+      color: var(--neon-cyan);
+    }
+
+    .column-body {
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* 社媒栏 - iframe */
+    .social-frame {
+      width: 100%;
+      height: 100%;
+      border: none;
+      background: var(--bg-primary);
+    }
+
+    .social-fallback {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      text-align: center;
+      padding: 20px;
+      color: var(--text-secondary);
+    }
+
+    .social-fallback .icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    .social-fallback .message {
+      margin-bottom: 16px;
+      font-size: 13px;
+    }
+
+    .social-fallback button {
+      background: var(--neon-cyan);
+      color: var(--bg-primary);
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    /* 新闻栏 */
+    .news-feed {
+      height: 100%;
+      overflow-y: auto;
+    }
+
+    /* 股票栏 */
+    .stocks-container {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .stock-ticker {
+      height: 32px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-color);
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+    }
+
+    .ticker-content {
+      display: flex;
+      animation: ticker 20s linear infinite;
+      white-space: nowrap;
+    }
+
+    @keyframes ticker {
+      0% { transform: translateX(0); }
+      100% { transform: translateX(-50%); }
+    }
+
+    .ticker-item {
+      padding: 0 16px;
+      font-size: 12px;
+      font-family: var(--font-mono);
+    }
+
+    .ticker-item .symbol {
+      color: var(--text-primary);
+      margin-right: 8px;
+    }
+
+    .ticker-item .price {
+      color: var(--neon-cyan);
+    }
+
+    .ticker-item .change.up {
+      color: var(--status-success);
+    }
+
+    .ticker-item .change.down {
+      color: var(--status-danger);
+    }
+
+    .stock-charts {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+    }
+
+    .stock-chart-item {
+      margin-bottom: 12px;
+      background: var(--bg-secondary);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .stock-chart-item iframe {
+      width: 100%;
+      height: 150px;
+      border: none;
+    }
+
+    /* 告警栏 */
+    .alert-feed {
+      height: 100%;
+      overflow-y: auto;
+    }
+
+    /* HIDRS 提示 */
+    .hidrs-hint {
+      margin: 12px;
+      padding: 16px;
+      background: var(--bg-tertiary);
+      border: 1px dashed var(--border-color);
+      border-radius: 4px;
+      text-align: center;
+    }
+
+    .hidrs-hint .hint-icon {
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+
+    .hidrs-hint .hint-title {
+      color: var(--neon-cyan);
+      font-weight: bold;
+      margin-bottom: 8px;
+    }
+
+    .hidrs-hint ul {
+      text-align: left;
+      padding-left: 20px;
+      margin: 8px 0;
+      color: var(--text-secondary);
+      font-size: 12px;
+    }
+
+    .hidrs-hint li {
+      margin-bottom: 4px;
+    }
+  </style>
+</head>
+<body data-page="right">
+  <div class="screen-container">
+    <!-- 顶部状态栏 -->
+    <div class="status-bar">
+      <div class="title">
+        📊 情报视窗
+      </div>
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <span id="hidrs-status" class="hidrs-status disconnected">🔴 HIDRS</span>
+        <div class="clock" id="clock">--:--:--</div>
+      </div>
+    </div>
+
+    <div class="right-layout">
+      <div class="four-column-layout">
+        <!-- 第1栏: 社交媒体 -->
+        <div class="column">
+          <div class="column-header">
+            <div class="col-title">
+              <span>📱</span>
+              <span>SNS / 社交</span>
+            </div>
+            <div class="col-actions">
+              <button onclick="refreshSocial()" title="刷新">🔄</button>
+              <button onclick="openSocialExternal()" title="新窗口">🔗</button>
+            </div>
+          </div>
+          <div class="column-body" id="social-container">
+            <!-- 尝试嵌入 X，如果失败显示替代方案 -->
+            <div class="social-fallback" id="social-fallback">
+              <div class="icon">🐦</div>
+              <div class="message">
+                X/Twitter 无法在 iframe 中嵌入<br>
+                点击下方按钮在新窗口打开
+              </div>
+              <button onclick="window.open('https://x.com/home', '_blank')">
+                打开 X/Twitter
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 第2栏: 新闻 -->
+        <div class="column">
+          <div class="column-header">
+            <div class="col-title">
+              <span>📰</span>
+              <span>ニュース / 新闻</span>
+            </div>
+            <div class="col-actions">
+              <button onclick="loadNewsFeeds()" title="刷新">🔄</button>
+            </div>
+          </div>
+          <div class="column-body">
+            <div class="news-feed feed-list" id="news-feed">
+              <div class="loading">
+                <div class="loading-spinner"></div>
+                <span>加载中...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 第3栏: 股票行情 -->
+        <div class="column">
+          <div class="column-header">
+            <div class="col-title">
+              <span>📈</span>
+              <span>マーケット / 行情</span>
+            </div>
+            <div class="col-actions">
+              <button onclick="location.href='/settings#stocks'" title="设置">⚙️</button>
+            </div>
+          </div>
+          <div class="column-body">
+            <div class="stocks-container">
+              <div class="stock-ticker">
+                <div class="ticker-content" id="stock-ticker">
+                  <!-- 滚动行情由 JS 填充 -->
+                </div>
+              </div>
+              <div class="stock-charts" id="stock-charts">
+                <!-- TradingView widgets 由 JS 填充 -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 第4栏: 告警日志 -->
+        <div class="column">
+          <div class="column-header">
+            <div class="col-title">
+              <span>🚨</span>
+              <span>ログ / 告警</span>
+            </div>
+            <div class="col-actions">
+              <button onclick="clearAlerts()" title="清空">🗑️</button>
+            </div>
+          </div>
+          <div class="column-body">
+            <div class="alert-feed feed-list" id="alert-feed">
+              <!-- 告警由 JS 填充 -->
+            </div>
+
+            <!-- HIDRS 未连接提示 -->
+            <div class="hidrs-hint" id="hidrs-hint">
+              <div class="hint-icon">🔮</div>
+              <div class="hint-title">HIDRS 未连接</div>
+              <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">
+                开启 HIDRS 可获得更多告警来源：
+              </p>
+              <ul>
+                <li>网络拓扑异常检测</li>
+                <li>Fiedler 值突变告警</li>
+                <li>社区结构变化</li>
+                <li>AI 决策反馈</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/core.js"></script>
+  <script>
+    // 右屏特定逻辑
+
+    // 初始化股票图表
+    function initStockCharts() {
+      const symbols = FairyDesk.config?.right_screen?.stocks?.symbols || ['AAPL', 'BTCUSD'];
+      const theme = FairyDesk.config?.right_screen?.stocks?.theme || 'dark';
+
+      // 滚动行情条
+      const tickerEl = document.getElementById('stock-ticker');
+      if (tickerEl) {
+        const tickerHtml = symbols.map(s => `
+          <div class="ticker-item">
+            <span class="symbol">${s}</span>
+            <span class="price">---</span>
+            <span class="change">--%</span>
+          </div>
+        `).join('');
+        tickerEl.innerHTML = tickerHtml + tickerHtml; // 重复以实现无缝滚动
+      }
+
+      // TradingView Mini Chart Widgets
+      const chartsEl = document.getElementById('stock-charts');
+      if (chartsEl) {
+        chartsEl.innerHTML = symbols.slice(0, 4).map(symbol => `
+          <div class="stock-chart-item">
+            <div class="tradingview-widget-container">
+              <div class="tradingview-widget-container__widget"></div>
+              <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-mini-symbol-overview.js" async>
+              {
+                "symbol": "${symbol.includes(':') ? symbol : 'NASDAQ:' + symbol}",
+                "width": "100%",
+                "height": "150",
+                "locale": "zh_CN",
+                "dateRange": "1D",
+                "colorTheme": "${theme}",
+                "isTransparent": true,
+                "autosize": true,
+                "largeChartUrl": ""
+              }
+              <\/script>
+            </div>
+          </div>
+        `).join('');
+      }
+    }
+
+    // 社交媒体
+    function refreshSocial() {
+      const container = document.getElementById('social-container');
+      const url = FairyDesk.config?.right_screen?.social?.url || 'https://x.com/home';
+
+      // 尝试 iframe（大多数社交网站会阻止）
+      const iframe = document.createElement('iframe');
+      iframe.className = 'social-frame';
+      iframe.src = url;
+      iframe.onerror = () => showSocialFallback();
+      iframe.onload = function() {
+        // 检测是否被阻止（通过尝试访问 contentDocument）
+        try {
+          const doc = iframe.contentDocument || iframe.contentWindow.document;
+          // 如果能访问说明没被阻止
+          document.getElementById('social-fallback').style.display = 'none';
+        } catch (e) {
+          // 被阻止，显示替代方案
+          showSocialFallback();
+        }
+      };
+
+      // 先显示 fallback，iframe 加载成功后隐藏
+      showSocialFallback();
+    }
+
+    function showSocialFallback() {
+      document.getElementById('social-fallback').style.display = 'flex';
+    }
+
+    function openSocialExternal() {
+      const url = FairyDesk.config?.right_screen?.social?.url || 'https://x.com/home';
+      window.open(url, '_blank');
+    }
+
+    // 清空告警
+    function clearAlerts() {
+      if (confirm('确定清空所有告警？')) {
+        document.getElementById('alert-feed').innerHTML = '';
+        showNotification('告警已清空', 'success');
+      }
+    }
+
+    // 添加模拟告警（演示用）
+    function addDemoAlert() {
+      const types = ['critical', 'warning', 'info'];
+      const messages = [
+        '检测到网络流量异常',
+        '系统内存使用率超过 80%',
+        'RSS 源更新完成',
+        '新的安全公告发布',
+        '服务健康检查通过'
+      ];
+
+      const event = {
+        type: types[Math.floor(Math.random() * types.length)],
+        message: messages[Math.floor(Math.random() * messages.length)],
+        timestamp: new Date().toISOString()
+      };
+
+      appendAlert(event, document.getElementById('alert-feed'), true);
+    }
+
+    // 页面加载后初始化
+    document.addEventListener('DOMContentLoaded', () => {
+      // 延迟加载股票图表（等待配置加载完成）
+      setTimeout(initStockCharts, 1000);
+
+      // 演示：定期添加模拟告警
+      setInterval(addDemoAlert, 30000);
+    });
+  </script>
+</body>
+</html>

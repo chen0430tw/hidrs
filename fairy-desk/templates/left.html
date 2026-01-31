@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FAIRY-DESK - 左屏 · 态势监控</title>
+  <link rel="stylesheet" href="/static/css/theme.css">
+  <style>
+    .screen-container {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .tab-section {
+      flex-shrink: 0;
+    }
+
+    .content-section {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .bottom-bar {
+      height: 36px;
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+
+    .bottom-bar .source-info {
+      color: var(--text-secondary);
+    }
+
+    .bottom-bar .controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .bottom-bar .controls button {
+      background: transparent;
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+      padding: 4px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      transition: all 0.2s ease;
+    }
+
+    .bottom-bar .controls button:hover {
+      color: var(--neon-cyan);
+      border-color: var(--neon-cyan);
+    }
+
+    .bottom-bar .controls button.active {
+      background: var(--neon-cyan);
+      color: var(--bg-primary);
+      border-color: var(--neon-cyan);
+    }
+
+    /* Tab 指示器 */
+    .tab-item .strategy-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      margin-left: 4px;
+    }
+
+    .tab-item .strategy-dot.background {
+      background: var(--status-success);
+    }
+
+    .tab-item .strategy-dot.lazy {
+      background: var(--text-muted);
+    }
+
+    .tab-item .strategy-dot.smart {
+      background: var(--status-warning);
+    }
+
+    /* iframe 加载状态 */
+    .tab-pane.loading::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 40px;
+      height: 40px;
+      margin: -20px 0 0 -20px;
+      border: 3px solid var(--border-color);
+      border-top-color: var(--neon-cyan);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    .iframe-error {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--text-secondary);
+      text-align: center;
+      padding: 20px;
+    }
+
+    .iframe-error .error-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    .iframe-error .error-message {
+      margin-bottom: 16px;
+    }
+
+    .iframe-error button {
+      background: var(--neon-cyan);
+      color: var(--bg-primary);
+      border: none;
+      padding: 8px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body data-page="left">
+  <div class="screen-container">
+    <!-- 顶部状态栏 -->
+    <div class="status-bar">
+      <div class="title">
+        <span class="live-indicator">
+          <span class="live-dot"></span>
+          <span>LIVE</span>
+        </span>
+        态势监控
+      </div>
+      <div class="clock" id="clock">--:--:--</div>
+    </div>
+
+    <!-- Tab 栏 -->
+    <div class="tab-section">
+      <div class="tab-bar" id="tab-bar">
+        <!-- Tab 由 JS 动态渲染 -->
+      </div>
+    </div>
+
+    <!-- 内容区 -->
+    <div class="content-section">
+      <div class="tab-content" id="tab-content">
+        <!-- iframe 内容由 JS 动态渲染 -->
+        <div class="loading">
+          <div class="loading-spinner"></div>
+          <span>加载中...</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 底部控制栏 -->
+    <div class="bottom-bar">
+      <div class="source-info" id="source-info">
+        选择一个分页开始
+      </div>
+      <div class="controls">
+        <button onclick="refreshCurrentTab()" title="刷新">🔄 刷新</button>
+        <button onclick="openInNewWindow()" title="新窗口打开">🔗 新窗口</button>
+        <button onclick="location.href='/settings'" title="设置">⚙️</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/core.js"></script>
+  <script>
+    // 左屏特定逻辑
+
+    function refreshCurrentTab() {
+      if (FairyDesk.activeTab) {
+        refreshTab(FairyDesk.activeTab);
+        showNotification('已刷新', 'success');
+      }
+    }
+
+    function openInNewWindow() {
+      const tabs = FairyDesk.config?.left_screen?.tabs || [];
+      const tab = tabs.find(t => t.id === FairyDesk.activeTab);
+      if (tab) {
+        window.open(tab.url, '_blank');
+      }
+    }
+
+    // 更新 Tab 渲染，添加策略指示器
+    const originalRenderTabs = renderTabs;
+    renderTabs = function(tabs) {
+      const tabBar = document.getElementById('tab-bar');
+      if (!tabBar) return;
+
+      tabBar.innerHTML = '';
+
+      tabs.forEach(tab => {
+        const tabEl = document.createElement('button');
+        tabEl.className = 'tab-item';
+        tabEl.dataset.tabId = tab.id;
+
+        const strategyClass = tab.loadStrategy || 'lazy';
+        tabEl.innerHTML = `
+          <span class="tab-icon">${tab.icon}</span>
+          <span class="tab-name">${tab.name}</span>
+          <span class="strategy-dot ${strategyClass}" title="${strategyClass === 'background' ? '背景同步' : strategyClass === 'smart' ? '智能休眠' : '懒加载'}"></span>
+          ${!tab.builtIn ? '<span class="tab-close" onclick="event.stopPropagation(); deleteTab(\'' + tab.id + '\')">×</span>' : ''}
+        `;
+        tabEl.onclick = () => switchTab(tab.id);
+        tabEl.oncontextmenu = (e) => {
+          e.preventDefault();
+          showTabContextMenu(e, tab);
+        };
+
+        tabBar.appendChild(tabEl);
+      });
+
+      // 添加按钮
+      const addBtn = document.createElement('button');
+      addBtn.className = 'tab-add';
+      addBtn.innerHTML = '+ 添加';
+      addBtn.onclick = showAddTabModal;
+      addBtn.title = '添加新分页';
+      tabBar.appendChild(addBtn);
+    };
+  </script>
+</body>
+</html>
