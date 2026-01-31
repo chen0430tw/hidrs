@@ -1,0 +1,96 @@
+version: '3'
+
+services:
+  # ZooKeeper服务 - Kafka依赖
+  zookeeper:
+    image: zookeeper:3.8
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      - ZOO_MY_ID=1
+    volumes:
+      - zookeeper_data:/data
+      - zookeeper_log:/datalog
+    networks:
+      - hidrs_network
+
+  # Kafka服务
+  kafka:
+    image: confluentinc/cp-kafka:7.3.0
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+    depends_on:
+      - zookeeper
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - hidrs_network
+
+  # MongoDB服务
+  mongodb:
+    image: mongo:5
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - hidrs_network
+
+  # Elasticsearch服务
+  elasticsearch:
+    image: elasticsearch:7.17.9
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - hidrs_network
+
+  # HIDRS应用服务
+  hidrs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hidrs
+    ports:
+      - "5000:5000"
+    depends_on:
+      - kafka
+      - mongodb
+      - elasticsearch
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+      - ./models:/app/models
+    networks:
+      - hidrs_network
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/
+      - KAFKA_SERVERS=kafka:9092
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+
+networks:
+  hidrs_network:
+    driver: bridge
+
+volumes:
+  zookeeper_data:
+  zookeeper_log:
+  kafka_data:
+  mongodb_data:
+  elasticsearch_data:

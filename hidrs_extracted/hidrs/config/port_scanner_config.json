@@ -1,0 +1,11 @@
+{
+    "mongodb_uri": "mongodb://localhost:27017/",
+    "mongodb_db": "hidrs",
+    "port_scan_collection": "port_scans",
+    "kafka_servers": ["localhost:9092"],
+    "kafka_topic": "port_scan_stream",
+    "ip_ranges": ["192.168.1.0/24", "10.0.0.0/24"],
+    "ports": "21,22,23,25,53,80,110,443,3306,8080",
+    "min_scan_interval": 300,
+    "max_scan_interval": 600
+}

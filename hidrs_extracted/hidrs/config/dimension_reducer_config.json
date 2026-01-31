@@ -1,0 +1,6 @@
+{
+    "umap_n_neighbors": 15,
+    "umap_min_dist": 0.1,
+    "umap_n_components": 2,
+    "pca_n_components": 50
+}

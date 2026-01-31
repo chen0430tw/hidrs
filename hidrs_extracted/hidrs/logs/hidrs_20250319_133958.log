@@ -1,0 +1,469 @@
+2025-03-19 13:40:12,826 - root - INFO - 初始化 data_acquisition 层
+2025-03-19 13:40:12,837 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:12,838 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:12,839 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:12,943 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:12,944 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:12,992 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:12,992 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:12,993 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:13,095 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:13,096 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:13,136 - elastic_transport.transport - INFO - HEAD http://elasticsearch:9200/hidrs_data [status:200 duration:0.031s]
+2025-03-19 13:40:13,431 - root - INFO - 初始化 data_processing 层
+2025-03-19 13:40:13,437 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:13,438 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:13,438 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:13,541 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:13,542 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:13,543 - kafka.coordinator.consumer - WARNING - group_id is None: disabling auto-commit.
+2025-03-19 13:40:13,544 - kafka.consumer.subscription_state - INFO - Updating subscribed topics to: ('raw_data_stream',)
+2025-03-19 13:40:13,546 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:13,546 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:13,547 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:13,650 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:13,651 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:18,064 - root - INFO - 初始化 network_topology 层
+2025-03-19 13:40:18,068 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:18,069 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:18,071 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:18,175 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:18,176 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:18,177 - kafka.coordinator.consumer - WARNING - group_id is None: disabling auto-commit.
+2025-03-19 13:40:18,178 - kafka.consumer.subscription_state - INFO - Updating subscribed topics to: ('processed_data_stream',)
+2025-03-19 13:40:18,179 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:18,180 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:18,181 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:18,284 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:18,285 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:18,291 - root - INFO - 初始化 holographic_mapping 层
+2025-03-19 13:40:18,297 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:18,299 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:18,304 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:18,407 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:18,408 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:18,408 - kafka.consumer.subscription_state - INFO - Updating subscribed topics to: ('topology_analysis_stream',)
+2025-03-19 13:40:18,410 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:18,410 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:18,411 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:18,513 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:18,514 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:18,553 - elastic_transport.transport - INFO - HEAD http://elasticsearch:9200/hidrs_holographic [status:200 duration:0.029s]
+2025-03-19 13:40:18,555 - root - INFO - 初始化 realtime_search 层
+2025-03-19 13:40:18,564 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:18,564 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:18,565 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:18,668 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:18,668 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:18,669 - kafka.consumer.subscription_state - INFO - Updating subscribed topics to: ('topology_analysis_stream',)
+2025-03-19 13:40:18,671 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:18,671 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:18,672 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:18,774 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:18,775 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:18,793 - elastic_transport.transport - INFO - HEAD http://elasticsearch:9200/hidrs_holographic [status:200 duration:0.009s]
+2025-03-19 13:40:18,860 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:18,861 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:18,862 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:18,966 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:18,966 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:18,978 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:18,980 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:18,981 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:19,084 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:19,085 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:19,086 - kafka.consumer.subscription_state - INFO - Updating subscribed topics to: ('topology_analysis_stream',)
+2025-03-19 13:40:19,088 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:19,088 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:19,089 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:19,193 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:19,194 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:19,195 - kafka.consumer.subscription_state - INFO - Updating subscribed topics to: ('search_events_stream',)
+2025-03-19 13:40:19,197 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:19,197 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:19,198 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:19,302 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:19,303 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:19,303 - kafka.consumer.subscription_state - INFO - Updating subscribed topics to: ('alerts_stream',)
+2025-03-19 13:40:19,305 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:19,305 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:19,306 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:19,408 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:19,409 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:19,411 - root - INFO - 初始化 user_interface 层
+2025-03-19 13:40:19,413 - root - INFO - 启动HIDRS系统...
+2025-03-19 13:40:19,414 - root - INFO - 层 data_processing 将在 5 秒后启动
+2025-03-19 13:40:19,419 - root - INFO - 层 network_topology 将在 10 秒后启动
+2025-03-19 13:40:19,420 - root - INFO - 层 holographic_mapping 将在 15 秒后启动
+2025-03-19 13:40:19,420 - root - INFO - 层 realtime_search 将在 20 秒后启动
+2025-03-19 13:40:19,421 - root - INFO - 层 user_interface 将在 25 秒后启动
+2025-03-19 13:40:19,421 - root - INFO - 所有层已开始启动过程
+2025-03-19 13:40:19,464 - root - INFO - 层 data_acquisition 已启动
+2025-03-19 13:40:19,601 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:19,602 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:19,603 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connected> [IPv4 ('172.18.0.5', 9092)]>: Closing connection. 
+2025-03-19 13:40:24,482 - root - INFO - 层 data_processing 已启动
+2025-03-19 13:40:24,484 - kafka.consumer.subscription_state - INFO - Updated partition assignment: [TopicPartition(topic='raw_data_stream', partition=0)]
+2025-03-19 13:40:24,485 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:24,486 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:24,486 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connected> [IPv4 ('172.18.0.5', 9092)]>: Closing connection. 
+2025-03-19 13:40:29,682 - root - INFO - 层 network_topology 已启动
+2025-03-19 13:40:30,853 - kafka.consumer.subscription_state - INFO - Updated partition assignment: [TopicPartition(topic='processed_data_stream', partition=0)]
+2025-03-19 13:40:30,859 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:30,862 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:30,863 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connected> [IPv4 ('172.18.0.5', 9092)]>: Closing connection. 
+2025-03-19 13:40:34,440 - root - INFO - 层 holographic_mapping 已启动
+2025-03-19 13:40:34,448 - kafka.cluster - INFO - Group coordinator for holographic_mapping_group is BrokerMetadata(nodeId='coordinator-1', host='kafka', port=9092, rack=None)
+2025-03-19 13:40:34,449 - kafka.coordinator - INFO - Discovered coordinator coordinator-1 for group holographic_mapping_group
+2025-03-19 13:40:34,450 - kafka.coordinator - INFO - Starting new heartbeat thread
+2025-03-19 13:40:34,450 - kafka.coordinator.consumer - INFO - Revoking previously assigned partitions set() for group holographic_mapping_group
+2025-03-19 13:40:34,455 - kafka.conn - INFO - <BrokerConnection node_id=coordinator-1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:34,457 - kafka.conn - INFO - <BrokerConnection node_id=coordinator-1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:34,458 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connected> [IPv4 ('172.18.0.5', 9092)]>: Closing connection. 
+2025-03-19 13:40:34,560 - kafka.coordinator - INFO - (Re-)joining group holographic_mapping_group
+2025-03-19 13:40:37,126 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:37,127 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:37,129 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connected> [IPv4 ('172.18.0.5', 9092)]>: Closing connection. 
+2025-03-19 13:40:37,571 - kafka.coordinator - INFO - Elected group leader -- performing partition assignments using range
+2025-03-19 13:40:37,573 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:37,574 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:37,575 - kafka.coordinator - INFO - Successfully joined group holographic_mapping_group with generation 31
+2025-03-19 13:40:37,575 - kafka.consumer.subscription_state - INFO - Updated partition assignment: [TopicPartition(topic='topology_analysis_stream', partition=0)]
+2025-03-19 13:40:37,575 - kafka.coordinator.consumer - INFO - Setting newly assigned partitions {TopicPartition(topic='topology_analysis_stream', partition=0)} for group holographic_mapping_group
+2025-03-19 13:40:39,443 - kafka.cluster - INFO - Group coordinator for decision_feedback_topology_group is BrokerMetadata(nodeId='coordinator-1', host='kafka', port=9092, rack=None)
+2025-03-19 13:40:39,443 - kafka.cluster - INFO - Group coordinator for decision_feedback_search_group is BrokerMetadata(nodeId='coordinator-1', host='kafka', port=9092, rack=None)
+2025-03-19 13:40:39,444 - root - INFO - 层 realtime_search 已启动
+2025-03-19 13:40:39,444 - kafka.cluster - INFO - Group coordinator for decision_feedback_alert_group is BrokerMetadata(nodeId='coordinator-1', host='kafka', port=9092, rack=None)
+2025-03-19 13:40:39,444 - kafka.coordinator - INFO - Discovered coordinator coordinator-1 for group decision_feedback_topology_group
+2025-03-19 13:40:39,447 - kafka.coordinator - INFO - Discovered coordinator coordinator-1 for group decision_feedback_search_group
+2025-03-19 13:40:39,471 - kafka.coordinator - INFO - Discovered coordinator coordinator-1 for group decision_feedback_alert_group
+2025-03-19 13:40:39,483 - kafka.coordinator - INFO - Starting new heartbeat thread
+2025-03-19 13:40:39,507 - kafka.coordinator - INFO - Starting new heartbeat thread
+2025-03-19 13:40:39,528 - kafka.coordinator - INFO - Starting new heartbeat thread
+2025-03-19 13:40:39,565 - kafka.coordinator.consumer - INFO - Revoking previously assigned partitions set() for group decision_feedback_topology_group
+2025-03-19 13:40:39,573 - kafka.coordinator.consumer - INFO - Revoking previously assigned partitions set() for group decision_feedback_search_group
+2025-03-19 13:40:39,584 - kafka.coordinator.consumer - INFO - Revoking previously assigned partitions set() for group decision_feedback_alert_group
+2025-03-19 13:40:39,585 - kafka.conn - INFO - <BrokerConnection node_id=coordinator-1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:39,598 - kafka.conn - INFO - <BrokerConnection node_id=coordinator-1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:39,599 - kafka.conn - INFO - <BrokerConnection node_id=coordinator-1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:39,605 - kafka.conn - INFO - <BrokerConnection node_id=coordinator-1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:39,612 - kafka.conn - INFO - <BrokerConnection node_id=coordinator-1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:39,612 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connected> [IPv4 ('172.18.0.5', 9092)]>: Closing connection. 
+2025-03-19 13:40:39,643 - kafka.conn - INFO - <BrokerConnection node_id=coordinator-1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:39,643 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connected> [IPv4 ('172.18.0.5', 9092)]>: Closing connection. 
+2025-03-19 13:40:39,655 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connected> [IPv4 ('172.18.0.5', 9092)]>: Closing connection. 
+2025-03-19 13:40:39,764 - kafka.coordinator - INFO - (Re-)joining group decision_feedback_topology_group
+2025-03-19 13:40:39,798 - kafka.coordinator - INFO - (Re-)joining group decision_feedback_alert_group
+2025-03-19 13:40:39,825 - kafka.coordinator - INFO - (Re-)joining group decision_feedback_search_group
+2025-03-19 13:40:42,792 - kafka.coordinator - INFO - Elected group leader -- performing partition assignments using range
+2025-03-19 13:40:42,795 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:42,796 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:42,797 - kafka.coordinator - INFO - Successfully joined group decision_feedback_topology_group with generation 33
+2025-03-19 13:40:42,797 - kafka.consumer.subscription_state - INFO - Updated partition assignment: [TopicPartition(topic='topology_analysis_stream', partition=0)]
+2025-03-19 13:40:42,798 - kafka.coordinator.consumer - INFO - Setting newly assigned partitions {TopicPartition(topic='topology_analysis_stream', partition=0)} for group decision_feedback_topology_group
+2025-03-19 13:40:42,825 - kafka.coordinator - INFO - Elected group leader -- performing partition assignments using range
+2025-03-19 13:40:42,828 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:42,829 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:42,830 - kafka.coordinator - INFO - Successfully joined group decision_feedback_alert_group with generation 31
+2025-03-19 13:40:42,830 - kafka.consumer.subscription_state - INFO - Updated partition assignment: [TopicPartition(topic='alerts_stream', partition=0)]
+2025-03-19 13:40:42,832 - kafka.coordinator.consumer - INFO - Setting newly assigned partitions {TopicPartition(topic='alerts_stream', partition=0)} for group decision_feedback_alert_group
+2025-03-19 13:40:42,865 - kafka.coordinator - INFO - Elected group leader -- performing partition assignments using range
+2025-03-19 13:40:42,868 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:42,869 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:42,870 - kafka.coordinator - INFO - Successfully joined group decision_feedback_search_group with generation 31
+2025-03-19 13:40:42,871 - kafka.consumer.subscription_state - INFO - Updated partition assignment: [TopicPartition(topic='search_events_stream', partition=0)]
+2025-03-19 13:40:42,871 - kafka.coordinator.consumer - INFO - Setting newly assigned partitions {TopicPartition(topic='search_events_stream', partition=0)} for group decision_feedback_search_group
+2025-03-19 13:40:44,509 - flask_debug - DEBUG - Flask template folder: /app/templates
+2025-03-19 13:40:44,511 - flask_debug - DEBUG - Template loader: <jinja2.loaders.FileSystemLoader object at 0x7f88c0182400>
+2025-03-19 13:40:44,513 - flask_debug - DEBUG - Template exists!
+2025-03-19 13:40:44,539 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:44,540 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:44,541 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:44,647 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:44,647 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:44,648 - kafka.coordinator.consumer - WARNING - group_id is None: disabling auto-commit.
+2025-03-19 13:40:44,649 - kafka.consumer.subscription_state - INFO - Updating subscribed topics to: ('processed_data_stream',)
+2025-03-19 13:40:44,651 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:44,651 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:44,652 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:44,756 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:44,756 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:44,859 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:44,863 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:44,866 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:45,376 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:45,408 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:45,448 - kafka.consumer.subscription_state - INFO - Updating subscribed topics to: ('topology_analysis_stream',)
+2025-03-19 13:40:45,506 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:45,524 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:45,542 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:45,680 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:45,686 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:45,891 - elastic_transport.transport - INFO - HEAD http://elasticsearch:9200/hidrs_holographic [status:200 duration:0.069s]
+2025-03-19 13:40:46,053 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:46,054 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:46,056 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:46,160 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:46,161 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:46,162 - kafka.consumer.subscription_state - INFO - Updating subscribed topics to: ('topology_analysis_stream',)
+2025-03-19 13:40:46,165 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:46,167 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:46,167 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:46,271 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:46,277 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:46,300 - elastic_transport.transport - INFO - HEAD http://elasticsearch:9200/hidrs_holographic [status:200 duration:0.009s]
+2025-03-19 13:40:46,317 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:46,318 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:46,319 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:46,440 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:46,440 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:46,573 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:46,577 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:46,580 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:46,684 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:46,684 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:46,686 - kafka.consumer.subscription_state - INFO - Updating subscribed topics to: ('topology_analysis_stream',)
+2025-03-19 13:40:46,693 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:46,694 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:46,695 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:46,800 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:46,800 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:46,801 - kafka.consumer.subscription_state - INFO - Updating subscribed topics to: ('search_events_stream',)
+2025-03-19 13:40:46,803 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:46,804 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:46,805 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:46,908 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:46,909 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:46,910 - kafka.consumer.subscription_state - INFO - Updating subscribed topics to: ('alerts_stream',)
+2025-03-19 13:40:46,913 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:40:46,916 - kafka.conn - INFO - Probing node bootstrap-0 broker version
+2025-03-19 13:40:46,918 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:40:47,032 - kafka.conn - INFO - Broker version identified as 2.5.0
+2025-03-19 13:40:47,034 - kafka.conn - INFO - Set configuration api_version=(2, 5, 0) to skip auto check_version requests on startup
+2025-03-19 13:40:47,046 - root - INFO - 层 user_interface 已启动
+2025-03-19 13:40:47,055 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://172.18.0.6:5000
+2025-03-19 13:40:47,056 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-03-19 13:40:47,703 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:40:47] "GET /search HTTP/1.1" 200 -
+2025-03-19 13:41:51,388 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:41:51] "GET /search HTTP/1.1" 200 -
+2025-03-19 13:41:59,478 - elastic_transport.transport - INFO - POST http://elasticsearch:9200/hidrs_holographic/_search [status:200 duration:0.253s]
+2025-03-19 13:41:59,673 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:41:59] "GET /api/search?q=test&cache=true&limit=20 HTTP/1.1" 200 -
+2025-03-19 13:41:59,687 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:41:59,718 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:41:59,722 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connected> [IPv4 ('172.18.0.5', 9092)]>: Closing connection. 
+2025-03-19 13:42:05,752 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:42:05] "GET /api/search?q=test&cache=true&limit=20 HTTP/1.1" 200 -
+2025-03-19 13:42:32,598 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:42:32,617 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:42:32,664 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connected> [IPv4 ('172.18.0.5', 9092)]>: Closing connection. 
+2025-03-19 13:43:20,296 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:20] "GET /api/search?q=test&cache=true&limit=20 HTTP/1.1" 200 -
+2025-03-19 13:43:21,886 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:21] "GET /network HTTP/1.1" 200 -
+2025-03-19 13:43:22,359 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:22] "GET /api/metrics/plot?type=fiedler&days=7 HTTP/1.1" 200 -
+2025-03-19 13:43:22,385 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:22] "GET /api/metrics/plot?type=node_count&days=7 HTTP/1.1" 200 -
+2025-03-19 13:43:24,533 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:24] "GET /api/network/graph?color_by=cluster HTTP/1.1" 200 -
+2025-03-19 13:43:24,620 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:24] "GET /api/network/metrics HTTP/1.1" 200 -
+2025-03-19 13:43:32,693 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:32] "GET /network HTTP/1.1" 200 -
+2025-03-19 13:43:33,073 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:33] "GET /api/metrics/plot?type=fiedler&days=7 HTTP/1.1" 200 -
+2025-03-19 13:43:33,074 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:33] "GET /api/metrics/plot?type=node_count&days=7 HTTP/1.1" 200 -
+2025-03-19 13:43:34,844 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:34] "GET /api/network/graph?color_by=cluster HTTP/1.1" 200 -
+2025-03-19 13:43:34,915 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:34] "GET /api/network/metrics HTTP/1.1" 200 -
+2025-03-19 13:43:37,072 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:37] "GET /dashboard HTTP/1.1" 200 -
+2025-03-19 13:43:37,470 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:37] "GET /api/network/metrics HTTP/1.1" 200 -
+2025-03-19 13:43:37,472 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:37] "GET /api/network/communities HTTP/1.1" 200 -
+2025-03-19 13:43:37,554 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:37] "GET /api/search/stats?hours=24 HTTP/1.1" 200 -
+2025-03-19 13:43:41,495 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:41] "GET /feedback HTTP/1.1" 200 -
+2025-03-19 13:43:41,950 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:41] "GET /api/feedback/recent?limit=5 HTTP/1.1" 200 -
+2025-03-19 13:43:43,900 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:43] "GET /search HTTP/1.1" 200 -
+2025-03-19 13:43:44,803 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:44] "GET / HTTP/1.1" 200 -
+2025-03-19 13:43:51,776 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:51] "GET /search HTTP/1.1" 200 -
+2025-03-19 13:43:55,378 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:43:55] "GET /api/search?q=test&cache=true&limit=20 HTTP/1.1" 200 -
+2025-03-19 13:44:02,482 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:44:02] "GET /api/metrics/plot?type=search_latency&days=7 HTTP/1.1" 200 -
+2025-03-19 13:44:17,053 - bs4.dammit - WARNING - Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
+2025-03-19 13:44:19,775 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:44:19] "GET /search HTTP/1.1" 200 -
+2025-03-19 13:44:36,270 - bs4.dammit - WARNING - Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
+2025-03-19 13:44:41,434 - bs4.dammit - WARNING - Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
+2025-03-19 13:44:53,294 - bs4.dammit - WARNING - Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
+2025-03-19 13:45:01,636 - bs4.dammit - WARNING - Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
+2025-03-19 13:45:09,548 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:45:09,551 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:45:09,553 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connected> [IPv4 ('172.18.0.5', 9092)]>: Closing connection. 
+2025-03-19 13:45:18,595 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:45:18,610 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:45:18,627 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connected> [IPv4 ('172.18.0.5', 9092)]>: Closing connection. 
+2025-03-19 13:45:18,867 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:45:18,895 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:45:18,902 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connected> [IPv4 ('172.18.0.5', 9092)]>: Closing connection. 
+2025-03-19 13:45:19,040 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:45:19,042 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:45:19,044 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connected> [IPv4 ('172.18.0.5', 9092)]>: Closing connection. 
+2025-03-19 13:45:19,487 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:45:19,490 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:45:19,645 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connected> [IPv4 ('172.18.0.5', 9092)]>: Closing connection. 
+2025-03-19 13:45:30,873 - elastic_transport.transport - INFO - PUT http://elasticsearch:9200/_bulk?refresh=true [status:N/A duration:10.119s]
+2025-03-19 13:45:30,891 - elastic_transport.node_pool - WARNING - Node <Urllib3HttpNode(http://elasticsearch:9200)> has failed for 1 times in a row, putting on 1 second timeout
+2025-03-19 13:46:36,837 - kafka.coordinator - WARNING - Heartbeat session expired, marking coordinator dead
+2025-03-19 13:46:36,839 - kafka.coordinator - WARNING - Heartbeat session expired, marking coordinator dead
+2025-03-19 13:46:36,844 - kafka.coordinator - WARNING - Marking the coordinator dead (node coordinator-1) for group decision_feedback_topology_group: Heartbeat session expired.
+2025-03-19 13:46:36,854 - kafka.coordinator - WARNING - Heartbeat session expired, marking coordinator dead
+2025-03-19 13:46:36,872 - kafka.coordinator - WARNING - Marking the coordinator dead (node coordinator-1) for group holographic_mapping_group: Heartbeat session expired.
+2025-03-19 13:46:36,913 - kafka.coordinator - WARNING - Heartbeat session expired, marking coordinator dead
+2025-03-19 13:46:36,924 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:46:36,933 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:46:36,934 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:46:36,940 - kafka.coordinator - WARNING - Marking the coordinator dead (node coordinator-1) for group decision_feedback_search_group: Heartbeat session expired.
+2025-03-19 13:46:37,868 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: connecting to kafka:9092 [('172.18.0.5', 9092) IPv4]
+2025-03-19 13:46:37,890 - kafka.coordinator - WARNING - Marking the coordinator dead (node coordinator-1) for group decision_feedback_alert_group: Heartbeat session expired.
+2025-03-19 13:46:37,918 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:46:37,939 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:46:37,940 - kafka.cluster - INFO - Group coordinator for decision_feedback_topology_group is BrokerMetadata(nodeId='coordinator-1', host='kafka', port=9092, rack=None)
+2025-03-19 13:46:37,944 - kafka.cluster - INFO - Group coordinator for holographic_mapping_group is BrokerMetadata(nodeId='coordinator-1', host='kafka', port=9092, rack=None)
+2025-03-19 13:46:37,945 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:46:37,958 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connected> [IPv4 ('172.18.0.5', 9092)]>: Closing connection. 
+2025-03-19 13:46:37,955 - kafka.conn - INFO - <BrokerConnection node_id=1 host=kafka:9092 <connecting> [IPv4 ('172.18.0.5', 9092)]>: Connection complete.
+2025-03-19 13:46:37,957 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connected> [IPv4 ('172.18.0.5', 9092)]>: Closing connection. 
+2025-03-19 13:46:37,957 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connected> [IPv4 ('172.18.0.5', 9092)]>: Closing connection. 
+2025-03-19 13:46:37,958 - kafka.coordinator - INFO - Discovered coordinator coordinator-1 for group decision_feedback_topology_group
+2025-03-19 13:46:37,958 - kafka.coordinator - INFO - Discovered coordinator coordinator-1 for group holographic_mapping_group
+2025-03-19 13:46:37,954 - kafka.cluster - INFO - Group coordinator for decision_feedback_search_group is BrokerMetadata(nodeId='coordinator-1', host='kafka', port=9092, rack=None)
+2025-03-19 13:46:37,960 - kafka.conn - INFO - <BrokerConnection node_id=bootstrap-0 host=kafka:9092 <connected> [IPv4 ('172.18.0.5', 9092)]>: Closing connection. 
+2025-03-19 13:46:37,968 - kafka.coordinator - INFO - Discovered coordinator coordinator-1 for group decision_feedback_search_group
+2025-03-19 13:46:37,983 - kafka.coordinator.consumer - WARNING - Auto offset commit failed for group decision_feedback_search_group: CommitFailedError: Commit cannot be completed since the group has already
+            rebalanced and assigned the partitions to another member.
+            This means that the time between subsequent calls to poll()
+            was longer than the configured max_poll_interval_ms, which
+            typically implies that the poll loop is spending too much
+            time message processing. You can address this either by
+            increasing the rebalance timeout with max_poll_interval_ms,
+            or by reducing the maximum size of batches returned in poll()
+            with max_poll_records.
+            
+2025-03-19 13:46:38,003 - kafka.coordinator.consumer - ERROR - Offset commit failed: This is likely to cause duplicate message delivery
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.9/site-packages/kafka/coordinator/consumer.py", line 528, in _maybe_auto_commit_offsets_sync
+    self.commit_offsets_sync(self._subscription.all_consumed_offsets())
+  File "/usr/local/lib/python3.9/site-packages/kafka/coordinator/consumer.py", line 521, in commit_offsets_sync
+    raise future.exception # pylint: disable-msg=raising-bad-type
+kafka.errors.CommitFailedError: CommitFailedError: Commit cannot be completed since the group has already
+            rebalanced and assigned the partitions to another member.
+            This means that the time between subsequent calls to poll()
+            was longer than the configured max_poll_interval_ms, which
+            typically implies that the poll loop is spending too much
+            time message processing. You can address this either by
+            increasing the rebalance timeout with max_poll_interval_ms,
+            or by reducing the maximum size of batches returned in poll()
+            with max_poll_records.
+            
+2025-03-19 13:46:38,011 - kafka.cluster - INFO - Group coordinator for decision_feedback_alert_group is BrokerMetadata(nodeId='coordinator-1', host='kafka', port=9092, rack=None)
+2025-03-19 13:46:38,035 - kafka.coordinator.consumer - WARNING - Auto offset commit failed for group holographic_mapping_group: CommitFailedError: Commit cannot be completed since the group has already
+            rebalanced and assigned the partitions to another member.
+            This means that the time between subsequent calls to poll()
+            was longer than the configured max_poll_interval_ms, which
+            typically implies that the poll loop is spending too much
+            time message processing. You can address this either by
+            increasing the rebalance timeout with max_poll_interval_ms,
+            or by reducing the maximum size of batches returned in poll()
+            with max_poll_records.
+            
+2025-03-19 13:46:38,045 - kafka.coordinator.consumer - WARNING - Auto offset commit failed for group decision_feedback_topology_group: CommitFailedError: Commit cannot be completed since the group has already
+            rebalanced and assigned the partitions to another member.
+            This means that the time between subsequent calls to poll()
+            was longer than the configured max_poll_interval_ms, which
+            typically implies that the poll loop is spending too much
+            time message processing. You can address this either by
+            increasing the rebalance timeout with max_poll_interval_ms,
+            or by reducing the maximum size of batches returned in poll()
+            with max_poll_records.
+            
+2025-03-19 13:46:38,090 - kafka.coordinator.consumer - ERROR - Offset commit failed: This is likely to cause duplicate message delivery
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.9/site-packages/kafka/coordinator/consumer.py", line 528, in _maybe_auto_commit_offsets_sync
+    self.commit_offsets_sync(self._subscription.all_consumed_offsets())
+  File "/usr/local/lib/python3.9/site-packages/kafka/coordinator/consumer.py", line 521, in commit_offsets_sync
+    raise future.exception # pylint: disable-msg=raising-bad-type
+kafka.errors.CommitFailedError: CommitFailedError: Commit cannot be completed since the group has already
+            rebalanced and assigned the partitions to another member.
+            This means that the time between subsequent calls to poll()
+            was longer than the configured max_poll_interval_ms, which
+            typically implies that the poll loop is spending too much
+            time message processing. You can address this either by
+            increasing the rebalance timeout with max_poll_interval_ms,
+            or by reducing the maximum size of batches returned in poll()
+            with max_poll_records.
+            
+2025-03-19 13:46:38,088 - kafka.coordinator.consumer - INFO - Revoking previously assigned partitions {TopicPartition(topic='search_events_stream', partition=0)} for group decision_feedback_search_group
+2025-03-19 13:46:38,089 - kafka.coordinator - INFO - Discovered coordinator coordinator-1 for group decision_feedback_alert_group
+2025-03-19 13:46:38,089 - kafka.coordinator.consumer - ERROR - Offset commit failed: This is likely to cause duplicate message delivery
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.9/site-packages/kafka/coordinator/consumer.py", line 528, in _maybe_auto_commit_offsets_sync
+    self.commit_offsets_sync(self._subscription.all_consumed_offsets())
+  File "/usr/local/lib/python3.9/site-packages/kafka/coordinator/consumer.py", line 521, in commit_offsets_sync
+    raise future.exception # pylint: disable-msg=raising-bad-type
+kafka.errors.CommitFailedError: CommitFailedError: Commit cannot be completed since the group has already
+            rebalanced and assigned the partitions to another member.
+            This means that the time between subsequent calls to poll()
+            was longer than the configured max_poll_interval_ms, which
+            typically implies that the poll loop is spending too much
+            time message processing. You can address this either by
+            increasing the rebalance timeout with max_poll_interval_ms,
+            or by reducing the maximum size of batches returned in poll()
+            with max_poll_records.
+            
+2025-03-19 13:46:38,087 - elastic_transport.node_pool - INFO - Resurrected node <Urllib3HttpNode(http://elasticsearch:9200)> (force=False)
+2025-03-19 13:46:38,092 - kafka.coordinator.consumer - INFO - Revoking previously assigned partitions {TopicPartition(topic='topology_analysis_stream', partition=0)} for group decision_feedback_topology_group
+2025-03-19 13:46:38,093 - kafka.coordinator - INFO - (Re-)joining group decision_feedback_search_group
+2025-03-19 13:46:38,096 - kafka.coordinator.consumer - INFO - Revoking previously assigned partitions {TopicPartition(topic='topology_analysis_stream', partition=0)} for group holographic_mapping_group
+2025-03-19 13:46:38,099 - kafka.coordinator - INFO - (Re-)joining group decision_feedback_topology_group
+2025-03-19 13:46:38,100 - kafka.coordinator - INFO - (Re-)joining group holographic_mapping_group
+2025-03-19 13:46:38,655 - kafka.coordinator.consumer - WARNING - Auto offset commit failed for group decision_feedback_alert_group: CommitFailedError: Commit cannot be completed since the group has already
+            rebalanced and assigned the partitions to another member.
+            This means that the time between subsequent calls to poll()
+            was longer than the configured max_poll_interval_ms, which
+            typically implies that the poll loop is spending too much
+            time message processing. You can address this either by
+            increasing the rebalance timeout with max_poll_interval_ms,
+            or by reducing the maximum size of batches returned in poll()
+            with max_poll_records.
+            
+2025-03-19 13:46:38,704 - kafka.coordinator.consumer - ERROR - Offset commit failed: This is likely to cause duplicate message delivery
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.9/site-packages/kafka/coordinator/consumer.py", line 528, in _maybe_auto_commit_offsets_sync
+    self.commit_offsets_sync(self._subscription.all_consumed_offsets())
+  File "/usr/local/lib/python3.9/site-packages/kafka/coordinator/consumer.py", line 521, in commit_offsets_sync
+    raise future.exception # pylint: disable-msg=raising-bad-type
+kafka.errors.CommitFailedError: CommitFailedError: Commit cannot be completed since the group has already
+            rebalanced and assigned the partitions to another member.
+            This means that the time between subsequent calls to poll()
+            was longer than the configured max_poll_interval_ms, which
+            typically implies that the poll loop is spending too much
+            time message processing. You can address this either by
+            increasing the rebalance timeout with max_poll_interval_ms,
+            or by reducing the maximum size of batches returned in poll()
+            with max_poll_records.
+            
+2025-03-19 13:46:38,733 - kafka.coordinator.consumer - INFO - Revoking previously assigned partitions {TopicPartition(topic='alerts_stream', partition=0)} for group decision_feedback_alert_group
+2025-03-19 13:46:38,750 - kafka.coordinator - INFO - (Re-)joining group decision_feedback_alert_group
+2025-03-19 13:46:41,199 - kafka.coordinator - INFO - Elected group leader -- performing partition assignments using range
+2025-03-19 13:46:41,203 - kafka.coordinator - INFO - Elected group leader -- performing partition assignments using range
+2025-03-19 13:46:41,206 - kafka.coordinator - INFO - Elected group leader -- performing partition assignments using range
+2025-03-19 13:46:41,235 - kafka.coordinator - INFO - Successfully joined group holographic_mapping_group with generation 33
+2025-03-19 13:46:41,236 - kafka.consumer.subscription_state - INFO - Updated partition assignment: [TopicPartition(topic='topology_analysis_stream', partition=0)]
+2025-03-19 13:46:41,237 - kafka.coordinator.consumer - INFO - Setting newly assigned partitions {TopicPartition(topic='topology_analysis_stream', partition=0)} for group holographic_mapping_group
+2025-03-19 13:46:41,250 - kafka.coordinator - INFO - Successfully joined group decision_feedback_search_group with generation 33
+2025-03-19 13:46:41,250 - kafka.consumer.subscription_state - INFO - Updated partition assignment: [TopicPartition(topic='search_events_stream', partition=0)]
+2025-03-19 13:46:41,254 - kafka.coordinator.consumer - INFO - Setting newly assigned partitions {TopicPartition(topic='search_events_stream', partition=0)} for group decision_feedback_search_group
+2025-03-19 13:46:41,256 - kafka.coordinator - INFO - Successfully joined group decision_feedback_topology_group with generation 35
+2025-03-19 13:46:41,257 - kafka.consumer.subscription_state - INFO - Updated partition assignment: [TopicPartition(topic='topology_analysis_stream', partition=0)]
+2025-03-19 13:46:41,257 - kafka.coordinator.consumer - INFO - Setting newly assigned partitions {TopicPartition(topic='topology_analysis_stream', partition=0)} for group decision_feedback_topology_group
+2025-03-19 13:46:41,770 - kafka.coordinator - INFO - Elected group leader -- performing partition assignments using range
+2025-03-19 13:46:41,784 - kafka.coordinator - INFO - Successfully joined group decision_feedback_alert_group with generation 33
+2025-03-19 13:46:41,785 - kafka.consumer.subscription_state - INFO - Updated partition assignment: [TopicPartition(topic='alerts_stream', partition=0)]
+2025-03-19 13:46:41,785 - kafka.coordinator.consumer - INFO - Setting newly assigned partitions {TopicPartition(topic='alerts_stream', partition=0)} for group decision_feedback_alert_group
+2025-03-19 13:46:43,452 - elastic_transport.transport - INFO - PUT http://elasticsearch:9200/_bulk?refresh=true [status:200 duration:5.355s]
+2025-03-19 13:46:43,467 - elastic_transport.node_pool - WARNING - Node <Urllib3HttpNode(http://elasticsearch:9200)> has been marked alive after a successful request
+2025-03-19 13:47:19,506 - werkzeug - INFO - 172.18.0.1 - - [19/Mar/2025 13:47:19] "GET /search HTTP/1.1" 200 -
+2025-03-19 13:48:16,154 - bs4.dammit - WARNING - Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
+2025-03-19 13:48:18,468 - bs4.dammit - WARNING - Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
+2025-03-19 13:48:20,675 - bs4.dammit - WARNING - Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
+2025-03-19 13:48:21,676 - bs4.dammit - WARNING - Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
+2025-03-19 13:56:29,304 - kafka.client - INFO - Closing idle connection 1, last active 591279 ms ago

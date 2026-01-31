@@ -1,0 +1,11 @@
+{
+    "mongodb_uri": "mongodb://localhost:27017/",
+    "mongodb_db": "hidrs",
+    "static_folder": "static",
+    "template_folder": "templates",
+    "graph_visualizer_config_path": "config/graph_visualizer_config.json",
+    "topology_manager_config_path": "config/topology_manager_config.json",
+    "holographic_mapping_manager_config_path": "config/holographic_mapping_manager_config.json",
+    "realtime_search_config_path": "config/realtime_search_config.json",
+    "decision_feedback_config_path": "config/decision_feedback_config.json"
+}

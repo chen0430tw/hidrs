@@ -1,0 +1,18 @@
+{
+    "mongodb_uri": "mongodb://localhost:27017/",
+    "mongodb_db": "hidrs",
+    "raw_data_collection": "raw_data",
+    "processed_data_collection": "processed_data",
+    "feature_vectors_collection": "feature_vectors",
+    "kafka_servers": ["localhost:9092"],
+    "kafka_input_topic": "raw_data_stream",
+    "kafka_output_topic": "processed_data_stream",
+    "feature_extractor_model": "bert",
+    "feature_extractor_config_path": "config/feature_extractor_config.json",
+    "dimension_reduction_method": "umap",
+    "dimension_reducer_config_path": "config/dimension_reducer_config.json",
+    "batch_size": 100,
+    "batch_processing_interval": 60,
+    "min_samples_for_reduction": 1000,
+    "reducer_model_path": "models/dimension_reducer.joblib"
+}

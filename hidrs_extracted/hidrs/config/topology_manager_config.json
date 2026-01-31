@@ -1,0 +1,16 @@
+{
+    "mongodb_uri": "mongodb://localhost:27017/",
+    "mongodb_db": "hidrs",
+    "feature_vectors_collection": "feature_vectors",
+    "topology_collection": "topology_analysis",
+    "kafka_servers": ["localhost:9092"],
+    "kafka_input_topic": "processed_data_stream",
+    "kafka_output_topic": "topology_analysis_stream",
+    "kafka_alert_topic": "alerts_stream",
+    "update_interval": 60,
+    "save_interval": 3600,
+    "topology_builder_config_path": "config/topology_builder_config.json",
+    "topology_save_path": "data/topology/network_topology.pkl",
+    "anomaly_threshold": 0.2,
+    "max_kafka_messages_per_update": 100
+}
