@@ -141,6 +141,12 @@ def settings_page():
     return render_template('settings.html', config=config)
 
 
+@app.route('/preview')
+def preview_page():
+    """三联屏预览模式"""
+    return render_template('preview.html', config=config)
+
+
 # ============================================================
 # 系统监控 API
 # ============================================================
