@@ -169,6 +169,12 @@ def widget_social():
     return render_template('widgets/social.html')
 
 
+@app.route('/widget/terminal')
+def widget_terminal():
+    """内置终端小组件（连接 claude-code-web）"""
+    return render_template('widgets/terminal.html')
+
+
 # ============================================================
 # 系统监控 API
 # ============================================================

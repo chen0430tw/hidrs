@@ -279,6 +279,7 @@
           <div class="terminal-tabs">
             <button class="active" onclick="switchTerminalTab('logs')">日志</button>
             <button onclick="switchTerminalTab('terminal')">终端</button>
+            <button onclick="switchTerminalTab('claude')" style="color: #00f0ff;">🧚 Claude</button>
           </div>
         </div>
 
@@ -287,6 +288,8 @@
             <div class="terminal-content" id="system-logs">
               <!-- 日志由 JS 动态渲染 -->
             </div>
+            <!-- Claude Code 终端 iframe -->
+            <iframe id="claude-terminal" src="" style="display: none; width: 100%; height: 100%; border: none;"></iframe>
           </div>
 
           <!-- AI Agent 侧边栏 -->
@@ -328,18 +331,36 @@
 
     function switchTerminalTab(tab) {
       currentTerminalTab = tab;
+
+      // 更新标签状态
       document.querySelectorAll('.terminal-tabs button').forEach(btn => {
-        btn.classList.toggle('active', btn.textContent.includes(tab === 'logs' ? '日志' : '终端'));
+        const btnText = btn.textContent.toLowerCase();
+        const isActive = (tab === 'logs' && btnText.includes('日志')) ||
+                         (tab === 'terminal' && btnText.includes('终端') && !btnText.includes('claude')) ||
+                         (tab === 'claude' && btnText.includes('claude'));
+        btn.classList.toggle('active', isActive);
       });
 
       const content = document.getElementById('system-logs');
-      if (tab === 'terminal') {
+      const claudeFrame = document.getElementById('claude-terminal');
+
+      if (tab === 'claude') {
+        // Claude Code 终端
+        content.style.display = 'none';
+        claudeFrame.style.display = 'block';
+        if (!claudeFrame.src || claudeFrame.src === '' || claudeFrame.src === 'about:blank') {
+          claudeFrame.src = '/widget/terminal';
+        }
+      } else if (tab === 'terminal') {
+        // 模拟终端
+        content.style.display = 'block';
+        claudeFrame.style.display = 'none';
         content.innerHTML = `
           <div class="terminal-line" style="color: var(--neon-cyan);">
             FAIRY-DESK Terminal v1.0.0
           </div>
           <div class="terminal-line" style="color: var(--text-muted);">
-            输入 'claude' 启动 Claude Code
+            输入 'claude' 切换到 Claude Code 终端
           </div>
           <div class="terminal-line" style="color: var(--text-muted);">
             输入 'help' 查看可用命令
@@ -351,7 +372,9 @@
         `;
         document.getElementById('terminal-input')?.focus();
       } else {
-        // 重新初始化日志
+        // 日志
+        content.style.display = 'block';
+        claudeFrame.style.display = 'none';
         content.innerHTML = '';
         initSystemLogs();
       }
@@ -391,13 +414,9 @@ HIDRS: ${FairyDesk.hidrsConnected ? '已连接' : '未连接'}`;
           ? 'HIDRS 已连接，全部功能可用'
           : 'HIDRS 未连接，部分功能受限\n运行 HIDRS 后可获得网络拓扑监控、全息搜索等功能';
       } else if (cmdLower === 'claude') {
-        output = `Claude Code 使用方式:
-  1. 终端: 在系统终端运行 "claude"
-  2. Web:  访问 claude.ai/code
-  3. 后台: 使用 "& 任务" 发送到云端
-  4. Chrome: 运行 "claude --chrome" 连接浏览器
-  5. 传送: 运行 "/teleport" 拉取 Web 会话`;
-        showNotification('Claude Code 指南已显示', 'info');
+        output = '正在切换到 Claude Code 终端...';
+        showNotification('切换到 Claude Code 终端', 'info');
+        setTimeout(() => switchTerminalTab('claude'), 500);
       } else if (cmd.trim()) {
         output = `命令未找到: ${cmd}\n输入 'help' 查看可用命令`;
       }
