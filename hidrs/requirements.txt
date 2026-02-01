@@ -1,0 +1,32 @@
+# 基础依赖
+numpy==1.23.5
+scipy==1.10.1
+pandas==2.0.1
+matplotlib==3.7.1
+networkx==3.1
+
+# 数据库与消息队列
+pymongo==4.3.3
+elasticsearch==8.8.0
+kafka-python==2.0.2
+
+# Web框架与API
+flask==2.3.2
+flask-cors==4.0.0
+
+# 网络与数据收集
+requests==2.31.0
+beautifulsoup4==4.12.2
+python-nmap==0.7.1
+
+# 机器学习与特征提取
+scikit-learn==1.2.2
+tensorflow==2.12.0
+torch==2.0.1
+transformers==4.30.2
+tensorflow-hub==0.13.0
+umap-learn==0.5.3
+
+# 其他工具
+joblib==1.2.0
+nltk==3.8.1

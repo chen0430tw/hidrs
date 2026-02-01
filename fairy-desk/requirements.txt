@@ -1,0 +1,10 @@
+# FAIRY-DESK Dependencies
+flask>=2.3.0
+flask-cors>=4.0.0
+psutil>=5.9.0
+feedparser>=6.0.0
+requests>=2.31.0
+
+# Optional: GPU monitoring (uncomment if needed)
+# GPUtil>=1.4.0
+# pynvml>=11.0.0

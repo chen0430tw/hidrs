@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FAIRY-DESK - 设置</title>
+  <link rel="stylesheet" href="/static/css/theme.css">
+  <style>
+    .settings-container {
+      height: calc(100vh - 32px);
+      overflow-y: auto;
+      padding: 24px;
+    }
+
+    .settings-section {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      margin-bottom: 24px;
+      overflow: hidden;
+    }
+
+    .settings-section-header {
+      background: var(--bg-tertiary);
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .settings-section-header .icon {
+      font-size: 20px;
+    }
+
+    .settings-section-header .title {
+      font-size: 16px;
+      font-weight: bold;
+      color: var(--neon-cyan);
+    }
+
+    .settings-section-body {
+      padding: 20px;
+    }
+
+    .settings-row {
+      display: flex;
+      align-items: flex-start;
+      margin-bottom: 20px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .settings-row:last-child {
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+
+    .settings-label {
+      width: 200px;
+      flex-shrink: 0;
+    }
+
+    .settings-label .label-title {
+      font-size: 14px;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+
+    .settings-label .label-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .settings-control {
+      flex: 1;
+    }
+
+    /* Tab 列表 */
+    .tab-list {
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .tab-list-item {
+      display: flex;
+      align-items: center;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-color);
+      gap: 12px;
+    }
+
+    .tab-list-item:last-child {
+      border-bottom: none;
+    }
+
+    .tab-list-item .tab-icon {
+      font-size: 18px;
+      width: 30px;
+      text-align: center;
+    }
+
+    .tab-list-item .tab-info {
+      flex: 1;
+    }
+
+    .tab-list-item .tab-name {
+      font-size: 14px;
+      color: var(--text-primary);
+    }
+
+    .tab-list-item .tab-url {
+      font-size: 11px;
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tab-list-item .tab-strategy {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+    }
+
+    .tab-list-item .tab-strategy.background {
+      background: rgba(16, 185, 129, 0.2);
+      color: var(--status-success);
+    }
+
+    .tab-list-item .tab-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .tab-list-item .tab-actions button {
+      background: transparent;
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+    }
+
+    .tab-list-item .tab-actions button:hover {
+      border-color: var(--neon-cyan);
+      color: var(--neon-cyan);
+    }
+
+    .tab-list-item .tab-actions button.danger:hover {
+      border-color: var(--status-danger);
+      color: var(--status-danger);
+    }
+
+    /* RSS 列表 */
+    .rss-list {
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+    }
+
+    .rss-item {
+      display: flex;
+      align-items: center;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border-color);
+      gap: 12px;
+    }
+
+    .rss-item:last-child {
+      border-bottom: none;
+    }
+
+    .rss-item input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+    }
+
+    .rss-item .rss-name {
+      width: 120px;
+      font-size: 13px;
+    }
+
+    .rss-item .rss-url {
+      flex: 1;
+      font-size: 11px;
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* 主题预览 */
+    .theme-preview {
+      display: flex;
+      gap: 16px;
+    }
+
+    .theme-option {
+      width: 100px;
+      padding: 12px;
+      border: 2px solid var(--border-color);
+      border-radius: 8px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .theme-option:hover {
+      border-color: var(--neon-cyan);
+    }
+
+    .theme-option.active {
+      border-color: var(--neon-cyan);
+      box-shadow: 0 0 10px rgba(0, 240, 255, 0.3);
+    }
+
+    .theme-option .preview-box {
+      height: 40px;
+      border-radius: 4px;
+      margin-bottom: 8px;
+    }
+
+    .theme-option .theme-name {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    /* 底部操作栏 */
+    .settings-footer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border-color);
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .settings-footer .left-actions {
+      display: flex;
+      gap: 12px;
+    }
+
+    .settings-footer .right-actions {
+      display: flex;
+      gap: 12px;
+    }
+
+    /* 留出底部空间 */
+    .settings-container {
+      padding-bottom: 80px;
+    }
+  </style>
+</head>
+<body data-page="settings">
+  <div class="screen-container">
+    <!-- 顶部状态栏 -->
+    <div class="status-bar">
+      <div class="title">
+        ⚙️ 设置
+      </div>
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <a href="/" style="color: var(--text-secondary); text-decoration: none; font-size: 12px;">← 返回首页</a>
+        <div class="clock" id="clock">--:--:--</div>
+      </div>
+    </div>
+
+    <div class="settings-container">
+      <!-- 左屏设置 -->
+      <div class="settings-section" id="left-settings">
+        <div class="settings-section-header">
+          <span class="icon">📹</span>
+          <span class="title">左屏设置 - 态势监控</span>
+        </div>
+        <div class="settings-section-body">
+          <div class="settings-row">
+            <div class="settings-label">
+              <div class="label-title">默认分页</div>
+              <div class="label-desc">启动时显示的分页</div>
+            </div>
+            <div class="settings-control">
+              <select id="default-tab" class="form-input form-select" style="width: 200px;">
+                <!-- 由 JS 填充 -->
+              </select>
+            </div>
+          </div>
+
+          <div class="settings-row">
+            <div class="settings-label">
+              <div class="label-title">分页管理</div>
+              <div class="label-desc">添加、编辑或删除分页</div>
+            </div>
+            <div class="settings-control">
+              <div class="tab-list" id="tab-list">
+                <!-- 由 JS 填充 -->
+              </div>
+              <button class="btn btn-secondary" style="margin-top: 12px;" onclick="showAddTabModal()">
+                + 添加新分页
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 中屏设置 -->
+      <div class="settings-section" id="center-settings">
+        <div class="settings-section-header">
+          <span class="icon">🖥️</span>
+          <span class="title">中屏设置 - 控制台</span>
+        </div>
+        <div class="settings-section-body">
+          <div class="settings-row">
+            <div class="settings-label">
+              <div class="label-title">刷新间隔</div>
+              <div class="label-desc">系统监控数据刷新频率</div>
+            </div>
+            <div class="settings-control">
+              <input type="number" id="refresh-interval" class="form-input" style="width: 100px;" min="1" max="60" value="5"> 秒
+            </div>
+          </div>
+
+          <div class="settings-row">
+            <div class="settings-label">
+              <div class="label-title">终端命令</div>
+              <div class="label-desc">Agent 启动时执行的命令</div>
+            </div>
+            <div class="settings-control">
+              <input type="text" id="terminal-command" class="form-input" style="width: 300px;" placeholder="claude">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右屏设置 -->
+      <div class="settings-section" id="right-settings">
+        <div class="settings-section-header">
+          <span class="icon">📊</span>
+          <span class="title">右屏设置 - 情报视窗</span>
+        </div>
+        <div class="settings-section-body">
+          <!-- 社交媒体 -->
+          <div class="settings-row">
+            <div class="settings-label">
+              <div class="label-title">社交媒体 URL</div>
+              <div class="label-desc">第一栏嵌入的网址</div>
+            </div>
+            <div class="settings-control">
+              <input type="url" id="social-url" class="form-input" placeholder="https://x.com/home">
+            </div>
+          </div>
+
+          <!-- 新闻 RSS -->
+          <div class="settings-row">
+            <div class="settings-label">
+              <div class="label-title">新闻 RSS 源</div>
+              <div class="label-desc">勾选启用的新闻源</div>
+            </div>
+            <div class="settings-control">
+              <div class="rss-list" id="rss-list">
+                <!-- 由 JS 填充 -->
+              </div>
+              <div style="margin-top: 12px; display: flex; gap: 8px;">
+                <input type="text" id="new-rss-name" class="form-input" style="width: 120px;" placeholder="名称">
+                <input type="url" id="new-rss-url" class="form-input" style="flex: 1;" placeholder="RSS URL">
+                <button class="btn btn-secondary" onclick="addRSSFeed()">添加</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 股票 -->
+          <div class="settings-row" id="stocks">
+            <div class="settings-label">
+              <div class="label-title">股票代码</div>
+              <div class="label-desc">TradingView 显示的股票</div>
+            </div>
+            <div class="settings-control">
+              <input type="text" id="stock-symbols" class="form-input" placeholder="AAPL, GOOGL, BTCUSD">
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                用逗号分隔，支持格式：AAPL, NASDAQ:MSFT, BINANCE:BTCUSDT
+              </div>
+            </div>
+          </div>
+
+          <!-- 高亮关键词 -->
+          <div class="settings-row">
+            <div class="settings-label">
+              <div class="label-title">高亮关键词</div>
+              <div class="label-desc">包含这些词的新闻会高亮显示</div>
+            </div>
+            <div class="settings-control">
+              <input type="text" id="highlight-keywords" class="form-input" placeholder="breaking, urgent, 地震, 战争">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- HIDRS 设置 -->
+      <div class="settings-section" id="hidrs-settings">
+        <div class="settings-section-header">
+          <span class="icon">🔮</span>
+          <span class="title">HIDRS 设置</span>
+        </div>
+        <div class="settings-section-body">
+          <div class="settings-row">
+            <div class="settings-label">
+              <div class="label-title">HIDRS 端点</div>
+              <div class="label-desc">HIDRS 服务器地址</div>
+            </div>
+            <div class="settings-control">
+              <input type="url" id="hidrs-endpoint" class="form-input" style="width: 300px;" placeholder="http://localhost:5000">
+              <button class="btn btn-secondary" style="margin-left: 8px;" onclick="testHIDRSConnection()">测试连接</button>
+            </div>
+          </div>
+
+          <div class="settings-row">
+            <div class="settings-label">
+              <div class="label-title">自动检测</div>
+              <div class="label-desc">自动检测 HIDRS 连接状态</div>
+            </div>
+            <div class="settings-control">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="hidrs-auto-detect" style="width: 16px; height: 16px;">
+                <span>启用自动检测</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 主题设置 -->
+      <div class="settings-section" id="theme-settings">
+        <div class="settings-section-header">
+          <span class="icon">🎨</span>
+          <span class="title">主题设置</span>
+        </div>
+        <div class="settings-section-body">
+          <div class="settings-row">
+            <div class="settings-label">
+              <div class="label-title">配色方案</div>
+              <div class="label-desc">选择界面主题</div>
+            </div>
+            <div class="settings-control">
+              <div class="theme-preview">
+                <div class="theme-option active" data-theme="cyberpunk">
+                  <div class="preview-box" style="background: linear-gradient(135deg, #0a0e17, #1a1f2e); border: 1px solid #00f0ff;"></div>
+                  <div class="theme-name">赛博朋克</div>
+                </div>
+                <div class="theme-option" data-theme="matrix">
+                  <div class="preview-box" style="background: linear-gradient(135deg, #0d1a0d, #1a2e1a); border: 1px solid #00ff00;"></div>
+                  <div class="theme-name">黑客帝国</div>
+                </div>
+                <div class="theme-option" data-theme="midnight">
+                  <div class="preview-box" style="background: linear-gradient(135deg, #1a1a2e, #2e2e4a); border: 1px solid #6366f1;"></div>
+                  <div class="theme-name">午夜蓝</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 底部操作栏 -->
+    <div class="settings-footer">
+      <div class="left-actions">
+        <button class="btn btn-secondary" onclick="resetToDefault()">恢复默认</button>
+        <button class="btn btn-secondary" onclick="exportConfig()">导出配置</button>
+        <button class="btn btn-secondary" onclick="importConfig()">导入配置</button>
+      </div>
+      <div class="right-actions">
+        <button class="btn btn-secondary" onclick="location.href='/'">取消</button>
+        <button class="btn btn-primary" onclick="saveAllSettings()">保存设置</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/core.js"></script>
+  <script>
+    // 设置页面特定逻辑
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      await loadConfig();
+      populateSettings();
+    });
+
+    function populateSettings() {
+      const config = FairyDesk.config;
+      if (!config) return;
+
+      // 左屏 Tab
+      const tabs = config.left_screen?.tabs || [];
+      const defaultTabSelect = document.getElementById('default-tab');
+      const tabList = document.getElementById('tab-list');
+
+      defaultTabSelect.innerHTML = tabs.map(t =>
+        `<option value="${t.id}" ${t.id === config.left_screen?.default_tab ? 'selected' : ''}>${t.icon} ${t.name}</option>`
+      ).join('');
+
+      tabList.innerHTML = tabs.map(t => `
+        <div class="tab-list-item">
+          <span class="tab-icon">${t.icon}</span>
+          <div class="tab-info">
+            <div class="tab-name">${t.name}</div>
+            <div class="tab-url">${t.url}</div>
+          </div>
+          <span class="tab-strategy ${t.loadStrategy}">${t.loadStrategy === 'background' ? '背景同步' : t.loadStrategy === 'smart' ? '智能' : '懒加载'}</span>
+          <div class="tab-actions">
+            <button onclick="editTab('${t.id}')">编辑</button>
+            ${!t.builtIn ? `<button class="danger" onclick="removeTab('${t.id}')">删除</button>` : ''}
+          </div>
+        </div>
+      `).join('');
+
+      // 中屏
+      document.getElementById('refresh-interval').value = config.center_screen?.refresh_interval || 5;
+      document.getElementById('terminal-command').value = config.center_screen?.terminal_command || 'claude';
+
+      // 右屏
+      document.getElementById('social-url').value = config.right_screen?.social?.url || 'https://x.com/home';
+
+      const feeds = config.right_screen?.news?.feeds || [];
+      document.getElementById('rss-list').innerHTML = feeds.map((f, i) => `
+        <div class="rss-item">
+          <input type="checkbox" ${f.enabled !== false ? 'checked' : ''} data-index="${i}">
+          <span class="rss-name">${f.name}</span>
+          <span class="rss-url">${f.url}</span>
+        </div>
+      `).join('');
+
+      document.getElementById('stock-symbols').value = (config.right_screen?.stocks?.symbols || []).join(', ');
+      document.getElementById('highlight-keywords').value = (config.right_screen?.news?.highlight_keywords || []).join(', ');
+
+      // HIDRS
+      document.getElementById('hidrs-endpoint').value = config.hidrs?.endpoint || 'http://localhost:5000';
+      document.getElementById('hidrs-auto-detect').checked = config.hidrs?.auto_detect !== false;
+
+      // 主题
+      document.querySelectorAll('.theme-option').forEach(opt => {
+        opt.classList.toggle('active', opt.dataset.theme === (config.theme?.name || 'cyberpunk'));
+        opt.onclick = () => {
+          document.querySelectorAll('.theme-option').forEach(o => o.classList.remove('active'));
+          opt.classList.add('active');
+        };
+      });
+    }
+
+    async function saveAllSettings() {
+      const config = FairyDesk.config;
+
+      // 收集设置
+      config.left_screen.default_tab = document.getElementById('default-tab').value;
+      config.center_screen.refresh_interval = parseInt(document.getElementById('refresh-interval').value) || 5;
+      config.center_screen.terminal_command = document.getElementById('terminal-command').value;
+
+      config.right_screen.social.url = document.getElementById('social-url').value;
+
+      // RSS 启用状态
+      document.querySelectorAll('#rss-list input[type="checkbox"]').forEach(cb => {
+        const index = parseInt(cb.dataset.index);
+        if (config.right_screen.news.feeds[index]) {
+          config.right_screen.news.feeds[index].enabled = cb.checked;
+        }
+      });
+
+      config.right_screen.stocks.symbols = document.getElementById('stock-symbols').value
+        .split(',').map(s => s.trim()).filter(s => s);
+
+      config.right_screen.news.highlight_keywords = document.getElementById('highlight-keywords').value
+        .split(',').map(s => s.trim()).filter(s => s);
+
+      config.hidrs.endpoint = document.getElementById('hidrs-endpoint').value;
+      config.hidrs.auto_detect = document.getElementById('hidrs-auto-detect').checked;
+
+      config.theme.name = document.querySelector('.theme-option.active')?.dataset.theme || 'cyberpunk';
+
+      // 保存
+      const success = await saveConfig(config);
+      if (success) {
+        showNotification('设置已保存', 'success');
+      }
+    }
+
+    function addRSSFeed() {
+      const name = document.getElementById('new-rss-name').value.trim();
+      const url = document.getElementById('new-rss-url').value.trim();
+
+      if (!name || !url) {
+        showNotification('请填写名称和 URL', 'error');
+        return;
+      }
+
+      FairyDesk.config.right_screen.news.feeds.push({ name, url, enabled: true });
+      populateSettings();
+
+      document.getElementById('new-rss-name').value = '';
+      document.getElementById('new-rss-url').value = '';
+
+      showNotification('RSS 源已添加（保存后生效）', 'success');
+    }
+
+    function editTab(tabId) {
+      const tab = FairyDesk.config.left_screen.tabs.find(t => t.id === tabId);
+      if (tab) showEditTabModal(tab);
+    }
+
+    async function removeTab(tabId) {
+      if (!confirm('确定删除此分页？')) return;
+
+      const tabs = FairyDesk.config.left_screen.tabs;
+      const index = tabs.findIndex(t => t.id === tabId);
+      if (index > -1) {
+        tabs.splice(index, 1);
+        populateSettings();
+        showNotification('分页已删除（保存后生效）', 'success');
+      }
+    }
+
+    async function testHIDRSConnection() {
+      const endpoint = document.getElementById('hidrs-endpoint').value;
+      try {
+        const resp = await fetch(`${endpoint}/health`, { timeout: 3000 });
+        if (resp.ok) {
+          showNotification('HIDRS 连接成功！', 'success');
+        } else {
+          showNotification('HIDRS 连接失败', 'error');
+        }
+      } catch {
+        showNotification('HIDRS 无法连接', 'error');
+      }
+    }
+
+    function resetToDefault() {
+      if (!confirm('确定恢复默认设置？所有自定义配置将丢失。')) return;
+      location.reload();
+    }
+
+    function exportConfig() {
+      const blob = new Blob([JSON.stringify(FairyDesk.config, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'fairy-desk-config.json';
+      a.click();
+      URL.revokeObjectURL(url);
+      showNotification('配置已导出', 'success');
+    }
+
+    function importConfig() {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.json';
+      input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        try {
+          const text = await file.text();
+          const config = JSON.parse(text);
+          FairyDesk.config = config;
+          populateSettings();
+          showNotification('配置已导入（保存后生效）', 'success');
+        } catch {
+          showNotification('配置文件格式错误', 'error');
+        }
+      };
+      input.click();
+    }
+  </script>
+</body>
+</html>

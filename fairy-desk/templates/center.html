@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FAIRY-DESK - 中屏 · 控制台</title>
+  <link rel="stylesheet" href="/static/css/theme.css">
+  <style>
+    .center-layout {
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 32px);
+    }
+
+    /* 仪表盘区域 */
+    .dashboard-section {
+      flex-shrink: 0;
+      padding: 12px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 12px;
+    }
+
+    .metric-card {
+      position: relative;
+    }
+
+    .metric-card .metric-extra {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* 终端区域 */
+    .terminal-section {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .terminal-header {
+      height: 32px;
+      background: var(--bg-tertiary);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      flex-shrink: 0;
+    }
+
+    .terminal-header .title {
+      font-size: 12px;
+      color: var(--neon-cyan);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .terminal-tabs {
+      display: flex;
+      gap: 2px;
+    }
+
+    .terminal-tabs button {
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      padding: 4px 12px;
+      font-size: 11px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+    }
+
+    .terminal-tabs button:hover {
+      color: var(--text-primary);
+    }
+
+    .terminal-tabs button.active {
+      color: var(--neon-cyan);
+      border-bottom-color: var(--neon-cyan);
+    }
+
+    .terminal-body {
+      flex: 1;
+      display: flex;
+      min-height: 0;
+    }
+
+    .terminal-main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .terminal-content {
+      flex: 1;
+      overflow: auto;
+      background: #0d1117;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--text-terminal);
+      padding: 12px;
+    }
+
+    /* AI Agent 侧边栏 */
+    .agent-sidebar {
+      width: 300px;
+      background: var(--bg-secondary);
+      border-left: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+
+    .agent-header {
+      height: 40px;
+      background: var(--bg-tertiary);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      gap: 8px;
+    }
+
+    .agent-header .agent-avatar {
+      font-size: 20px;
+    }
+
+    .agent-header .agent-name {
+      font-size: 13px;
+      color: var(--neon-cyan);
+      font-weight: bold;
+    }
+
+    .agent-header .agent-status {
+      font-size: 10px;
+      color: var(--status-success);
+      margin-left: auto;
+    }
+
+    .agent-body {
+      flex: 1;
+      overflow: auto;
+      padding: 12px;
+    }
+
+    .agent-message {
+      margin-bottom: 12px;
+      padding: 10px 12px;
+      background: var(--bg-tertiary);
+      border-radius: 8px;
+      font-size: 13px;
+    }
+
+    .agent-message.system {
+      background: rgba(0, 240, 255, 0.1);
+      border-left: 3px solid var(--neon-cyan);
+    }
+
+    .agent-input {
+      padding: 12px;
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      gap: 8px;
+    }
+
+    .agent-input input {
+      flex: 1;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      padding: 8px 12px;
+      color: var(--text-primary);
+      font-size: 13px;
+    }
+
+    .agent-input input:focus {
+      outline: none;
+      border-color: var(--neon-cyan);
+    }
+
+    .agent-input button {
+      background: var(--neon-cyan);
+      color: var(--bg-primary);
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    /* HIDRS 指标（如果连接） */
+    .hidrs-metrics {
+      display: none;
+    }
+
+    .hidrs-metrics.connected {
+      display: grid;
+    }
+  </style>
+</head>
+<body data-page="center">
+  <div class="screen-container">
+    <!-- 顶部状态栏 -->
+    <div class="status-bar">
+      <div class="title">
+        🖥️ 控制台
+      </div>
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <span id="hidrs-status" class="hidrs-status disconnected">🔴 HIDRS</span>
+        <div class="clock" id="clock">--:--:--</div>
+      </div>
+    </div>
+
+    <div class="center-layout">
+      <!-- 仪表盘 -->
+      <div class="dashboard-section">
+        <div class="dashboard-grid">
+          <!-- 系统指标 -->
+          <div class="metric-card" id="metric-cpu">
+            <div class="metric-icon">💻</div>
+            <div class="metric-value">--%</div>
+            <div class="metric-label">CPU</div>
+            <div class="metric-bar"><div class="metric-bar-fill" style="width: 0%"></div></div>
+          </div>
+
+          <div class="metric-card" id="metric-memory">
+            <div class="metric-icon">🧠</div>
+            <div class="metric-value">--%</div>
+            <div class="metric-label">内存</div>
+            <div class="metric-bar"><div class="metric-bar-fill" style="width: 0%"></div></div>
+            <div class="metric-extra">--/-- GB</div>
+          </div>
+
+          <div class="metric-card" id="metric-gpu">
+            <div class="metric-icon">🎮</div>
+            <div class="metric-value">--%</div>
+            <div class="metric-label">GPU</div>
+            <div class="metric-bar"><div class="metric-bar-fill" style="width: 0%"></div></div>
+            <div class="metric-extra">--/-- MB</div>
+          </div>
+
+          <div class="metric-card" id="metric-network">
+            <div class="metric-icon">🌐</div>
+            <div class="metric-value">--</div>
+            <div class="metric-label">网络</div>
+            <div class="metric-bar"><div class="metric-bar-fill" style="width: 0%"></div></div>
+            <div class="metric-extra">-- 连接</div>
+          </div>
+
+          <!-- HIDRS 指标（仅在连接时显示） -->
+          <div class="metric-card hidrs-metrics" id="metric-nodes">
+            <div class="metric-icon">🔗</div>
+            <div class="metric-value">--</div>
+            <div class="metric-label">节点数</div>
+            <div class="metric-bar"><div class="metric-bar-fill" style="width: 0%"></div></div>
+          </div>
+
+          <div class="metric-card hidrs-metrics" id="metric-fiedler">
+            <div class="metric-icon">📊</div>
+            <div class="metric-value">--</div>
+            <div class="metric-label">Fiedler</div>
+            <div class="metric-bar"><div class="metric-bar-fill" style="width: 0%"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 终端 + Agent -->
+      <div class="terminal-section">
+        <div class="terminal-header">
+          <div class="title">系统日志</div>
+          <div class="terminal-tabs">
+            <button class="active" onclick="switchTerminalTab('logs')">日志</button>
+            <button onclick="switchTerminalTab('terminal')">终端</button>
+          </div>
+        </div>
+
+        <div class="terminal-body">
+          <div class="terminal-main">
+            <div class="terminal-content" id="system-logs">
+              <!-- 日志由 JS 动态渲染 -->
+            </div>
+          </div>
+
+          <!-- AI Agent 侧边栏 -->
+          <div class="agent-sidebar">
+            <div class="agent-header">
+              <span class="agent-avatar">🧚</span>
+              <span class="agent-name">AI AGENT</span>
+              <span class="agent-status">● ACTIVE</span>
+            </div>
+            <div class="agent-body" id="agent-messages">
+              <div class="agent-message system">
+                <strong>FAIRY ASSISTANT</strong><br>
+                系统已就绪。输入 <code>claude</code> 启动 Claude Code，或输入问题获取帮助。
+              </div>
+            </div>
+            <div class="agent-input">
+              <input type="text" id="agent-input" placeholder="输入命令或问题..." onkeypress="if(event.key==='Enter')sendAgentMessage()">
+              <button onclick="sendAgentMessage()">发送</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/core.js"></script>
+  <script>
+    // 中屏特定逻辑
+
+    let currentTerminalTab = 'logs';
+
+    function switchTerminalTab(tab) {
+      currentTerminalTab = tab;
+      document.querySelectorAll('.terminal-tabs button').forEach(btn => {
+        btn.classList.toggle('active', btn.textContent.includes(tab === 'logs' ? '日志' : '终端'));
+      });
+
+      const content = document.getElementById('system-logs');
+      if (tab === 'terminal') {
+        content.innerHTML = `
+          <div class="terminal-line" style="color: var(--neon-cyan);">
+            FAIRY-DESK Terminal v1.0.0
+          </div>
+          <div class="terminal-line" style="color: var(--text-muted);">
+            输入 'claude' 启动 Claude Code
+          </div>
+          <div class="terminal-line" style="color: var(--text-muted);">
+            输入 'help' 查看可用命令
+          </div>
+          <div class="terminal-input">
+            <span class="prompt">$</span>
+            <input type="text" id="terminal-input" onkeypress="if(event.key==='Enter')executeCommand(this.value)">
+          </div>
+        `;
+        document.getElementById('terminal-input')?.focus();
+      } else {
+        // 重新初始化日志
+        content.innerHTML = '';
+        initSystemLogs();
+      }
+    }
+
+    function executeCommand(cmd) {
+      const content = document.getElementById('system-logs');
+      const input = document.getElementById('terminal-input');
+
+      // 添加命令到输出
+      const cmdLine = document.createElement('div');
+      cmdLine.className = 'terminal-line';
+      cmdLine.innerHTML = `<span style="color: var(--neon-green);">$ ${escapeHtml(cmd)}</span>`;
+      content.insertBefore(cmdLine, content.lastElementChild);
+
+      // 处理命令
+      let output = '';
+      const cmdLower = cmd.toLowerCase().trim();
+
+      if (cmdLower === 'help') {
+        output = `可用命令:
+  claude    - 启动 Claude Code
+  clear     - 清屏
+  status    - 系统状态
+  hidrs     - HIDRS 连接状态
+  help      - 显示帮助`;
+      } else if (cmdLower === 'clear') {
+        switchTerminalTab('terminal');
+        return;
+      } else if (cmdLower === 'status') {
+        output = `FAIRY-DESK 运行中
+CPU: ${document.querySelector('#metric-cpu .metric-value')?.textContent || '--'}
+内存: ${document.querySelector('#metric-memory .metric-value')?.textContent || '--'}
+HIDRS: ${FairyDesk.hidrsConnected ? '已连接' : '未连接'}`;
+      } else if (cmdLower === 'hidrs') {
+        output = FairyDesk.hidrsConnected
+          ? 'HIDRS 已连接，全部功能可用'
+          : 'HIDRS 未连接，部分功能受限\n运行 HIDRS 后可获得网络拓扑监控、全息搜索等功能';
+      } else if (cmdLower === 'claude') {
+        output = '正在启动 Claude Code...\n提示: 在实际终端中运行 "claude" 命令';
+        showNotification('请在系统终端中运行 claude 命令', 'info');
+      } else if (cmd.trim()) {
+        output = `命令未找到: ${cmd}\n输入 'help' 查看可用命令`;
+      }
+
+      if (output) {
+        const outputLine = document.createElement('div');
+        outputLine.className = 'terminal-line';
+        outputLine.style.whiteSpace = 'pre-wrap';
+        outputLine.textContent = output;
+        content.insertBefore(outputLine, content.lastElementChild);
+      }
+
+      input.value = '';
+      content.scrollTop = content.scrollHeight;
+    }
+
+    function sendAgentMessage() {
+      const input = document.getElementById('agent-input');
+      const message = input.value.trim();
+      if (!message) return;
+
+      const container = document.getElementById('agent-messages');
+
+      // 用户消息
+      const userMsg = document.createElement('div');
+      userMsg.className = 'agent-message';
+      userMsg.style.textAlign = 'right';
+      userMsg.style.background = 'var(--bg-panel)';
+      userMsg.textContent = message;
+      container.appendChild(userMsg);
+
+      // 模拟 Agent 响应
+      setTimeout(() => {
+        const agentMsg = document.createElement('div');
+        agentMsg.className = 'agent-message system';
+
+        let response = '';
+        const msgLower = message.toLowerCase();
+
+        if (msgLower.includes('claude') || msgLower.includes('code')) {
+          response = '要启动 Claude Code，请在系统终端中运行:\n\n<code>claude</code>\n\n或者切换到终端标签页输入命令。';
+        } else if (msgLower.includes('hidrs') || msgLower.includes('连接')) {
+          response = FairyDesk.hidrsConnected
+            ? '✅ HIDRS 已连接，所有功能正常运行。'
+            : '⚠️ HIDRS 未连接。启动 HIDRS 可获得:\n• 网络拓扑监控\n• Fiedler 值检测\n• 全息搜索\n• 决策反馈';
+        } else if (msgLower.includes('help') || msgLower.includes('帮助')) {
+          response = '我可以帮你:\n• 查看系统状态\n• 启动 Claude Code\n• 检查 HIDRS 连接\n• 解答使用问题\n\n有什么需要帮助的？';
+        } else {
+          response = '收到！我会尽力帮助你。如果需要执行命令，请切换到终端标签页。';
+        }
+
+        agentMsg.innerHTML = `<strong>🧚 FAIRY</strong><br>${response}`;
+        container.appendChild(agentMsg);
+        container.scrollTop = container.scrollHeight;
+      }, 500);
+
+      input.value = '';
+      container.scrollTop = container.scrollHeight;
+    }
+
+    // 更新 HIDRS 指标显示
+    function updateHIDRSMetrics() {
+      if (!FairyDesk.hidrsConnected) return;
+
+      document.querySelectorAll('.hidrs-metrics').forEach(el => {
+        el.classList.add('connected');
+      });
+
+      // 获取 HIDRS 数据
+      fetch('/api/hidrs/proxy/api/network/metrics')
+        .then(resp => resp.json())
+        .then(data => {
+          if (data.current_metrics) {
+            updateMetric('nodes', data.current_metrics.node_count || 0, '');
+            updateMetric('fiedler', (data.current_metrics.fiedler_value || 0).toFixed(3), '');
+          }
+        })
+        .catch(() => {});
+    }
+
+    // 定期检查 HIDRS
+    setInterval(() => {
+      if (FairyDesk.hidrsConnected) {
+        updateHIDRSMetrics();
+      }
+    }, 10000);
+  </script>
+</body>
+</html>
