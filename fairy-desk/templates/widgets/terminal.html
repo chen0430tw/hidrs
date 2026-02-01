@@ -415,14 +415,32 @@
     let isConnected = false;
 
     // 初始化
-    document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', async function() {
       document.getElementById('server-url').value = serverUrl;
       document.getElementById('auth-token').value = authToken;
 
       // 如果有保存的配置，尝试自动连接
       if (serverUrl && localStorage.getItem('claude-web-autoconnect') === 'true') {
         connect();
+        return;
       }
+
+      // 首次访问：自动探测 claude-code-web 是否在运行
+      // 依次尝试默认端口和常用端口
+      var probePorts = ['3000', '3001', '8080'];
+      for (var i = 0; i < probePorts.length; i++) {
+        var probeUrl = 'http://localhost:' + probePorts[i];
+        var reachable = await checkServer(probeUrl, '');
+        if (reachable) {
+          // 服务已在运行，自动填入并连接
+          serverUrl = probeUrl;
+          document.getElementById('server-url').value = probeUrl;
+          localStorage.setItem('claude-web-url', probeUrl);
+          connect();
+          return;
+        }
+      }
+      // 未检测到服务，保持显示设置面板
     });
 
     // 检测服务是否可达（先 health，再 HEAD 回退）
