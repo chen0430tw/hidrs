@@ -424,12 +424,43 @@
       }
     });
 
+    // 检测服务是否可达（先 health，再 HEAD 回退）
+    async function checkServer(url, token) {
+      var headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+
+      // 尝试 /health 端点
+      try {
+        var resp = await fetch(url + '/health', {
+          method: 'GET',
+          headers: headers,
+          mode: 'cors',
+          signal: AbortSignal.timeout(5000)
+        });
+        if (resp.ok) return true;
+      } catch (e) {
+        // /health 不可用，继续
+      }
+
+      // 回退：HEAD 请求根路径
+      try {
+        var resp2 = await fetch(url, {
+          method: 'HEAD',
+          headers: headers,
+          mode: 'cors',
+          signal: AbortSignal.timeout(5000)
+        });
+        return resp2.ok || resp2.type === 'opaque';
+      } catch (e) {
+        return false;
+      }
+    }
+
     // 连接到 claude-code-web
     async function connect() {
-      const urlInput = document.getElementById('server-url');
-      const tokenInput = document.getElementById('auth-token');
-      const connectBtn = document.getElementById('connect-btn');
-      const errorMsg = document.getElementById('error-message');
+      var urlInput = document.getElementById('server-url');
+      var tokenInput = document.getElementById('auth-token');
+      var connectBtn = document.getElementById('connect-btn');
+      var errorMsg = document.getElementById('error-message');
 
       serverUrl = urlInput.value.trim().replace(/\/$/, '');
       authToken = tokenInput.value.trim();
@@ -449,32 +480,29 @@
       errorMsg.classList.remove('show');
       updateStatus('connecting', '连接中...');
 
-      try {
-        // 检查服务是否可用
-        const checkUrl = serverUrl + '/health';
-        const response = await fetch(checkUrl, {
-          method: 'GET',
-          headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {},
-          mode: 'cors'
-        }).catch(() => null);
+      // 检查服务是否可用
+      var reachable = await checkServer(serverUrl, authToken);
 
-        // 即使 health 检查失败也尝试加载（可能没有 health 端点）
+      if (reachable) {
         loadTerminal();
-
-      } catch (error) {
-        // 网络错误，但仍尝试加载
-        loadTerminal();
+      } else {
+        // 服务不可达，显示错误，留在设置面板
+        showError('无法连接到 ' + serverUrl + '，请确保 claude-code-web 已启动');
+        updateStatus('disconnected', '连接失败');
+        connectBtn.disabled = false;
+        connectBtn.innerHTML = '🚀 连接';
+        localStorage.removeItem('claude-web-autoconnect');
       }
     }
 
-    // 加载终端
+    // 加载终端 iframe（仅在 checkServer 成功后调用）
     function loadTerminal() {
-      const frame = document.getElementById('terminal-frame');
-      const setupPanel = document.getElementById('setup-panel');
-      const connectBtn = document.getElementById('connect-btn');
+      var frame = document.getElementById('terminal-frame');
+      var setupPanel = document.getElementById('setup-panel');
+      var connectBtn = document.getElementById('connect-btn');
 
       // 构建 URL
-      let url = serverUrl;
+      var url = serverUrl;
       if (authToken) {
         url += (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(authToken);
       }
@@ -483,8 +511,8 @@
       frame.classList.remove('hidden');
       frame.style.display = 'block';
 
-      // 监听加载
-      frame.onload = () => {
+      // 监听加载完成
+      frame.onload = function() {
         setupPanel.classList.add('hidden');
         updateStatus('connected', '已连接');
         isConnected = true;
@@ -493,24 +521,29 @@
         connectBtn.innerHTML = '🚀 连接';
       };
 
-      frame.onerror = () => {
-        showError('无法连接到 claude-code-web 服务，请确保服务已启动');
-        updateStatus('disconnected', '连接失败');
+      frame.onerror = function() {
+        // iframe 加载失败，回到设置面板
+        frame.style.display = 'none';
+        setupPanel.classList.remove('hidden');
+        showError('iframe 加载失败，请检查 claude-code-web 是否正常运行');
+        updateStatus('disconnected', '加载失败');
         connectBtn.disabled = false;
         connectBtn.innerHTML = '🚀 连接';
+        localStorage.removeItem('claude-web-autoconnect');
       };
 
-      // 超时处理
-      setTimeout(() => {
+      // 超时保护：10 秒后如果 onload 仍未触发，检查状态
+      setTimeout(function() {
         if (!isConnected) {
-          // 可能是静默加载成功
+          // onload 未触发，可能是跨域 iframe 加载成功但无法检测
+          // 隐藏设置面板（iframe 可能已经渲染了内容）
           setupPanel.classList.add('hidden');
           updateStatus('connected', '已连接');
           isConnected = true;
         }
         connectBtn.disabled = false;
         connectBtn.innerHTML = '🚀 连接';
-      }, 5000);
+      }, 10000);
     }
 
     // 显示设置面板
@@ -522,14 +555,19 @@
     }
 
     // 重新连接
-    function reconnect() {
-      const frame = document.getElementById('terminal-frame');
-      if (frame.src && frame.src !== 'about:blank') {
+    async function reconnect() {
+      var frame = document.getElementById('terminal-frame');
+      if (serverUrl && frame.src && frame.src !== 'about:blank') {
         updateStatus('connecting', '重连中...');
-        frame.src = frame.src;
-        setTimeout(() => {
-          updateStatus('connected', '已连接');
-        }, 2000);
+        var reachable = await checkServer(serverUrl, authToken);
+        if (reachable) {
+          isConnected = false;
+          frame.src = frame.src;
+          // onload 会更新状态
+        } else {
+          showSetup();
+          showError('服务不可达，请检查 claude-code-web 是否已启动');
+        }
       } else {
         showSetup();
       }
@@ -538,7 +576,7 @@
     // 新窗口打开
     function openExternal() {
       if (serverUrl) {
-        let url = serverUrl;
+        var url = serverUrl;
         if (authToken) {
           url += (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(authToken);
         }
@@ -548,8 +586,8 @@
 
     // 更新状态
     function updateStatus(status, text) {
-      const dot = document.getElementById('status-dot');
-      const textEl = document.getElementById('status-text');
+      var dot = document.getElementById('status-dot');
+      var textEl = document.getElementById('status-text');
 
       dot.className = 'status-dot';
       if (status === 'connected') {
@@ -563,16 +601,14 @@
 
     // 显示错误
     function showError(message) {
-      const errorEl = document.getElementById('error-message');
+      var errorEl = document.getElementById('error-message');
       errorEl.textContent = message;
       errorEl.classList.add('show');
     }
 
     // 添加 CSS
-    const style = document.createElement('style');
-    style.textContent = `
-      .hidden { display: none !important; }
-    `;
+    var style = document.createElement('style');
+    style.textContent = '.hidden { display: none !important; }';
     document.head.appendChild(style);
   </script>
 </body>
