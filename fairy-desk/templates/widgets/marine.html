@@ -72,7 +72,7 @@
       left: 0;
       width: 100%;
       height: 100%;
-      display: flex;
+      display: none;
       flex-direction: column;
       align-items: center;
       justify-content: center;
@@ -81,8 +81,8 @@
       text-align: center;
       padding: 40px;
     }
-    .fallback.hidden {
-      display: none;
+    .fallback.visible {
+      display: flex;
     }
     .fallback .icon {
       font-size: 64px;
@@ -137,6 +137,10 @@
       display: flex;
       align-items: center;
       gap: 12px;
+      z-index: 5;
+    }
+    .loading.hidden {
+      display: none;
     }
     .loading-spinner {
       width: 24px;
@@ -158,26 +162,23 @@
       <span>船舶追踪</span>
     </div>
     <div class="provider-tabs">
-      <button class="active" onclick="switchProvider('marinetraffic')">MarineTraffic</button>
-      <button onclick="switchProvider('vesselfinder')">VesselFinder</button>
+      <button class="active" data-provider="marinetraffic" onclick="switchProvider('marinetraffic')">MarineTraffic</button>
+      <button data-provider="vesselfinder" onclick="switchProvider('vesselfinder')">VesselFinder</button>
     </div>
   </div>
 
-  <div class="frame-container">
+  <div class="frame-container" id="frame-container">
     <div class="loading" id="loading">
       <div class="loading-spinner"></div>
       <span>加载中...</span>
     </div>
 
-    <iframe id="marine-frame" src="" style="display: none;"></iframe>
+    <!-- 嵌入帧由 JS 动态生成 -->
 
     <div class="fallback" id="fallback">
       <div class="icon">🚢</div>
       <h2>船舶追踪服务</h2>
-      <p>
-        由于安全策略限制，部分船舶追踪网站无法在嵌入模式下显示。
-        请选择以下方式查看：
-      </p>
+      <p>嵌入地图加载失败，请尝试在新窗口中打开。</p>
       <div class="buttons">
         <button class="primary" onclick="window.open('https://www.marinetraffic.com/', '_blank')">
           🌊 打开 MarineTraffic
@@ -190,79 +191,128 @@
   </div>
 
   <script>
+    // 官方 JS Embed 使用 document.write()，只能在页面加载时执行。
+    // 解决方案：用 srcdoc iframe 为每个 provider 创建独立的文档上下文，
+    // 让官方 embed.js / aismap.js 在其中正常运行。
+
     const providers = {
       marinetraffic: {
-        // MarineTraffic 官方嵌入地图
-        embedUrl: 'https://www.marinetraffic.com/en/ais/embed/zoom:4/centery:35/centerx:140/maptype:4/shownames:true/mmsi:0/shipid:0/fleet:/fleet_id:/vtypes:/showmenu:/remember:false',
+        // MarineTraffic 官方 embed.js 嵌入
+        // 参数: width, height, latitude(→centery), longitude(→centerx), zoom, maptype, shownames, trackvessel, fleet
+        buildSrcdoc: function() {
+          return '<!DOCTYPE html>' +
+            '<html><head><style>*{margin:0;padding:0}body{overflow:hidden}</style></head>' +
+            '<body>' +
+            '<script>' +
+            'var width="100%";' +
+            'var height="100%";' +
+            'var border=0;' +
+            'var latitude=25;' +
+            'var longitude=125;' +
+            'var zoom=4;' +
+            'var maptype=4;' +
+            'var shownames=true;' +
+            'var trackvessel=0;' +
+            'var fleet="";' +
+            'var showmenu=false;' +
+            'var remember=false;' +
+            '<\/script>' +
+            '<script src="https://www.marinetraffic.com/js/embed.js"><\/script>' +
+            '</body></html>';
+        },
         fallbackUrl: 'https://www.marinetraffic.com/'
       },
       vesselfinder: {
-        // VesselFinder 官方嵌入
-        embedUrl: 'https://www.vesselfinder.com/aismap?lat=35&lon=140&zoom=4&width=100%&height=100%',
+        // VesselFinder 官方 aismap.js 嵌入
+        // 参数: width, height, latitude, longitude, zoom, names, mmsi, imo, show_track, fleet
+        buildSrcdoc: function() {
+          return '<!DOCTYPE html>' +
+            '<html><head><style>*{margin:0;padding:0}body{overflow:hidden}</style></head>' +
+            '<body>' +
+            '<script>' +
+            'var width="100%";' +
+            'var height="100%";' +
+            'var latitude=25;' +
+            'var longitude=125;' +
+            'var zoom=4;' +
+            'var names=true;' +
+            '<\/script>' +
+            '<script src="https://www.vesselfinder.com/aismap.js"><\/script>' +
+            '</body></html>';
+        },
         fallbackUrl: 'https://www.vesselfinder.com/'
       }
     };
 
     let currentProvider = 'marinetraffic';
+    let loadTimeoutId = null;
 
     function switchProvider(provider) {
+      if (!providers[provider]) return;
       currentProvider = provider;
 
       // 更新按钮状态
-      document.querySelectorAll('.provider-tabs button').forEach(btn => {
-        btn.classList.toggle('active', btn.textContent.toLowerCase().includes(provider));
+      document.querySelectorAll('.provider-tabs button').forEach(function(btn) {
+        btn.classList.toggle('active', btn.dataset.provider === provider);
       });
 
       loadProvider(provider);
     }
 
     function loadProvider(provider) {
-      const frame = document.getElementById('marine-frame');
-      const loading = document.getElementById('loading');
-      const fallback = document.getElementById('fallback');
+      var container = document.getElementById('frame-container');
+      var loading = document.getElementById('loading');
+      var fallback = document.getElementById('fallback');
 
-      loading.style.display = 'flex';
-      frame.style.display = 'none';
-      fallback.classList.add('hidden');
+      // 清除上一次的超时计时器
+      if (loadTimeoutId) {
+        clearTimeout(loadTimeoutId);
+        loadTimeoutId = null;
+      }
 
-      const config = providers[provider];
-      frame.src = config.embedUrl;
+      // 移除旧的 iframe
+      var oldFrame = document.getElementById('marine-frame');
+      if (oldFrame) {
+        oldFrame.remove();
+      }
 
-      // 检测是否加载成功
+      // 显示加载状态
+      loading.classList.remove('hidden');
+      fallback.classList.remove('visible');
+
+      // 创建新 iframe，使用 srcdoc 注入官方 embed 脚本
+      var config = providers[provider];
+      var frame = document.createElement('iframe');
+      frame.id = 'marine-frame';
+      frame.setAttribute('allowfullscreen', '');
+      frame.setAttribute('loading', 'lazy');
+      frame.srcdoc = config.buildSrcdoc();
+
       frame.onload = function() {
-        loading.style.display = 'none';
-        try {
-          // 尝试访问 iframe 内容，如果被阻止会抛出错误
-          const doc = frame.contentDocument || frame.contentWindow.document;
-          frame.style.display = 'block';
-        } catch (e) {
-          // X-Frame-Options 阻止，显示 fallback
-          showFallback();
-        }
+        loading.classList.add('hidden');
       };
 
       frame.onerror = function() {
         showFallback();
       };
 
-      // 超时检测
-      setTimeout(() => {
-        if (loading.style.display !== 'none') {
-          // 可能是静默失败，检查 iframe
-          if (!frame.contentWindow || frame.style.display === 'none') {
-            showFallback();
-          } else {
-            loading.style.display = 'none';
-            frame.style.display = 'block';
-          }
+      container.appendChild(frame);
+
+      // 超时保护：8秒后如果仍在加载则隐藏 loading
+      loadTimeoutId = setTimeout(function() {
+        if (!loading.classList.contains('hidden')) {
+          loading.classList.add('hidden');
         }
-      }, 5000);
+      }, 8000);
     }
 
     function showFallback() {
-      document.getElementById('loading').style.display = 'none';
-      document.getElementById('marine-frame').style.display = 'none';
-      document.getElementById('fallback').classList.remove('hidden');
+      document.getElementById('loading').classList.add('hidden');
+      var frame = document.getElementById('marine-frame');
+      if (frame) {
+        frame.style.display = 'none';
+      }
+      document.getElementById('fallback').classList.add('visible');
     }
 
     // 初始加载
