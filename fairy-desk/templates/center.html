@@ -276,7 +276,7 @@
       <!-- 终端 + Agent -->
       <div class="terminal-section">
         <div class="terminal-header">
-          <div class="title">系统日志</div>
+          <div class="title">系统控制台</div>
           <div class="terminal-tabs">
             <button class="active" onclick="switchTerminalTab('logs')">日志</button>
             <button onclick="switchTerminalTab('terminal')">终端</button>
@@ -334,8 +334,10 @@
     let currentTerminalTab = 'logs';
     let ttydUrl = null;       // 探测到的 ttyd 地址
     let ttydChecked = false;  // 是否已探测
+    let claudeConnected = false;  // Claude 是否已直连
+    let claudeWebUrl = null;      // 探测到的 claude-code-web 地址
 
-    // 探测 ttyd 是否可用
+    // 探测 ttyd 是否可用（no-cors 因为 ttyd 不返回 CORS 头）
     async function detectTtyd() {
       if (ttydChecked) return ttydUrl;
       var ports = [7681, 7682, 7680];
@@ -344,59 +346,155 @@
         try {
           var resp = await fetch(url, {
             method: 'HEAD',
-            mode: 'cors',
-            signal: AbortSignal.timeout(3000)
+            mode: 'no-cors',
+            signal: AbortSignal.timeout(2000)
           });
-          if (resp.ok || resp.type === 'opaque') {
-            ttydUrl = url;
-            break;
-          }
-        } catch (e) { /* 继续 */ }
+          // no-cors 成功返回 opaque response（status=0, type='opaque'）
+          // 失败则抛异常进 catch
+          ttydUrl = url;
+          break;
+        } catch (e) { /* 端口不通，继续 */ }
       }
       ttydChecked = true;
       return ttydUrl;
     }
 
-    // 连接 Claude 按钮
-    function connectClaude() {
+    // 探测 claude-code-web 是否可用（从 center.html 层级直连）
+    async function detectClaudeWeb() {
+      // 如果 localStorage 有保存的地址，优先尝试
+      var saved = localStorage.getItem('claude-web-url');
+      if (saved) {
+        var ok = await probeUrl(saved);
+        if (ok) { claudeWebUrl = saved; return saved; }
+      }
+      // 探测常用端口
+      var ports = [32352, 3000, 3001];
+      for (var i = 0; i < ports.length; i++) {
+        var url = 'http://localhost:' + ports[i];
+        var ok = await probeUrl(url);
+        if (ok) {
+          claudeWebUrl = url;
+          localStorage.setItem('claude-web-url', url);
+          return url;
+        }
+      }
+      return null;
+    }
+
+    async function probeUrl(url) {
+      // 先试 /health
+      try {
+        var resp = await fetch(url + '/health', {
+          method: 'GET', mode: 'cors',
+          signal: AbortSignal.timeout(3000)
+        });
+        if (resp.ok) return true;
+      } catch (e) {}
+      // 回退 HEAD
+      try {
+        var resp2 = await fetch(url, {
+          method: 'HEAD', mode: 'cors',
+          signal: AbortSignal.timeout(3000)
+        });
+        return resp2.ok || resp2.type === 'opaque';
+      } catch (e) { return false; }
+    }
+
+    // 连接 Claude（按钮 + tab 首次点击共用）
+    async function connectClaude() {
       var claudeFrame = document.getElementById('claude-terminal');
-      // 强制重新加载 terminal widget
-      claudeFrame.src = '';
-      switchTerminalTab('claude');
-      setTimeout(function() {
+      var content = document.getElementById('system-logs');
+      var ttydFrame = document.getElementById('ttyd-terminal');
+
+      // 切到 Claude tab
+      currentTerminalTab = 'claude';
+      updateTabState('claude');
+      content.style.display = 'none';
+      ttydFrame.style.display = 'none';
+      claudeFrame.style.display = 'block';
+
+      // 显示连接中状态
+      claudeFrame.src = 'about:blank';
+      claudeFrame.style.background = '#0a0e17';
+
+      // 直接从 center.html 层级探测 claude-code-web
+      var url = await detectClaudeWeb();
+
+      if (url) {
+        // 找到了，直接加载 claude-code-web（跳过 terminal.html 中间层）
+        var token = localStorage.getItem('claude-web-token') || '';
+        var loadUrl = url;
+        if (token) {
+          loadUrl += (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
+        }
+        claudeFrame.src = loadUrl;
+        claudeConnected = true;
+        localStorage.setItem('claude-web-autoconnect', 'true');
+      } else {
+        // 没找到，加载 terminal.html 设置面板作为回退
         claudeFrame.src = '/widget/terminal';
-      }, 100);
+        claudeConnected = false;
+      }
+    }
+
+    function updateTabState(tab) {
+      document.querySelectorAll('.terminal-tabs button').forEach(function(btn) {
+        if (btn.id === 'btn-connect-claude') return;
+        var btnText = btn.textContent.toLowerCase();
+        var isActive = (tab === 'logs' && btnText.includes('日志')) ||
+                       (tab === 'terminal' && btnText.includes('终端') && !btnText.includes('claude')) ||
+                       (tab === 'claude' && btnText.includes('claude'));
+        btn.classList.toggle('active', isActive);
+      });
     }
 
     function switchTerminalTab(tab) {
       currentTerminalTab = tab;
-
-      // 更新标签状态（不含连接按钮）
-      document.querySelectorAll('.terminal-tabs button').forEach(btn => {
-        if (btn.id === 'btn-connect-claude') return;
-        const btnText = btn.textContent.toLowerCase();
-        const isActive = (tab === 'logs' && btnText.includes('日志')) ||
-                         (tab === 'terminal' && btnText.includes('终端') && !btnText.includes('claude')) ||
-                         (tab === 'claude' && btnText.includes('claude'));
-        btn.classList.toggle('active', isActive);
-      });
+      updateTabState(tab);
 
       var content = document.getElementById('system-logs');
       var claudeFrame = document.getElementById('claude-terminal');
       var ttydFrame = document.getElementById('ttyd-terminal');
 
       if (tab === 'claude') {
-        // Claude Code 终端
         content.style.display = 'none';
         ttydFrame.style.display = 'none';
         claudeFrame.style.display = 'block';
-        if (!claudeFrame.src || claudeFrame.src === '' || claudeFrame.src === 'about:blank') {
-          claudeFrame.src = '/widget/terminal';
+
+        if (claudeConnected && claudeFrame.src && claudeFrame.src !== 'about:blank') {
+          // 已连接，直接显示
+          return;
         }
+        // 首次点击或未连接 → 触发自动连接（与连接按钮相同逻辑）
+        connectClaude();
       } else if (tab === 'terminal') {
         // ttyd 真实终端（或回退到模拟终端）
         claudeFrame.style.display = 'none';
-        loadTtydOrFallback(content, ttydFrame);
+
+        if (ttydChecked && ttydUrl) {
+          // 已探测到 ttyd，直接显示
+          content.style.display = 'none';
+          ttydFrame.style.display = 'block';
+          if (!ttydFrame.src || ttydFrame.src === '' || ttydFrame.src === 'about:blank') {
+            ttydFrame.src = ttydUrl;
+          }
+        } else if (ttydChecked && !ttydUrl) {
+          // 已探测过，没有 ttyd，直接显示回退终端
+          content.style.display = 'block';
+          ttydFrame.style.display = 'none';
+          showFallbackTerminal(content);
+        } else {
+          // 首次：先显示 content 区域（清空旧内容），异步探测
+          content.style.display = 'block';
+          ttydFrame.style.display = 'none';
+          content.innerHTML = '';
+          var loadingMsg = document.createElement('div');
+          loadingMsg.className = 'terminal-line';
+          loadingMsg.style.color = 'var(--text-muted)';
+          loadingMsg.textContent = '正在检测终端服务...';
+          content.appendChild(loadingMsg);
+          loadTtydOrFallback(content, ttydFrame);
+        }
       } else {
         // 日志
         content.style.display = 'block';

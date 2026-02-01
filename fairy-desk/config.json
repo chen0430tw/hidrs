@@ -80,6 +80,26 @@
           "enabled": true
         },
         {
+          "name": "CNN",
+          "url": "http://rss.cnn.com/rss/edition_world.rss",
+          "enabled": true
+        },
+        {
+          "name": "NYT 纽约时报",
+          "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+          "enabled": true
+        },
+        {
+          "name": "人民日报",
+          "url": "http://www.people.com.cn/rss/world.xml",
+          "enabled": true
+        },
+        {
+          "name": "CNA 中央社",
+          "url": "https://feeds.feedburner.com/rsscna/politics",
+          "enabled": true
+        },
+        {
           "name": "Reuters",
           "url": "https://www.reutersagency.com/feed/?best-regions=asia&post_type=best",
           "enabled": true
@@ -88,6 +108,11 @@
           "name": "NHK World",
           "url": "https://www3.nhk.or.jp/rss/news/cat0.xml",
           "enabled": true
+        },
+        {
+          "name": "Sputnik 卫星通讯社",
+          "url": "https://sputniknews.com/export/rss2/archive/index.xml",
+          "enabled": true
         }
       ],
       "highlight_keywords": ["breaking", "urgent", "alert", "warning", "震", "地震", "台风", "战争"]
@@ -95,7 +120,7 @@
     "stocks": {
       "provider": "tradingview",
       "theme": "dark",
-      "symbols": ["AAPL", "GOOGL", "BTCUSD", "ETHUSD"],
+      "symbols": ["FOREXCOM:SPXUSD", "AAPL", "GOOGL", "NVDA", "BTCUSD", "ETHUSD", "FX:USDCNY"],
       "show_ticker": true
     },
     "alerts": {

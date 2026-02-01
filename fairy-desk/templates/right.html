@@ -98,46 +98,10 @@
     }
 
     .stock-ticker {
-      height: 32px;
+      height: 46px;
       background: var(--bg-secondary);
       border-bottom: 1px solid var(--border-color);
       overflow: hidden;
-      display: flex;
-      align-items: center;
-    }
-
-    .ticker-content {
-      display: flex;
-      animation: ticker 20s linear infinite;
-      white-space: nowrap;
-    }
-
-    @keyframes ticker {
-      0% { transform: translateX(0); }
-      100% { transform: translateX(-50%); }
-    }
-
-    .ticker-item {
-      padding: 0 16px;
-      font-size: 12px;
-      font-family: var(--font-mono);
-    }
-
-    .ticker-item .symbol {
-      color: var(--text-primary);
-      margin-right: 8px;
-    }
-
-    .ticker-item .price {
-      color: var(--neon-cyan);
-    }
-
-    .ticker-item .change.up {
-      color: var(--status-success);
-    }
-
-    .ticker-item .change.down {
-      color: var(--status-danger);
     }
 
     .stock-charts {
@@ -318,47 +282,86 @@
   <script>
     // 右屏特定逻辑
 
-    // 初始化股票图表
+    // 初始化股票行情（TradingView Ticker Tape + Mini Chart）
     function initStockCharts() {
-      const symbols = FairyDesk.config?.right_screen?.stocks?.symbols || ['AAPL', 'BTCUSD'];
-      const theme = FairyDesk.config?.right_screen?.stocks?.theme || 'dark';
+      var symbols = (FairyDesk.config && FairyDesk.config.right_screen &&
+                     FairyDesk.config.right_screen.stocks &&
+                     FairyDesk.config.right_screen.stocks.symbols) || ['AAPL', 'GOOGL', 'BTCUSD', 'ETHUSD'];
+      var theme = (FairyDesk.config && FairyDesk.config.right_screen &&
+                   FairyDesk.config.right_screen.stocks &&
+                   FairyDesk.config.right_screen.stocks.theme) || 'dark';
 
-      // 滚动行情条
-      const tickerEl = document.getElementById('stock-ticker');
+      // === 1. TradingView Ticker Tape（真实价格滚动条）===
+      var tickerEl = document.getElementById('stock-ticker');
       if (tickerEl) {
-        const tickerHtml = symbols.map(s => `
-          <div class="ticker-item">
-            <span class="symbol">${s}</span>
-            <span class="price">---</span>
-            <span class="change">--%</span>
-          </div>
-        `).join('');
-        tickerEl.innerHTML = tickerHtml + tickerHtml; // 重复以实现无缝滚动
+        tickerEl.innerHTML = '';
+        var tickerContainer = document.createElement('div');
+        tickerContainer.className = 'tradingview-widget-container';
+        tickerContainer.style.cssText = 'width:100%;height:100%';
+
+        var tickerWidget = document.createElement('div');
+        tickerWidget.className = 'tradingview-widget-container__widget';
+        tickerContainer.appendChild(tickerWidget);
+
+        var tickerScript = document.createElement('script');
+        tickerScript.type = 'text/javascript';
+        tickerScript.src = 'https://s3.tradingview.com/external-embedding/embed-widget-ticker-tape.js';
+        tickerScript.async = true;
+        tickerScript.textContent = JSON.stringify({
+          "symbols": symbols.map(function(s) {
+            return {
+              "proName": s.includes(':') ? s : (
+                s.includes('USD') || s.includes('BTC') || s.includes('ETH') ? s : 'NASDAQ:' + s
+              ),
+              "title": s.replace(/^[A-Z]+:/, '')
+            };
+          }),
+          "showSymbolLogo": true,
+          "colorTheme": theme,
+          "isTransparent": true,
+          "displayMode": "compact",
+          "locale": "zh_CN"
+        });
+        tickerContainer.appendChild(tickerScript);
+        tickerEl.appendChild(tickerContainer);
       }
 
-      // TradingView Mini Chart Widgets
-      const chartsEl = document.getElementById('stock-charts');
+      // === 2. TradingView Mini Symbol Overview Charts ===
+      var chartsEl = document.getElementById('stock-charts');
       if (chartsEl) {
-        chartsEl.innerHTML = symbols.slice(0, 4).map(symbol => `
-          <div class="stock-chart-item">
-            <div class="tradingview-widget-container">
-              <div class="tradingview-widget-container__widget"></div>
-              <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-mini-symbol-overview.js" async>
-              {
-                "symbol": "${symbol.includes(':') ? symbol : 'NASDAQ:' + symbol}",
-                "width": "100%",
-                "height": "150",
-                "locale": "zh_CN",
-                "dateRange": "1D",
-                "colorTheme": "${theme}",
-                "isTransparent": true,
-                "autosize": true,
-                "largeChartUrl": ""
-              }
-              <\/script>
-            </div>
-          </div>
-        `).join('');
+        chartsEl.innerHTML = '';
+        symbols.slice(0, 6).forEach(function(symbol) {
+          var chartItem = document.createElement('div');
+          chartItem.className = 'stock-chart-item';
+
+          var container = document.createElement('div');
+          container.className = 'tradingview-widget-container';
+
+          var widgetDiv = document.createElement('div');
+          widgetDiv.className = 'tradingview-widget-container__widget';
+          container.appendChild(widgetDiv);
+
+          var script = document.createElement('script');
+          script.type = 'text/javascript';
+          script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-mini-symbol-overview.js';
+          script.async = true;
+          script.textContent = JSON.stringify({
+            "symbol": symbol.includes(':') ? symbol : (
+              symbol.includes('USD') || symbol.includes('BTC') || symbol.includes('ETH') ? symbol : 'NASDAQ:' + symbol
+            ),
+            "width": "100%",
+            "height": "150",
+            "locale": "zh_CN",
+            "dateRange": "1D",
+            "colorTheme": theme,
+            "isTransparent": true,
+            "autosize": true,
+            "largeChartUrl": ""
+          });
+          container.appendChild(script);
+          chartItem.appendChild(container);
+          chartsEl.appendChild(chartItem);
+        });
       }
     }
 
