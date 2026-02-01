@@ -108,6 +108,11 @@
           "name": "NHK World",
           "url": "https://www3.nhk.or.jp/rss/news/cat0.xml",
           "enabled": true
+        },
+        {
+          "name": "Sputnik 卫星通讯社",
+          "url": "https://sputniknews.com/export/rss2/archive/index.xml",
+          "enabled": true
         }
       ],
       "highlight_keywords": ["breaking", "urgent", "alert", "warning", "震", "地震", "台风", "战争"]
@@ -115,7 +120,7 @@
     "stocks": {
       "provider": "tradingview",
       "theme": "dark",
-      "symbols": ["FOREXCOM:SPXUSD", "AAPL", "GOOGL", "BTCUSD", "ETHUSD", "FX:USDCNY"],
+      "symbols": ["FOREXCOM:SPXUSD", "AAPL", "GOOGL", "NVDA", "BTCUSD", "ETHUSD", "FX:USDCNY"],
       "show_ticker": true
     },
     "alerts": {
