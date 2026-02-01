@@ -543,18 +543,30 @@
 
     // 初始化
     document.addEventListener('DOMContentLoaded', function() {
-      // Twitter 官方 widgets.js 加载后触发 twttr.ready 回调
-      window.twttr = window.twttr || {};
-      twttr.ready = function(twttr) {
-        loadTwitterWidget();
-      };
+      // 官方 Twitter widgets.js 引导加载（正确的 ready 队列模式）
+      window.twttr = (function(d, s, id) {
+        var js, fjs = d.getElementsByTagName(s)[0], t = window.twttr || {};
+        if (d.getElementById(id)) return t;
+        js = d.createElement(s);
+        js.id = id;
+        js.src = 'https://platform.twitter.com/widgets.js';
+        fjs.parentNode.insertBefore(js, fjs);
+        t._e = [];
+        t.ready = function(f) { t._e.push(f); };
+        return t;
+      }(document, 'script', 'twitter-wjs'));
 
-      // 超时保护：如果 12 秒后 widget 仍未加载成功，显示 fallback
+      // 注册回调（widgets.js 加载完成后自动触发）
+      twttr.ready(function(twttr) {
+        loadTwitterWidget();
+      });
+
+      // 超时保护：如果 15 秒后 widget 仍未加载成功，显示 fallback
       setTimeout(function() {
         if (!window.twitterLoaded) {
           showTwitterFallback();
         }
-      }, 12000);
+      }, 15000);
     });
 
     // 监听 iframe 加载错误（Bluesky, Mastodon, Weibo 等）
@@ -565,7 +577,5 @@
       });
     });
   </script>
-  <!-- Twitter 官方 widgets.js：自动将 <a class="twitter-timeline"> 渲染为带认证的 iframe -->
-  <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
 </body>
 </html>
