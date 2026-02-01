@@ -356,7 +356,7 @@
       <div class="setup-form">
         <div class="form-group">
           <label>服务地址</label>
-          <input type="text" id="server-url" placeholder="http://localhost:3000" value="http://localhost:3000">
+          <input type="text" id="server-url" placeholder="http://localhost:32352" value="http://localhost:32352">
         </div>
         <div class="form-group">
           <label>认证 Token（如已启用）</label>
@@ -410,7 +410,7 @@
 
   <script>
     // 配置
-    let serverUrl = localStorage.getItem('claude-web-url') || 'http://localhost:3000';
+    let serverUrl = localStorage.getItem('claude-web-url') || 'http://localhost:32352';
     let authToken = localStorage.getItem('claude-web-token') || '';
     let isConnected = false;
 
@@ -427,7 +427,7 @@
 
       // 首次访问：自动探测 claude-code-web 是否在运行
       // 依次尝试默认端口和常用端口
-      var probePorts = ['3000', '3001', '8080'];
+      var probePorts = ['32352', '3000', '3001'];
       for (var i = 0; i < probePorts.length; i++) {
         var probeUrl = 'http://localhost:' + probePorts[i];
         var reachable = await checkServer(probeUrl, '');

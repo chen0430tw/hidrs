@@ -281,6 +281,7 @@
             <button class="active" onclick="switchTerminalTab('logs')">日志</button>
             <button onclick="switchTerminalTab('terminal')">终端</button>
             <button onclick="switchTerminalTab('claude')" style="color: #00f0ff;">🧿 Claude</button>
+            <button id="btn-connect-claude" onclick="connectClaude()" style="color: #0a0e17; background: var(--neon-cyan); border-radius: 3px; padding: 2px 10px; font-size: 10px; margin-left: 8px;">🚀 连接</button>
           </div>
         </div>
 
@@ -289,6 +290,8 @@
             <div class="terminal-content" id="system-logs">
               <!-- 日志由 JS 动态渲染 -->
             </div>
+            <!-- ttyd 真实终端 iframe -->
+            <iframe id="ttyd-terminal" src="" style="display: none; flex: 1; width: 100%; border: none; background: #0d1117;"></iframe>
             <!-- Claude Code 终端 iframe -->
             <iframe id="claude-terminal" src="" style="display: none; flex: 1; width: 100%; border: none;"></iframe>
           </div>
@@ -329,12 +332,48 @@
     // 中屏特定逻辑
 
     let currentTerminalTab = 'logs';
+    let ttydUrl = null;       // 探测到的 ttyd 地址
+    let ttydChecked = false;  // 是否已探测
+
+    // 探测 ttyd 是否可用
+    async function detectTtyd() {
+      if (ttydChecked) return ttydUrl;
+      var ports = [7681, 7682, 7680];
+      for (var i = 0; i < ports.length; i++) {
+        var url = 'http://localhost:' + ports[i];
+        try {
+          var resp = await fetch(url, {
+            method: 'HEAD',
+            mode: 'cors',
+            signal: AbortSignal.timeout(3000)
+          });
+          if (resp.ok || resp.type === 'opaque') {
+            ttydUrl = url;
+            break;
+          }
+        } catch (e) { /* 继续 */ }
+      }
+      ttydChecked = true;
+      return ttydUrl;
+    }
+
+    // 连接 Claude 按钮
+    function connectClaude() {
+      var claudeFrame = document.getElementById('claude-terminal');
+      // 强制重新加载 terminal widget
+      claudeFrame.src = '';
+      switchTerminalTab('claude');
+      setTimeout(function() {
+        claudeFrame.src = '/widget/terminal';
+      }, 100);
+    }
 
     function switchTerminalTab(tab) {
       currentTerminalTab = tab;
 
-      // 更新标签状态
+      // 更新标签状态（不含连接按钮）
       document.querySelectorAll('.terminal-tabs button').forEach(btn => {
+        if (btn.id === 'btn-connect-claude') return;
         const btnText = btn.textContent.toLowerCase();
         const isActive = (tab === 'logs' && btnText.includes('日志')) ||
                          (tab === 'terminal' && btnText.includes('终端') && !btnText.includes('claude')) ||
@@ -342,74 +381,117 @@
         btn.classList.toggle('active', isActive);
       });
 
-      const content = document.getElementById('system-logs');
-      const claudeFrame = document.getElementById('claude-terminal');
+      var content = document.getElementById('system-logs');
+      var claudeFrame = document.getElementById('claude-terminal');
+      var ttydFrame = document.getElementById('ttyd-terminal');
 
       if (tab === 'claude') {
         // Claude Code 终端
         content.style.display = 'none';
+        ttydFrame.style.display = 'none';
         claudeFrame.style.display = 'block';
         if (!claudeFrame.src || claudeFrame.src === '' || claudeFrame.src === 'about:blank') {
           claudeFrame.src = '/widget/terminal';
         }
       } else if (tab === 'terminal') {
-        // 模拟终端
-        content.style.display = 'block';
+        // ttyd 真实终端（或回退到模拟终端）
         claudeFrame.style.display = 'none';
-        content.innerHTML = `
-          <div class="terminal-line" style="color: var(--neon-cyan);">
-            FAIRY-DESK Terminal v1.0.0
-          </div>
-          <div class="terminal-line" style="color: var(--text-muted);">
-            输入 'claude' 切换到 Claude Code 终端
-          </div>
-          <div class="terminal-line" style="color: var(--text-muted);">
-            输入 'help' 查看可用命令
-          </div>
-          <div class="terminal-input">
-            <span class="prompt">$</span>
-            <input type="text" id="terminal-input" onkeypress="if(event.key==='Enter')executeCommand(this.value)">
-          </div>
-        `;
-        document.getElementById('terminal-input')?.focus();
+        loadTtydOrFallback(content, ttydFrame);
       } else {
         // 日志
         content.style.display = 'block';
         claudeFrame.style.display = 'none';
+        ttydFrame.style.display = 'none';
         content.innerHTML = '';
         initSystemLogs();
       }
     }
 
+    async function loadTtydOrFallback(content, ttydFrame) {
+      var url = await detectTtyd();
+      if (url) {
+        // ttyd 可用，加载 iframe
+        content.style.display = 'none';
+        ttydFrame.style.display = 'block';
+        if (!ttydFrame.src || ttydFrame.src === '' || ttydFrame.src === 'about:blank') {
+          ttydFrame.src = url;
+        }
+      } else {
+        // ttyd 不可用，显示安装提示 + 模拟终端
+        content.style.display = 'block';
+        ttydFrame.style.display = 'none';
+        showFallbackTerminal(content);
+      }
+    }
+
+    function showFallbackTerminal(content) {
+      content.innerHTML = '';
+
+      var banner = document.createElement('div');
+      banner.className = 'terminal-line';
+      banner.style.color = 'var(--neon-cyan)';
+      banner.textContent = 'FAIRY-DESK Terminal v1.0.0';
+      content.appendChild(banner);
+
+      var ttydHint = document.createElement('div');
+      ttydHint.className = 'terminal-line';
+      ttydHint.style.cssText = 'color: #eab308; margin: 8px 0; padding: 8px; background: rgba(234,179,8,0.1); border-radius: 4px; font-size: 12px;';
+      ttydHint.textContent = '💡 安装 ttyd 可获得真实终端体验（审计更方便）：pip install ttyd 或 brew install ttyd，然后运行 ttyd -p 7681 bash';
+      content.appendChild(ttydHint);
+
+      var helpLine = document.createElement('div');
+      helpLine.className = 'terminal-line';
+      helpLine.style.color = 'var(--text-muted)';
+      helpLine.textContent = "输入 'help' 查看可用命令";
+      content.appendChild(helpLine);
+
+      var inputDiv = document.createElement('div');
+      inputDiv.className = 'terminal-input';
+
+      var prompt = document.createElement('span');
+      prompt.className = 'prompt';
+      prompt.textContent = '$';
+      inputDiv.appendChild(prompt);
+
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.id = 'terminal-input';
+      input.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') executeCommand(this.value);
+      });
+      inputDiv.appendChild(input);
+
+      content.appendChild(inputDiv);
+      input.focus();
+    }
+
     function executeCommand(cmd) {
-      const content = document.getElementById('system-logs');
-      const input = document.getElementById('terminal-input');
+      var content = document.getElementById('system-logs');
+      var input = document.getElementById('terminal-input');
 
       // 添加命令到输出
-      const cmdLine = document.createElement('div');
+      var cmdLine = document.createElement('div');
       cmdLine.className = 'terminal-line';
-      cmdLine.innerHTML = `<span style="color: var(--neon-green);">$ ${escapeHtml(cmd)}</span>`;
+      var cmdSpan = document.createElement('span');
+      cmdSpan.style.color = 'var(--neon-green)';
+      cmdSpan.textContent = '$ ' + cmd;
+      cmdLine.appendChild(cmdSpan);
       content.insertBefore(cmdLine, content.lastElementChild);
 
       // 处理命令
-      let output = '';
-      const cmdLower = cmd.toLowerCase().trim();
+      var output = '';
+      var cmdLower = cmd.toLowerCase().trim();
 
       if (cmdLower === 'help') {
-        output = `可用命令:
-  claude    - 启动 Claude Code
-  clear     - 清屏
-  status    - 系统状态
-  hidrs     - HIDRS 连接状态
-  help      - 显示帮助`;
+        output = '可用命令:\n  claude    - 启动 Claude Code\n  clear     - 清屏\n  status    - 系统状态\n  hidrs     - HIDRS 连接状态\n  help      - 显示帮助';
       } else if (cmdLower === 'clear') {
         switchTerminalTab('terminal');
         return;
       } else if (cmdLower === 'status') {
-        output = `FAIRY-DESK 运行中
-CPU: ${document.querySelector('#metric-cpu .metric-value')?.textContent || '--'}
-内存: ${document.querySelector('#metric-memory .metric-value')?.textContent || '--'}
-HIDRS: ${FairyDesk.hidrsConnected ? '已连接' : '未连接'}`;
+        output = 'FAIRY-DESK 运行中\n' +
+          'CPU: ' + (document.querySelector('#metric-cpu .metric-value')?.textContent || '--') + '\n' +
+          '内存: ' + (document.querySelector('#metric-memory .metric-value')?.textContent || '--') + '\n' +
+          'HIDRS: ' + (FairyDesk.hidrsConnected ? '已连接' : '未连接');
       } else if (cmdLower === 'hidrs') {
         output = FairyDesk.hidrsConnected
           ? 'HIDRS 已连接，全部功能可用'
@@ -417,13 +499,13 @@ HIDRS: ${FairyDesk.hidrsConnected ? '已连接' : '未连接'}`;
       } else if (cmdLower === 'claude') {
         output = '正在切换到 Claude Code 终端...';
         showNotification('切换到 Claude Code 终端', 'info');
-        setTimeout(() => switchTerminalTab('claude'), 500);
+        setTimeout(function() { switchTerminalTab('claude'); }, 500);
       } else if (cmd.trim()) {
-        output = `命令未找到: ${cmd}\n输入 'help' 查看可用命令`;
+        output = '命令未找到: ' + cmd + '\n输入 \'help\' 查看可用命令';
       }
 
       if (output) {
-        const outputLine = document.createElement('div');
+        var outputLine = document.createElement('div');
         outputLine.className = 'terminal-line';
         outputLine.style.whiteSpace = 'pre-wrap';
         outputLine.textContent = output;
