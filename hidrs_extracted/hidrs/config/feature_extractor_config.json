@@ -1,6 +1,0 @@
-{
-    "bert_model": "bert-base-uncased",
-    "use_model": "https://tfhub.dev/google/universal-sentence-encoder/4",
-    "feature_dim": 768,
-    "max_sequence_length": 512
-}

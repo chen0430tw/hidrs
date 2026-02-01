@@ -1,6 +1,0 @@
-{
-    "output_dimension": 256,
-    "information_preserve_ratio": 0.9,
-    "local_information_weight": 0.7,
-    "scale_decay_factor": 2.0
-}

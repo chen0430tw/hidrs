@@ -1,8 +1,0 @@
-{
-    "similarity_metric": "cosine",
-    "similarity_threshold": 0.6,
-    "use_normalized_laplacian": true,
-    "use_sparse_computation": true,
-    "k_eigenvalues": 10,
-    "default_n_clusters": 5
-}
