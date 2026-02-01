@@ -279,6 +279,10 @@
       <span class="icon">🤖</span>
       <span>Reddit</span>
     </button>
+    <button class="platform-tab" data-platform="weibo" onclick="switchPlatform('weibo')">
+      <span class="icon">🔴</span>
+      <span>微博</span>
+    </button>
   </div>
 
   <!-- 内容区域 -->
@@ -356,6 +360,22 @@
         </button>
       </div>
     </div>
+
+    <!-- 微博 Weibo -->
+    <div class="platform-content" id="content-weibo">
+      <div class="quick-actions">
+        <div class="quick-action" onclick="window.open('https://weibo.com/', '_blank')">🏠 首页</div>
+        <div class="quick-action" onclick="window.open('https://s.weibo.com/top/summary', '_blank')">🔥 热搜</div>
+        <div class="quick-action" onclick="window.open('https://weibo.com/mygroups', '_blank')">👥 分组</div>
+        <div class="quick-action" onclick="window.open('https://message.weibo.com/', '_blank')">✉️ 私信</div>
+      </div>
+      <div class="embed-container">
+        <div class="loading-overlay" id="loading-weibo">
+          <div class="loading-spinner"></div>
+        </div>
+        <iframe src="https://m.weibo.cn/p/index?containerid=102803" onload="hideLoading('weibo')" onerror="showWeiboFallback()"></iframe>
+      </div>
+    </div>
   </div>
 
   <!-- 轮播控制 -->
@@ -365,6 +385,7 @@
     <div class="carousel-dot" data-index="2" onclick="goToSlide(2)"></div>
     <div class="carousel-dot" data-index="3" onclick="goToSlide(3)"></div>
     <div class="carousel-dot" data-index="4" onclick="goToSlide(4)"></div>
+    <div class="carousel-dot" data-index="5" onclick="goToSlide(5)"></div>
     <button class="carousel-toggle" id="carousel-toggle" onclick="toggleCarousel()">
       ▶ 自动轮播
     </button>
@@ -374,7 +395,7 @@
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
 
   <script>
-    const platforms = ['x', 'threads', 'bluesky', 'mastodon', 'reddit'];
+    const platforms = ['x', 'threads', 'bluesky', 'mastodon', 'reddit', 'weibo'];
     let currentIndex = 0;
     let carouselInterval = null;
     let isCarouselPlaying = false;
@@ -472,6 +493,23 @@
     function showFallback(platform) {
       hideLoading(platform);
       // 可以在这里添加更多 fallback 逻辑
+    }
+
+    function showWeiboFallback() {
+      hideLoading('weibo');
+      const container = document.querySelector('#content-weibo .embed-container');
+      if (container) {
+        container.innerHTML = `
+          <div class="fallback-ui">
+            <div class="platform-icon">🔴</div>
+            <h3>微博 Weibo</h3>
+            <p>微博嵌入加载失败。点击下方按钮在新窗口中打开。</p>
+            <button class="open-btn" onclick="window.open('https://weibo.com/', '_blank')">
+              🚀 打开微博
+            </button>
+          </div>
+        `;
+      }
     }
 
     // 轮播控制
