@@ -276,7 +276,7 @@
       <!-- 终端 + Agent -->
       <div class="terminal-section">
         <div class="terminal-header">
-          <div class="title">系统日志</div>
+          <div class="title">系统控制台</div>
           <div class="terminal-tabs">
             <button class="active" onclick="switchTerminalTab('logs')">日志</button>
             <button onclick="switchTerminalTab('terminal')">终端</button>
@@ -337,7 +337,7 @@
     let claudeConnected = false;  // Claude 是否已直连
     let claudeWebUrl = null;      // 探测到的 claude-code-web 地址
 
-    // 探测 ttyd 是否可用
+    // 探测 ttyd 是否可用（no-cors 因为 ttyd 不返回 CORS 头）
     async function detectTtyd() {
       if (ttydChecked) return ttydUrl;
       var ports = [7681, 7682, 7680];
@@ -346,14 +346,14 @@
         try {
           var resp = await fetch(url, {
             method: 'HEAD',
-            mode: 'cors',
-            signal: AbortSignal.timeout(3000)
+            mode: 'no-cors',
+            signal: AbortSignal.timeout(2000)
           });
-          if (resp.ok || resp.type === 'opaque') {
-            ttydUrl = url;
-            break;
-          }
-        } catch (e) { /* 继续 */ }
+          // no-cors 成功返回 opaque response（status=0, type='opaque'）
+          // 失败则抛异常进 catch
+          ttydUrl = url;
+          break;
+        } catch (e) { /* 端口不通，继续 */ }
       }
       ttydChecked = true;
       return ttydUrl;
@@ -470,7 +470,31 @@
       } else if (tab === 'terminal') {
         // ttyd 真实终端（或回退到模拟终端）
         claudeFrame.style.display = 'none';
-        loadTtydOrFallback(content, ttydFrame);
+
+        if (ttydChecked && ttydUrl) {
+          // 已探测到 ttyd，直接显示
+          content.style.display = 'none';
+          ttydFrame.style.display = 'block';
+          if (!ttydFrame.src || ttydFrame.src === '' || ttydFrame.src === 'about:blank') {
+            ttydFrame.src = ttydUrl;
+          }
+        } else if (ttydChecked && !ttydUrl) {
+          // 已探测过，没有 ttyd，直接显示回退终端
+          content.style.display = 'block';
+          ttydFrame.style.display = 'none';
+          showFallbackTerminal(content);
+        } else {
+          // 首次：先显示 content 区域（清空旧内容），异步探测
+          content.style.display = 'block';
+          ttydFrame.style.display = 'none';
+          content.innerHTML = '';
+          var loadingMsg = document.createElement('div');
+          loadingMsg.className = 'terminal-line';
+          loadingMsg.style.color = 'var(--text-muted)';
+          loadingMsg.textContent = '正在检测终端服务...';
+          content.appendChild(loadingMsg);
+          loadTtydOrFallback(content, ttydFrame);
+        }
       } else {
         // 日志
         content.style.display = 'block';
