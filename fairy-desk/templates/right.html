@@ -83,37 +83,6 @@
       background: var(--bg-primary);
     }
 
-    .social-fallback {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-      text-align: center;
-      padding: 20px;
-      color: var(--text-secondary);
-    }
-
-    .social-fallback .icon {
-      font-size: 48px;
-      margin-bottom: 16px;
-    }
-
-    .social-fallback .message {
-      margin-bottom: 16px;
-      font-size: 13px;
-    }
-
-    .social-fallback button {
-      background: var(--neon-cyan);
-      color: var(--bg-primary);
-      border: none;
-      padding: 10px 20px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 13px;
-    }
-
     /* 新闻栏 */
     .news-feed {
       height: 100%;
@@ -253,21 +222,12 @@
             </div>
             <div class="col-actions">
               <button onclick="refreshSocial()" title="刷新">🔄</button>
-              <button onclick="openSocialExternal()" title="新窗口">🔗</button>
+              <button onclick="window.open('/widget/social', '_blank')" title="弹出窗口">⛶</button>
             </div>
           </div>
           <div class="column-body" id="social-container">
-            <!-- 尝试嵌入 X，如果失败显示替代方案 -->
-            <div class="social-fallback" id="social-fallback">
-              <div class="icon">🐦</div>
-              <div class="message">
-                X/Twitter 无法在 iframe 中嵌入<br>
-                点击下方按钮在新窗口打开
-              </div>
-              <button onclick="window.open('https://x.com/home', '_blank')">
-                打开 X/Twitter
-              </button>
-            </div>
+            <!-- 使用内置社交媒体小组件（支持 X/Threads/Bluesky/Mastodon/Reddit 轮播） -->
+            <iframe src="/widget/social" class="social-frame" id="social-frame"></iframe>
           </div>
         </div>
 
@@ -401,39 +361,13 @@
       }
     }
 
-    // 社交媒体
+    // 社交媒体 - 刷新内置小组件
     function refreshSocial() {
-      const container = document.getElementById('social-container');
-      const url = FairyDesk.config?.right_screen?.social?.url || 'https://x.com/home';
-
-      // 尝试 iframe（大多数社交网站会阻止）
-      const iframe = document.createElement('iframe');
-      iframe.className = 'social-frame';
-      iframe.src = url;
-      iframe.onerror = () => showSocialFallback();
-      iframe.onload = function() {
-        // 检测是否被阻止（通过尝试访问 contentDocument）
-        try {
-          const doc = iframe.contentDocument || iframe.contentWindow.document;
-          // 如果能访问说明没被阻止
-          document.getElementById('social-fallback').style.display = 'none';
-        } catch (e) {
-          // 被阻止，显示替代方案
-          showSocialFallback();
-        }
-      };
-
-      // 先显示 fallback，iframe 加载成功后隐藏
-      showSocialFallback();
-    }
-
-    function showSocialFallback() {
-      document.getElementById('social-fallback').style.display = 'flex';
-    }
-
-    function openSocialExternal() {
-      const url = FairyDesk.config?.right_screen?.social?.url || 'https://x.com/home';
-      window.open(url, '_blank');
+      const frame = document.getElementById('social-frame');
+      if (frame) {
+        frame.src = frame.src;
+        showNotification('社交媒体已刷新', 'info');
+      }
     }
 
     // 清空告警

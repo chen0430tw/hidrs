@@ -163,6 +163,12 @@ def widget_marine():
     return render_template('widgets/marine.html')
 
 
+@app.route('/widget/social')
+def widget_social():
+    """内置社交媒体小组件（X/Threads/Bluesky/Mastodon/Reddit 轮播）"""
+    return render_template('widgets/social.html')
+
+
 # ============================================================
 # 系统监控 API
 # ============================================================
