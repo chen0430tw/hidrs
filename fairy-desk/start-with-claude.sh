@@ -13,7 +13,7 @@ NC='\033[0m' # No Color
 
 echo -e "${CYAN}"
 echo "  ╔═══════════════════════════════════════════╗"
-echo "  ║      🧚 FAIRY-DESK + Claude Code         ║"
+echo "  ║      🧿 FAIRY-DESK + Claude Code         ║"
 echo "  ║         启动脚本 v1.0.0                  ║"
 echo "  ╚═══════════════════════════════════════════╝"
 echo -e "${NC}"

@@ -279,7 +279,7 @@
           <div class="terminal-tabs">
             <button class="active" onclick="switchTerminalTab('logs')">日志</button>
             <button onclick="switchTerminalTab('terminal')">终端</button>
-            <button onclick="switchTerminalTab('claude')" style="color: #00f0ff;">🧚 Claude</button>
+            <button onclick="switchTerminalTab('claude')" style="color: #00f0ff;">🧿 Claude</button>
           </div>
         </div>
 
@@ -295,7 +295,7 @@
           <!-- AI Agent 侧边栏 -->
           <div class="agent-sidebar">
             <div class="agent-header">
-              <span class="agent-avatar">🧚</span>
+              <span class="agent-avatar">🧿</span>
               <span class="agent-name">AI AGENT</span>
               <span class="agent-status">● ACTIVE</span>
             </div>
@@ -473,7 +473,7 @@ HIDRS: ${FairyDesk.hidrsConnected ? '已连接' : '未连接'}`;
           response = '收到！我会尽力帮助你。如果需要执行命令，请切换到终端标签页。';
         }
 
-        agentMsg.innerHTML = `<strong>🧚 FAIRY</strong><br>${response}`;
+        agentMsg.innerHTML = `<strong>🧿 FAIRY</strong><br>${response}`;
         container.appendChild(agentMsg);
         container.scrollTop = container.scrollHeight;
       }, 500);

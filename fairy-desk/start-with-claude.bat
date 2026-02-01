@@ -4,7 +4,7 @@ title FAIRY-DESK + Claude Code
 
 echo.
 echo   ╔═══════════════════════════════════════════╗
-echo   ║      🧚 FAIRY-DESK + Claude Code          ║
+echo   ║      🧿 FAIRY-DESK + Claude Code          ║
 echo   ║         启动脚本 v1.0.0                   ║
 echo   ╚═══════════════════════════════════════════╝
 echo.
