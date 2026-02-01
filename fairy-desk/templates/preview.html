@@ -6,242 +6,215 @@
   <title>FAIRY-DESK - 三联屏预览</title>
   <link rel="stylesheet" href="/static/css/theme.css">
   <style>
-    body {
+    * {
       margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
       min-height: 100vh;
-      background: linear-gradient(135deg, #0a0e17 0%, #1a1f2e 50%, #0a0e17 100%);
+      background: #0a0a0f;
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
-      overflow: hidden;
+      overflow-x: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    /* 顶部标题区 */
+    .header {
+      padding: 30px 40px 20px;
+      text-align: center;
+      width: 100%;
     }
 
     .preview-title {
-      color: var(--neon-cyan);
-      font-size: 24px;
-      font-weight: bold;
+      color: #00f0ff;
+      font-size: 20px;
+      font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 4px;
-      margin-bottom: 20px;
-      text-shadow: 0 0 20px var(--neon-cyan);
+      letter-spacing: 6px;
+      text-shadow: 0 0 30px rgba(0, 240, 255, 0.5);
     }
 
     .preview-subtitle {
-      color: var(--text-secondary);
-      font-size: 12px;
-      letter-spacing: 2px;
-      margin-bottom: 40px;
+      color: #6b7280;
+      font-size: 11px;
+      letter-spacing: 3px;
+      margin-top: 8px;
     }
 
-    /* 桌面场景容器 */
-    .desk-scene {
-      perspective: 1200px;
-      perspective-origin: 50% 30%;
-    }
-
-    /* 三联屏容器 */
-    .monitors-container {
+    /* 三联屏预览区 - 平铺布局 */
+    .preview-container {
+      flex: 1;
       display: flex;
-      align-items: flex-end;
+      align-items: center;
       justify-content: center;
-      transform-style: preserve-3d;
-      transform: rotateX(5deg);
+      padding: 20px;
+      gap: 12px;
+      width: 100%;
+      max-width: 1600px;
     }
 
-    /* 单个显示器 */
-    .monitor {
-      position: relative;
-      margin: 0 -5px;
-      transform-style: preserve-3d;
+    /* 单个显示器预览 */
+    .monitor-preview {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
     }
 
-    /* 显示器外框 */
+    /* 显示器外框 - 仿真显示器边框 */
     .monitor-frame {
       background: linear-gradient(180deg, #2a2a2a 0%, #1a1a1a 100%);
-      border-radius: 8px;
-      padding: 8px 8px 25px 8px;
+      border-radius: 6px;
+      padding: 6px 6px 20px 6px;
       box-shadow:
-        0 10px 30px rgba(0, 0, 0, 0.5),
-        0 0 0 1px rgba(255, 255, 255, 0.1),
+        0 8px 32px rgba(0, 0, 0, 0.5),
+        0 0 0 1px rgba(255, 255, 255, 0.08),
         inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      position: relative;
     }
 
-    /* 屏幕 */
+    /* 屏幕容器 */
     .monitor-screen {
       background: #000;
-      border-radius: 4px;
+      border-radius: 3px;
       overflow: hidden;
       position: relative;
-      box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.8);
     }
 
+    /* 左右屏尺寸 - 16:9 比例 */
+    .monitor-preview.side .monitor-screen {
+      width: 384px;   /* 16:9 @ 384x216 */
+      height: 216px;
+    }
+
+    /* 中屏稍大 */
+    .monitor-preview.center .monitor-screen {
+      width: 480px;   /* 16:9 @ 480x270 */
+      height: 270px;
+    }
+
+    .monitor-preview.center .monitor-frame {
+      box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.6),
+        0 0 40px rgba(0, 240, 255, 0.08),
+        0 0 0 1px rgba(255, 255, 255, 0.1);
+    }
+
+    /* iframe 缩放显示实际内容 */
     .monitor-screen iframe {
-      width: 100%;
-      height: 100%;
+      width: 1920px;
+      height: 1080px;
       border: none;
       transform-origin: top left;
     }
 
-    /* 显示器底座指示灯 */
-    .monitor-led {
-      position: absolute;
-      bottom: 10px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 6px;
-      height: 6px;
-      background: var(--neon-cyan);
-      border-radius: 50%;
-      box-shadow: 0 0 8px var(--neon-cyan);
-      animation: led-pulse 2s infinite;
+    .monitor-preview.side .monitor-screen iframe {
+      transform: scale(0.2);  /* 384/1920 = 0.2 */
     }
 
-    @keyframes led-pulse {
+    .monitor-preview.center .monitor-screen iframe {
+      transform: scale(0.25); /* 480/1920 = 0.25 */
+    }
+
+    /* LED 指示灯 */
+    .monitor-led {
+      position: absolute;
+      bottom: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 5px;
+      height: 5px;
+      background: #00f0ff;
+      border-radius: 50%;
+      box-shadow: 0 0 6px #00f0ff;
+      animation: led-blink 2s ease-in-out infinite;
+    }
+
+    @keyframes led-blink {
       0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
+      50% { opacity: 0.4; }
     }
 
     /* 显示器支架 */
     .monitor-stand {
-      width: 40px;
-      height: 30px;
-      background: linear-gradient(180deg, #2a2a2a 0%, #1a1a1a 100%);
-      margin: 0 auto;
-      clip-path: polygon(20% 0%, 80% 0%, 100% 100%, 0% 100%);
+      width: 30px;
+      height: 20px;
+      background: linear-gradient(180deg, #252525 0%, #1a1a1a 100%);
+      clip-path: polygon(15% 0%, 85% 0%, 100% 100%, 0% 100%);
     }
 
     .monitor-base {
-      width: 80px;
-      height: 8px;
+      width: 60px;
+      height: 6px;
       background: linear-gradient(180deg, #2a2a2a 0%, #1a1a1a 100%);
-      margin: 0 auto;
-      border-radius: 4px;
+      border-radius: 3px;
       box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-    }
-
-    /* 左屏 - 略微向右倾斜 */
-    .monitor.left {
-      transform: rotateY(25deg) translateZ(-20px);
-    }
-
-    .monitor.left .monitor-screen {
-      width: 280px;
-      height: 180px;
-    }
-
-    /* 中屏 - 正面 */
-    .monitor.center {
-      transform: translateZ(20px);
-      z-index: 10;
-    }
-
-    .monitor.center .monitor-screen {
-      width: 340px;
-      height: 200px;
-    }
-
-    .monitor.center .monitor-frame {
-      box-shadow:
-        0 15px 40px rgba(0, 0, 0, 0.6),
-        0 0 30px rgba(0, 240, 255, 0.1),
-        0 0 0 1px rgba(255, 255, 255, 0.1);
-    }
-
-    /* 右屏 - 略微向左倾斜 */
-    .monitor.right {
-      transform: rotateY(-25deg) translateZ(-20px);
-    }
-
-    .monitor.right .monitor-screen {
-      width: 280px;
-      height: 180px;
     }
 
     /* 显示器标签 */
     .monitor-label {
-      position: absolute;
-      bottom: -35px;
-      left: 50%;
-      transform: translateX(-50%);
-      color: var(--text-muted);
-      font-size: 10px;
+      margin-top: 12px;
+      color: #6b7280;
+      font-size: 11px;
       text-transform: uppercase;
-      letter-spacing: 1px;
-      white-space: nowrap;
+      letter-spacing: 2px;
     }
 
-    /* 桌面 */
-    .desk-surface {
-      width: 1000px;
-      height: 150px;
-      background: linear-gradient(180deg,
-        rgba(30, 30, 40, 0.8) 0%,
-        rgba(20, 20, 30, 0.6) 100%
-      );
-      margin-top: -20px;
-      border-radius: 8px;
-      transform: rotateX(60deg) translateZ(-100px);
-      box-shadow:
-        0 -5px 20px rgba(0, 240, 255, 0.1),
-        inset 0 0 50px rgba(0, 0, 0, 0.3);
-    }
-
-    /* 控制栏 */
-    .controls {
-      margin-top: 40px;
+    /* 悬停全屏按钮 */
+    .fullscreen-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.6);
       display: flex;
-      gap: 16px;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+      cursor: pointer;
     }
 
-    .controls button {
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-color);
-      color: var(--text-secondary);
+    .monitor-screen:hover .fullscreen-overlay {
+      opacity: 1;
+    }
+
+    .fullscreen-btn {
+      background: rgba(0, 240, 255, 0.2);
+      border: 1px solid #00f0ff;
+      color: #00f0ff;
       padding: 10px 20px;
       border-radius: 4px;
+      font-size: 12px;
       cursor: pointer;
-      font-size: 13px;
-      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
     }
 
-    .controls button:hover {
-      border-color: var(--neon-cyan);
-      color: var(--neon-cyan);
-      box-shadow: 0 0 10px rgba(0, 240, 255, 0.2);
+    .fullscreen-btn:hover {
+      background: #00f0ff;
+      color: #0a0a0f;
     }
 
-    .controls button.primary {
-      background: var(--neon-cyan);
-      color: var(--bg-primary);
-      border-color: var(--neon-cyan);
-    }
-
-    .controls button.primary:hover {
-      background: transparent;
-      color: var(--neon-cyan);
-    }
-
-    /* 提示文字 */
-    .hint {
-      margin-top: 20px;
-      color: var(--text-muted);
-      font-size: 11px;
-    }
-
-    /* 加载遮罩 */
+    /* 加载状态 */
     .monitor-loading {
       position: absolute;
       top: 0;
       left: 0;
       width: 100%;
       height: 100%;
-      background: var(--bg-primary);
+      background: #0a0e17;
       display: flex;
       align-items: center;
       justify-content: center;
-      color: var(--text-muted);
-      font-size: 12px;
+      flex-direction: column;
+      gap: 10px;
       z-index: 10;
     }
 
@@ -249,120 +222,184 @@
       display: none;
     }
 
-    /* 全屏按钮 */
-    .fullscreen-btn {
-      position: absolute;
-      top: 5px;
-      right: 5px;
-      background: rgba(0, 0, 0, 0.5);
-      border: none;
-      color: var(--text-secondary);
-      padding: 4px 8px;
-      border-radius: 4px;
+    .loading-spinner {
+      width: 24px;
+      height: 24px;
+      border: 2px solid rgba(0, 240, 255, 0.2);
+      border-top-color: #00f0ff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .loading-text {
+      color: #6b7280;
+      font-size: 11px;
+    }
+
+    /* 底部控制栏 */
+    .controls {
+      padding: 20px 40px 30px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .controls button {
+      background: #1f2937;
+      border: 1px solid #374151;
+      color: #9ca3af;
+      padding: 10px 20px;
+      border-radius: 6px;
       cursor: pointer;
-      font-size: 10px;
-      opacity: 0;
-      transition: opacity 0.2s;
-      z-index: 20;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
     }
 
-    .monitor-screen:hover .fullscreen-btn {
-      opacity: 1;
+    .controls button:hover {
+      border-color: #00f0ff;
+      color: #00f0ff;
     }
 
-    .fullscreen-btn:hover {
-      color: var(--neon-cyan);
+    .controls button.primary {
+      background: #00f0ff;
+      border-color: #00f0ff;
+      color: #0a0a0f;
+      font-weight: 500;
     }
 
-    /* 环境光效果 */
-    .ambient-glow {
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      width: 800px;
-      height: 400px;
-      transform: translate(-50%, -50%);
-      background: radial-gradient(ellipse, rgba(0, 240, 255, 0.05) 0%, transparent 70%);
-      pointer-events: none;
-      z-index: -1;
+    .controls button.primary:hover {
+      background: #00d4e0;
+    }
+
+    .hint {
+      color: #4b5563;
+      font-size: 11px;
+      margin-left: 20px;
+    }
+
+    /* 响应式调整 */
+    @media (max-width: 1400px) {
+      .monitor-preview.side .monitor-screen {
+        width: 320px;
+        height: 180px;
+      }
+      .monitor-preview.side .monitor-screen iframe {
+        transform: scale(0.1667);
+      }
+      .monitor-preview.center .monitor-screen {
+        width: 400px;
+        height: 225px;
+      }
+      .monitor-preview.center .monitor-screen iframe {
+        transform: scale(0.2083);
+      }
+    }
+
+    @media (max-width: 1100px) {
+      .preview-container {
+        flex-direction: column;
+        gap: 20px;
+      }
+      .monitor-preview.side .monitor-screen,
+      .monitor-preview.center .monitor-screen {
+        width: 480px;
+        height: 270px;
+      }
+      .monitor-preview.side .monitor-screen iframe,
+      .monitor-preview.center .monitor-screen iframe {
+        transform: scale(0.25);
+      }
     }
   </style>
 </head>
 <body>
-  <div class="ambient-glow"></div>
+  <div class="header">
+    <h1 class="preview-title">🧚 FAIRY-DESK</h1>
+    <p class="preview-subtitle">三联屏预览模式 · Triple Monitor Preview</p>
+  </div>
 
-  <h1 class="preview-title">🧚 FAIRY-DESK</h1>
-  <p class="preview-subtitle">三联屏预览模式 · Triple Monitor Preview</p>
-
-  <div class="desk-scene">
-    <div class="monitors-container">
-      <!-- 左屏 -->
-      <div class="monitor left">
-        <div class="monitor-frame">
-          <div class="monitor-screen">
-            <div class="monitor-loading" id="loading-left">
-              <span>📹 加载中...</span>
-            </div>
-            <button class="fullscreen-btn" onclick="openFullscreen('/left')">⛶ 全屏</button>
-            <iframe src="/left" onload="hideLoading('left')"></iframe>
+  <div class="preview-container">
+    <!-- 左屏 -->
+    <div class="monitor-preview side">
+      <div class="monitor-frame">
+        <div class="monitor-screen">
+          <div class="monitor-loading" id="loading-left">
+            <div class="loading-spinner"></div>
+            <span class="loading-text">态势监控加载中...</span>
           </div>
-          <div class="monitor-led"></div>
-        </div>
-        <div class="monitor-stand"></div>
-        <div class="monitor-base"></div>
-        <div class="monitor-label">左屏 · 态势监控</div>
-      </div>
-
-      <!-- 中屏 -->
-      <div class="monitor center">
-        <div class="monitor-frame">
-          <div class="monitor-screen">
-            <div class="monitor-loading" id="loading-center">
-              <span>🖥️ 加载中...</span>
-            </div>
-            <button class="fullscreen-btn" onclick="openFullscreen('/center')">⛶ 全屏</button>
-            <iframe src="/center" onload="hideLoading('center')"></iframe>
+          <iframe src="/left" onload="hideLoading('left')"></iframe>
+          <div class="fullscreen-overlay" onclick="openFullscreen('/left')">
+            <button class="fullscreen-btn">⛶ 打开全屏</button>
           </div>
-          <div class="monitor-led"></div>
         </div>
-        <div class="monitor-stand"></div>
-        <div class="monitor-base"></div>
-        <div class="monitor-label">中屏 · 控制台</div>
+        <div class="monitor-led"></div>
       </div>
-
-      <!-- 右屏 -->
-      <div class="monitor right">
-        <div class="monitor-frame">
-          <div class="monitor-screen">
-            <div class="monitor-loading" id="loading-right">
-              <span>📊 加载中...</span>
-            </div>
-            <button class="fullscreen-btn" onclick="openFullscreen('/right')">⛶ 全屏</button>
-            <iframe src="/right" onload="hideLoading('right')"></iframe>
-          </div>
-          <div class="monitor-led"></div>
-        </div>
-        <div class="monitor-stand"></div>
-        <div class="monitor-base"></div>
-        <div class="monitor-label">右屏 · 情报视窗</div>
-      </div>
+      <div class="monitor-stand"></div>
+      <div class="monitor-base"></div>
+      <div class="monitor-label">左屏 · 态势监控</div>
     </div>
 
-    <div class="desk-surface"></div>
+    <!-- 中屏 -->
+    <div class="monitor-preview center">
+      <div class="monitor-frame">
+        <div class="monitor-screen">
+          <div class="monitor-loading" id="loading-center">
+            <div class="loading-spinner"></div>
+            <span class="loading-text">控制台加载中...</span>
+          </div>
+          <iframe src="/center" onload="hideLoading('center')"></iframe>
+          <div class="fullscreen-overlay" onclick="openFullscreen('/center')">
+            <button class="fullscreen-btn">⛶ 打开全屏</button>
+          </div>
+        </div>
+        <div class="monitor-led"></div>
+      </div>
+      <div class="monitor-stand"></div>
+      <div class="monitor-base"></div>
+      <div class="monitor-label">中屏 · 控制台</div>
+    </div>
+
+    <!-- 右屏 -->
+    <div class="monitor-preview side">
+      <div class="monitor-frame">
+        <div class="monitor-screen">
+          <div class="monitor-loading" id="loading-right">
+            <div class="loading-spinner"></div>
+            <span class="loading-text">情报视窗加载中...</span>
+          </div>
+          <iframe src="/right" onload="hideLoading('right')"></iframe>
+          <div class="fullscreen-overlay" onclick="openFullscreen('/right')">
+            <button class="fullscreen-btn">⛶ 打开全屏</button>
+          </div>
+        </div>
+        <div class="monitor-led"></div>
+      </div>
+      <div class="monitor-stand"></div>
+      <div class="monitor-base"></div>
+      <div class="monitor-label">右屏 · 情报视窗</div>
+    </div>
   </div>
 
   <div class="controls">
-    <button onclick="refreshAll()">🔄 刷新全部</button>
+    <button onclick="refreshAll()">🔄 刷新</button>
     <button onclick="location.href='/settings'">⚙️ 设置</button>
-    <button class="primary" onclick="openAllWindows()">🖥️ 打开三个窗口</button>
+    <button class="primary" onclick="openAllWindows()">🖥️ 开启三窗口模式</button>
+    <span class="hint">将三个窗口分别拖到三台显示器即可使用</span>
   </div>
-
-  <p class="hint">点击显示器上的「全屏」按钮可单独打开该屏幕 · 拖动窗口到不同显示器即可使用</p>
 
   <script>
     function hideLoading(screen) {
       const el = document.getElementById('loading-' + screen);
-      if (el) el.classList.add('hidden');
+      if (el) {
+        setTimeout(() => el.classList.add('hidden'), 300);
+      }
     }
 
     function openFullscreen(path) {
@@ -370,17 +407,22 @@
     }
 
     function openAllWindows() {
-      window.open('/left', 'fairy-left', 'width=800,height=600,left=0,top=0');
-      window.open('/center', 'fairy-center', 'width=800,height=600,left=810,top=0');
-      window.open('/right', 'fairy-right', 'width=800,height=600,left=1620,top=0');
+      // 计算窗口位置，尝试分布到多屏
+      const w = 960, h = 600;
+      window.open('/left', 'fairy-left', `width=${w},height=${h},left=0,top=50`);
+      setTimeout(() => {
+        window.open('/center', 'fairy-center', `width=${w},height=${h},left=${w + 10},top=50`);
+      }, 100);
+      setTimeout(() => {
+        window.open('/right', 'fairy-right', `width=${w},height=${h},left=${(w + 10) * 2},top=50`);
+      }, 200);
     }
 
     function refreshAll() {
-      document.querySelectorAll('.monitor-screen iframe').forEach(iframe => {
+      document.querySelectorAll('.monitor-screen iframe').forEach((iframe, i) => {
+        const loading = document.getElementById('loading-' + ['left', 'center', 'right'][i]);
+        if (loading) loading.classList.remove('hidden');
         iframe.src = iframe.src;
-      });
-      document.querySelectorAll('.monitor-loading').forEach(el => {
-        el.classList.remove('hidden');
       });
     }
   </script>
