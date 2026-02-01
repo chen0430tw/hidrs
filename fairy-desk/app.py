@@ -148,6 +148,34 @@ def preview_page():
 
 
 # ============================================================
+# 内置小组件路由（解决 X-Frame-Options 问题）
+# ============================================================
+
+@app.route('/widget/map')
+def widget_map():
+    """内置地图小组件（Leaflet + OpenStreetMap 图层）"""
+    return render_template('widgets/map.html')
+
+
+@app.route('/widget/marine')
+def widget_marine():
+    """内置船舶追踪小组件"""
+    return render_template('widgets/marine.html')
+
+
+@app.route('/widget/social')
+def widget_social():
+    """内置社交媒体小组件（X/Threads/Bluesky/Mastodon/Reddit 轮播）"""
+    return render_template('widgets/social.html')
+
+
+@app.route('/widget/terminal')
+def widget_terminal():
+    """内置终端小组件（连接 claude-code-web）"""
+    return render_template('widgets/terminal.html')
+
+
+# ============================================================
 # 系统监控 API
 # ============================================================
 

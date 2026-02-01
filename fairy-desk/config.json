@@ -25,7 +25,7 @@
         "id": "map",
         "name": "地图",
         "icon": "🗺️",
-        "url": "https://www.openstreetmap.org/",
+        "url": "/widget/map",
         "category": "monitor",
         "loadStrategy": "background",
         "builtIn": true
@@ -43,7 +43,7 @@
         "id": "marine",
         "name": "船舶",
         "icon": "🚢",
-        "url": "https://www.vesselfinder.com/",
+        "url": "/widget/marine",
         "category": "monitor",
         "loadStrategy": "smart",
         "builtIn": true
