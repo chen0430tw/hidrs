@@ -148,6 +148,22 @@ def preview_page():
 
 
 # ============================================================
+# 内置小组件路由（解决 X-Frame-Options 问题）
+# ============================================================
+
+@app.route('/widget/map')
+def widget_map():
+    """内置地图小组件（Leaflet + OpenStreetMap 图层）"""
+    return render_template('widgets/map.html')
+
+
+@app.route('/widget/marine')
+def widget_marine():
+    """内置船舶追踪小组件"""
+    return render_template('widgets/marine.html')
+
+
+# ============================================================
 # 系统监控 API
 # ============================================================
 

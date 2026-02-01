@@ -299,7 +299,15 @@
             <div class="agent-body" id="agent-messages">
               <div class="agent-message system">
                 <strong>FAIRY ASSISTANT</strong><br>
-                系统已就绪。输入 <code>claude</code> 启动 Claude Code，或输入问题获取帮助。
+                系统已就绪。Claude Code 使用方式：
+              </div>
+              <div class="agent-message" style="background: var(--bg-panel); font-size: 12px;">
+                <strong style="color: var(--neon-cyan);">🖥️ 终端模式</strong><br>
+                在系统终端运行：<code style="background: #1e293b; padding: 2px 6px; border-radius: 3px;">claude</code><br><br>
+                <strong style="color: var(--neon-cyan);">🌐 Web 模式</strong><br>
+                访问 <a href="https://claude.ai/code" target="_blank" style="color: var(--neon-cyan);">claude.ai/code</a> 或使用 <code style="background: #1e293b; padding: 2px 6px; border-radius: 3px;">claude &</code> 前缀发送任务<br><br>
+                <strong style="color: var(--neon-cyan);">🔗 Chrome 集成</strong><br>
+                安装 Claude in Chrome 扩展后运行：<code style="background: #1e293b; padding: 2px 6px; border-radius: 3px;">claude --chrome</code>
               </div>
             </div>
             <div class="agent-input">
@@ -383,8 +391,13 @@ HIDRS: ${FairyDesk.hidrsConnected ? '已连接' : '未连接'}`;
           ? 'HIDRS 已连接，全部功能可用'
           : 'HIDRS 未连接，部分功能受限\n运行 HIDRS 后可获得网络拓扑监控、全息搜索等功能';
       } else if (cmdLower === 'claude') {
-        output = '正在启动 Claude Code...\n提示: 在实际终端中运行 "claude" 命令';
-        showNotification('请在系统终端中运行 claude 命令', 'info');
+        output = `Claude Code 使用方式:
+  1. 终端: 在系统终端运行 "claude"
+  2. Web:  访问 claude.ai/code
+  3. 后台: 使用 "& 任务" 发送到云端
+  4. Chrome: 运行 "claude --chrome" 连接浏览器
+  5. 传送: 运行 "/teleport" 拉取 Web 会话`;
+        showNotification('Claude Code 指南已显示', 'info');
       } else if (cmd.trim()) {
         output = `命令未找到: ${cmd}\n输入 'help' 查看可用命令`;
       }
@@ -425,7 +438,12 @@ HIDRS: ${FairyDesk.hidrsConnected ? '已连接' : '未连接'}`;
         const msgLower = message.toLowerCase();
 
         if (msgLower.includes('claude') || msgLower.includes('code')) {
-          response = '要启动 Claude Code，请在系统终端中运行:\n\n<code>claude</code>\n\n或者切换到终端标签页输入命令。';
+          response = `Claude Code 使用指南：<br><br>
+            <b>1. 终端模式</b> - 在系统终端运行 <code>claude</code><br>
+            <b>2. Web 模式</b> - 访问 <a href="https://claude.ai/code" target="_blank">claude.ai/code</a><br>
+            <b>3. 后台任务</b> - 输入 <code>& 你的任务</code> 发送到 Web 执行<br>
+            <b>4. Chrome 集成</b> - 运行 <code>claude --chrome</code> 连接浏览器<br>
+            <b>5. 会话传送</b> - 运行 <code>/teleport</code> 拉取 Web 会话到本地`;
         } else if (msgLower.includes('hidrs') || msgLower.includes('连接')) {
           response = FairyDesk.hidrsConnected
             ? '✅ HIDRS 已连接，所有功能正常运行。'
