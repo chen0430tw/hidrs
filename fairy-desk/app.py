@@ -79,7 +79,7 @@ def save_config():
 def get_default_config():
     """返回默认配置"""
     return {
-        "server": {"host": "0.0.0.0", "port": 8080, "debug": True},
+        "server": {"host": "0.0.0.0", "port": 38080, "debug": True},
         "hidrs": {"endpoint": "http://localhost:5000", "auto_detect": True, "check_interval": 30},
         "left_screen": {"default_tab": "cctv", "tabs": []},
         "center_screen": {"terminal_command": "claude", "refresh_interval": 5},
@@ -535,7 +535,7 @@ if __name__ == '__main__':
     # 启动 Flask
     app.run(
         host=config.get('server', {}).get('host', '0.0.0.0'),
-        port=config.get('server', {}).get('port', 8080),
+        port=config.get('server', {}).get('port', 38080),
         debug=config.get('server', {}).get('debug', True),
         threaded=True
     )

@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <link rel="icon" href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'&gt;&lt;text y='.9em' font-size='90'&gt;🧿&lt;/text&gt;&lt;/svg&gt;">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FAIRY-DESK - Claude Code Terminal</title>
   <style>
@@ -355,7 +356,7 @@
       <div class="setup-form">
         <div class="form-group">
           <label>服务地址</label>
-          <input type="text" id="server-url" placeholder="http://localhost:3000" value="http://localhost:3000">
+          <input type="text" id="server-url" placeholder="http://localhost:32352" value="http://localhost:32352">
         </div>
         <div class="form-group">
           <label>认证 Token（如已启用）</label>
@@ -409,19 +410,37 @@
 
   <script>
     // 配置
-    let serverUrl = localStorage.getItem('claude-web-url') || 'http://localhost:3000';
+    let serverUrl = localStorage.getItem('claude-web-url') || 'http://localhost:32352';
     let authToken = localStorage.getItem('claude-web-token') || '';
     let isConnected = false;
 
     // 初始化
-    document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', async function() {
       document.getElementById('server-url').value = serverUrl;
       document.getElementById('auth-token').value = authToken;
 
       // 如果有保存的配置，尝试自动连接
       if (serverUrl && localStorage.getItem('claude-web-autoconnect') === 'true') {
         connect();
+        return;
       }
+
+      // 首次访问：自动探测 claude-code-web 是否在运行
+      // 依次尝试默认端口和常用端口
+      var probePorts = ['32352', '3000', '3001'];
+      for (var i = 0; i < probePorts.length; i++) {
+        var probeUrl = 'http://localhost:' + probePorts[i];
+        var reachable = await checkServer(probeUrl, '');
+        if (reachable) {
+          // 服务已在运行，自动填入并连接
+          serverUrl = probeUrl;
+          document.getElementById('server-url').value = probeUrl;
+          localStorage.setItem('claude-web-url', probeUrl);
+          connect();
+          return;
+        }
+      }
+      // 未检测到服务，保持显示设置面板
     });
 
     // 检测服务是否可达（先 health，再 HEAD 回退）

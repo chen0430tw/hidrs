@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <link rel="icon" href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'&gt;&lt;text y='.9em' font-size='90'&gt;🧿&lt;/text&gt;&lt;/svg&gt;">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FAIRY-DESK - 船舶追踪</title>
   <style>
@@ -201,8 +202,9 @@
         // 参数: width, height, latitude(→centery), longitude(→centerx), zoom, maptype, shownames, trackvessel, fleet
         buildSrcdoc: function() {
           return '<!DOCTYPE html>' +
-            '<html><head><style>*{margin:0;padding:0}body{overflow:hidden}</style></head>' +
-            '<body>' +
+            '<html style="height:100%;margin:0">' +
+            '<head><style>*{margin:0;padding:0}html,body{height:100%;overflow:hidden}body iframe{width:100%!important;height:100%!important}</style></head>' +
+            '<body style="height:100%">' +
             '<script>' +
             'var width="100%";' +
             'var height="100%";' +
@@ -227,8 +229,9 @@
         // 参数: width, height, latitude, longitude, zoom, names, mmsi, imo, show_track, fleet
         buildSrcdoc: function() {
           return '<!DOCTYPE html>' +
-            '<html><head><style>*{margin:0;padding:0}body{overflow:hidden}</style></head>' +
-            '<body>' +
+            '<html style="height:100%;margin:0">' +
+            '<head><style>*{margin:0;padding:0}html,body{height:100%;overflow:hidden}body iframe{width:100%!important;height:100%!important}</style></head>' +
+            '<body style="height:100%">' +
             '<script>' +
             'var width="100%";' +
             'var height="100%";' +
