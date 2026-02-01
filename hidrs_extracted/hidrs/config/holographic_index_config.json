@@ -1,0 +1,9 @@
+{
+    "elasticsearch_hosts": ["http://localhost:9200"],
+    "elasticsearch_username": "",
+    "elasticsearch_password": "",
+    "index_name": "hidrs_holographic",
+    "number_of_shards": 1,
+    "number_of_replicas": 0,
+    "holographic_mapper_config_path": "config/holographic_mapper_config.json"
+}
