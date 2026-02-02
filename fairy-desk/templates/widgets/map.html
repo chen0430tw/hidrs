@@ -114,6 +114,36 @@
       color: #00f0ff;
       border-color: rgba(0, 240, 255, 0.5);
     }
+    /* 图层切换器 */
+    .layer-switcher {
+      position: absolute;
+      bottom: 30px;
+      right: 10px;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .layer-switcher button {
+      padding: 6px 12px;
+      background: rgba(17, 24, 39, 0.9);
+      border: 1px solid rgba(0, 240, 255, 0.3);
+      border-radius: 4px;
+      color: #9ca3af;
+      cursor: pointer;
+      font-size: 11px;
+      text-align: left;
+    }
+    .layer-switcher button:hover {
+      background: rgba(0, 240, 255, 0.1);
+      color: #00f0ff;
+      border-color: rgba(0, 240, 255, 0.5);
+    }
+    .layer-switcher button.active {
+      color: #00f0ff;
+      border-color: #00f0ff;
+      background: rgba(0, 240, 255, 0.15);
+    }
   </style>
 </head>
 <body>
@@ -138,21 +168,65 @@
     <div>ZOOM: <span class="coord" id="zoom">--</span></div>
   </div>
 
+  <div class="layer-switcher">
+    <button class="active" id="btn-satellite" onclick="switchLayer('satellite')">🛰️ 卫星</button>
+    <button id="btn-google" onclick="switchLayer('google')">🌏 Google</button>
+    <button id="btn-dark" onclick="switchLayer('dark')">🌑 暗色</button>
+  </div>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    // 初始化地图
-    const map = L.map('map', {
-      center: [35.6762, 139.6503], // 东京
-      zoom: 4,
-      zoomControl: true
+    // 图层定义
+    var layers = {
+      satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: '&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Source: Esri, Maxar, Earthstar Geographics',
+        maxZoom: 19
+      }),
+      google: L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+        attribution: '&copy; Google Maps',
+        maxZoom: 20
+      }),
+      dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+        subdomains: 'abcd',
+        maxZoom: 19
+      })
+    };
+
+    // Esri 卫星标注覆盖层（在卫星视图上显示地名）
+    var labelsOverlay = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      pane: 'overlayPane'
     });
 
-    // 添加暗色主题地图图层
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-      subdomains: 'abcd',
-      maxZoom: 19
-    }).addTo(map);
+    var currentLayerName = 'satellite';
+
+    // 初始化地图（默认卫星图层）
+    const map = L.map('map', {
+      center: [35.6762, 139.6503],
+      zoom: 4,
+      zoomControl: true,
+      layers: [layers.satellite, labelsOverlay]
+    });
+
+    function switchLayer(name) {
+      // 移除当前图层
+      map.removeLayer(layers[currentLayerName]);
+      map.removeLayer(labelsOverlay);
+
+      // 添加新图层
+      layers[name].addTo(map);
+      // 卫星视图加标注覆盖层
+      if (name === 'satellite') {
+        labelsOverlay.addTo(map);
+      }
+      currentLayerName = name;
+
+      // 更新按钮状态
+      document.querySelectorAll('.layer-switcher button').forEach(function(btn) {
+        btn.classList.toggle('active', btn.id === 'btn-' + name);
+      });
+    }
 
     // 更新坐标显示
     function updateInfo() {

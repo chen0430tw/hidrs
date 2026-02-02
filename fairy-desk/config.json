@@ -16,15 +16,15 @@
         "id": "cctv",
         "name": "CCTV",
         "icon": "📹",
-        "url": "https://www.earthcam.com/",
+        "url": "/widget/cctv",
         "category": "monitor",
         "loadStrategy": "background",
         "builtIn": true
       },
       {
         "id": "map",
-        "name": "地图",
-        "icon": "🗺️",
+        "name": "卫星",
+        "icon": "🛰️",
         "url": "/widget/map",
         "category": "monitor",
         "loadStrategy": "background",
@@ -57,7 +57,21 @@
         "loadStrategy": "background",
         "builtIn": true
       }
-    ]
+    ],
+    "cctv": {
+      "grid": "3x3",
+      "cameras": [
+        {"name": "NYC Times Square", "url": "https://www.youtube.com/embed/1EiC9bvVGnk?autoplay=1&mute=1&controls=0", "enabled": true},
+        {"name": "Tokyo Shibuya", "url": "https://www.youtube.com/embed/gFRtAAmiFbE?autoplay=1&mute=1&controls=0", "enabled": true},
+        {"name": "Namib Desert", "url": "https://www.youtube.com/embed/ydYDqZQpim8?autoplay=1&mute=1&controls=0", "enabled": true},
+        {"name": "Venice Italy", "url": "https://www.youtube.com/embed/vPwD4UxBBSk?autoplay=1&mute=1&controls=0", "enabled": true},
+        {"name": "Abbey Road London", "url": "https://www.youtube.com/embed/dqBs2x_qb5M?autoplay=1&mute=1&controls=0", "enabled": true},
+        {"name": "International Space Station", "url": "https://www.youtube.com/embed/P9C25Un7xaM?autoplay=1&mute=1&controls=0", "enabled": true},
+        {"name": "Jackson Hole", "url": "https://www.youtube.com/embed/psfFJR3vZ78?autoplay=1&mute=1&controls=0", "enabled": true},
+        {"name": "Dublin Temple Bar", "url": "https://www.youtube.com/embed/Y6a4Z5HJpXA?autoplay=1&mute=1&controls=0", "enabled": true},
+        {"name": "Miami Beach", "url": "https://www.youtube.com/embed/vnSSsNBwDXA?autoplay=1&mute=1&controls=0", "enabled": true}
+      ]
+    }
   },
   "center_screen": {
     "terminal_command": "claude",
@@ -120,7 +134,7 @@
     "stocks": {
       "provider": "tradingview",
       "theme": "dark",
-      "symbols": ["FOREXCOM:SPXUSD", "AAPL", "GOOGL", "NVDA", "BTCUSD", "ETHUSD", "FX:USDCNY"],
+      "symbols": ["FOREXCOM:SPXUSD", "AAPL", "GOOGL", "NVDA", "BTCUSD", "ETHUSD", "FX_IDC:USDCNY"],
       "show_ticker": true
     },
     "alerts": {

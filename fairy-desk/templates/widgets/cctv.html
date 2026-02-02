@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'&gt;&lt;text y='.9em' font-size='90'&gt;🧿&lt;/text&gt;&lt;/svg&gt;">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FAIRY-DESK - CCTV 监控</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #0a0e17; overflow: hidden; font-family: 'Consolas', 'Monaco', monospace; }
+
+    .cctv-header {
+      height: 28px;
+      background: rgba(0,0,0,0.6);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 10px;
+      border-bottom: 1px solid rgba(0,240,255,0.2);
+      z-index: 10;
+      position: relative;
+    }
+
+    .cctv-header .title {
+      color: #00f0ff;
+      font-size: 11px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    .cctv-header .rec {
+      color: #ff3333;
+      font-size: 10px;
+      animation: blink 1s infinite;
+    }
+
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    .grid-controls {
+      display: flex;
+      gap: 4px;
+    }
+
+    .grid-controls button {
+      background: transparent;
+      border: 1px solid rgba(0,240,255,0.3);
+      color: #8899aa;
+      font-size: 10px;
+      padding: 2px 8px;
+      cursor: pointer;
+      border-radius: 2px;
+      font-family: inherit;
+    }
+
+    .grid-controls button:hover { color: #00f0ff; border-color: #00f0ff; }
+    .grid-controls button.active { color: #00f0ff; border-color: #00f0ff; background: rgba(0,240,255,0.1); }
+
+    .cctv-grid {
+      display: grid;
+      width: 100%;
+      height: calc(100% - 28px);
+      gap: 2px;
+      background: #000;
+    }
+
+    .cctv-grid.grid-2x2 { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); }
+    .cctv-grid.grid-3x3 { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); }
+    .cctv-grid.grid-4x4 { grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(4, 1fr); }
+
+    .camera-cell {
+      position: relative;
+      background: #0a0e17;
+      overflow: hidden;
+    }
+
+    .camera-cell iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+
+    .camera-label {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(transparent, rgba(0,0,0,0.8));
+      padding: 16px 8px 4px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      pointer-events: none;
+    }
+
+    .camera-label .cam-name {
+      color: #fff;
+      font-size: 10px;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+    }
+
+    .camera-label .cam-id {
+      color: #00f0ff;
+      font-size: 9px;
+      font-family: monospace;
+    }
+
+    .camera-cell .cam-overlay {
+      position: absolute;
+      top: 4px;
+      left: 6px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      pointer-events: none;
+    }
+
+    .camera-cell .cam-overlay .rec-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #ff3333;
+      animation: blink 1.5s infinite;
+    }
+
+    .camera-cell .cam-overlay .cam-time {
+      color: rgba(255,255,255,0.7);
+      font-size: 9px;
+      font-family: monospace;
+    }
+
+    /* 离线/无信号 */
+    .camera-offline {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #0a0e17;
+      color: #4a5568;
+    }
+
+    .camera-offline .no-signal {
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+
+    .camera-offline .no-signal-text {
+      font-size: 10px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    /* 全屏单摄像头 */
+    .camera-cell.fullscreen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 100;
+    }
+
+    .camera-cell.fullscreen .camera-label {
+      padding: 24px 16px 8px;
+    }
+
+    .camera-cell.fullscreen .cam-name { font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="cctv-header">
+    <div class="title">📹 CCTV 多路监控</div>
+    <div class="grid-controls">
+      <button onclick="setGrid('2x2')" id="btn-2x2">2×2</button>
+      <button onclick="setGrid('3x3')" id="btn-3x3" class="active">3×3</button>
+      <button onclick="setGrid('4x4')" id="btn-4x4">4×4</button>
+    </div>
+    <div class="rec">● REC</div>
+  </div>
+  <div class="cctv-grid grid-3x3" id="cctv-grid">
+    <!-- 由 JS 动态填充 -->
+  </div>
+
+  <script>
+    var cameras = [];
+    var currentGrid = '3x3';
+
+    function setGrid(size) {
+      currentGrid = size;
+      var grid = document.getElementById('cctv-grid');
+      grid.className = 'cctv-grid grid-' + size;
+
+      // 更新按钮状态
+      document.querySelectorAll('.grid-controls button').forEach(function(btn) {
+        btn.classList.toggle('active', btn.id === 'btn-' + size);
+      });
+
+      renderCameras();
+    }
+
+    function getMaxCameras() {
+      var parts = currentGrid.split('x');
+      return parseInt(parts[0]) * parseInt(parts[1]);
+    }
+
+    function renderCameras() {
+      var grid = document.getElementById('cctv-grid');
+      grid.innerHTML = '';
+      var max = getMaxCameras();
+      var enabled = cameras.filter(function(c) { return c.enabled !== false; });
+
+      for (var i = 0; i < max; i++) {
+        var cell = document.createElement('div');
+        cell.className = 'camera-cell';
+
+        if (i < enabled.length) {
+          var cam = enabled[i];
+
+          // iframe
+          var iframe = document.createElement('iframe');
+          iframe.src = cam.url;
+          iframe.allow = 'autoplay; encrypted-media';
+          iframe.allowFullscreen = true;
+          iframe.loading = 'lazy';
+          cell.appendChild(iframe);
+
+          // REC 点 + 时间
+          var overlay = document.createElement('div');
+          overlay.className = 'cam-overlay';
+          var dot = document.createElement('div');
+          dot.className = 'rec-dot';
+          overlay.appendChild(dot);
+          var timeEl = document.createElement('span');
+          timeEl.className = 'cam-time';
+          timeEl.textContent = new Date().toLocaleTimeString('zh-CN', {hour12: false});
+          overlay.appendChild(timeEl);
+          cell.appendChild(overlay);
+
+          // 底部标签
+          var label = document.createElement('div');
+          label.className = 'camera-label';
+          var nameEl = document.createElement('span');
+          nameEl.className = 'cam-name';
+          nameEl.textContent = cam.name;
+          label.appendChild(nameEl);
+          var idEl = document.createElement('span');
+          idEl.className = 'cam-id';
+          idEl.textContent = 'CAM-' + String(i + 1).padStart(2, '0');
+          label.appendChild(idEl);
+          cell.appendChild(label);
+
+          // 双击全屏
+          cell.addEventListener('dblclick', function() {
+            this.classList.toggle('fullscreen');
+          });
+        } else {
+          // 无信号
+          var offline = document.createElement('div');
+          offline.className = 'camera-offline';
+          var noSig = document.createElement('div');
+          noSig.className = 'no-signal';
+          noSig.textContent = '📡';
+          offline.appendChild(noSig);
+          var noText = document.createElement('div');
+          noText.className = 'no-signal-text';
+          noText.textContent = 'No Signal';
+          offline.appendChild(noText);
+          var camId = document.createElement('div');
+          camId.style.cssText = 'color:#4a5568;font-size:9px;margin-top:4px;';
+          camId.textContent = 'CAM-' + String(i + 1).padStart(2, '0');
+          offline.appendChild(camId);
+          cell.appendChild(offline);
+        }
+
+        grid.appendChild(cell);
+      }
+    }
+
+    // 更新时钟
+    setInterval(function() {
+      var timeEls = document.querySelectorAll('.cam-time');
+      var now = new Date().toLocaleTimeString('zh-CN', {hour12: false});
+      timeEls.forEach(function(el) { el.textContent = now; });
+    }, 1000);
+
+    // 从 API 加载配置
+    fetch('/api/config')
+      .then(function(r) { return r.json(); })
+      .then(function(cfg) {
+        var cctvCfg = cfg.left_screen && cfg.left_screen.cctv;
+        if (cctvCfg) {
+          cameras = cctvCfg.cameras || [];
+          currentGrid = cctvCfg.grid || '3x3';
+          setGrid(currentGrid);
+        } else {
+          // 默认：无摄像头配置
+          cameras = [];
+          renderCameras();
+        }
+      })
+      .catch(function() {
+        cameras = [];
+        renderCameras();
+      });
+  </script>
+</body>
+</html>
