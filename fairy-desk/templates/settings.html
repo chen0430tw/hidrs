@@ -336,6 +336,26 @@
               <input type="text" id="terminal-command" class="form-input" style="width: 300px;" placeholder="claude">
             </div>
           </div>
+
+          <div class="settings-row">
+            <div class="settings-label">
+              <div class="label-title">终端背景颜色</div>
+              <div class="label-desc">控制台终端区域的背景色</div>
+            </div>
+            <div class="settings-control">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <input type="color" id="terminal-bg-color" value="#0d1117" style="width: 48px; height: 32px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-tertiary); cursor: pointer;">
+                <input type="text" id="terminal-bg-color-hex" class="form-input" style="width: 120px; font-family: monospace;" placeholder="#0d1117">
+                <div style="display: flex; gap: 6px;">
+                  <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px;" onclick="setTermBg('#0d1117')">默认</button>
+                  <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px;" onclick="setTermBg('#000000')">纯黑</button>
+                  <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px;" onclick="setTermBg('#1a1b26')">Tokyo Night</button>
+                  <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px;" onclick="setTermBg('#282c34')">One Dark</button>
+                  <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px;" onclick="setTermBg('#0d1a0d')">Matrix</button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -523,6 +543,11 @@
       document.getElementById('refresh-interval').value = config.center_screen?.refresh_interval || 5;
       document.getElementById('terminal-command').value = config.center_screen?.terminal_command || 'claude';
 
+      // 终端背景色
+      var termBg = config.theme?.terminal_bg_color || '#0d1117';
+      document.getElementById('terminal-bg-color').value = termBg;
+      document.getElementById('terminal-bg-color-hex').value = termBg;
+
       // 右屏
       document.getElementById('social-url').value = config.right_screen?.social?.url || 'https://x.com/home';
 
@@ -554,6 +579,22 @@
       });
     }
 
+    // 终端背景色快捷设置
+    function setTermBg(color) {
+      document.getElementById('terminal-bg-color').value = color;
+      document.getElementById('terminal-bg-color-hex').value = color;
+    }
+
+    // 同步 color picker 和 hex input
+    document.getElementById('terminal-bg-color').addEventListener('input', function() {
+      document.getElementById('terminal-bg-color-hex').value = this.value;
+    });
+    document.getElementById('terminal-bg-color-hex').addEventListener('input', function() {
+      if (/^#[0-9a-fA-F]{6}$/.test(this.value)) {
+        document.getElementById('terminal-bg-color').value = this.value;
+      }
+    });
+
     async function saveAllSettings() {
       const config = FairyDesk.config;
 
@@ -582,6 +623,7 @@
       config.hidrs.auto_detect = document.getElementById('hidrs-auto-detect').checked;
 
       config.theme.name = document.querySelector('.theme-option.active')?.dataset.theme || 'cyberpunk';
+      config.theme.terminal_bg_color = document.getElementById('terminal-bg-color').value || '#0d1117';
 
       // 保存
       const success = await saveConfig(config);

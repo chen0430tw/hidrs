@@ -321,18 +321,23 @@
       </div>
     </div>
 
-    <!-- Bluesky -->
+    <!-- Bluesky (bsky-embed web component，无需认证) -->
     <div class="platform-content" id="content-bluesky">
       <div class="quick-actions">
         <div class="quick-action" onclick="window.open('https://bsky.app/', '_blank')">🏠 首页</div>
         <div class="quick-action" onclick="window.open('https://bsky.app/search', '_blank')">🔍 搜索</div>
         <div class="quick-action" onclick="window.open('https://bsky.app/notifications', '_blank')">🔔 通知</div>
       </div>
-      <div class="embed-container">
-        <div class="loading-overlay" id="loading-bluesky">
-          <div class="loading-spinner"></div>
-        </div>
-        <iframe src="https://bsky.app/" onload="hideLoading('bluesky')" onerror="showFallback('bluesky')"></iframe>
+      <div class="embed-container" style="overflow-y: auto; padding: 8px;">
+        <script type="module" src="https://cdn.jsdelivr.net/npm/bsky-embed/dist/bsky-embed.es.js" async></script>
+        <bsky-embed
+          username="bsky.app"
+          mode="dark"
+          limit="15"
+          link-target="_blank"
+          load-more="true"
+          custom-styles="* { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; } .border-slate-300 { border-color: rgba(0,240,255,0.2) !important; } a { color: #00f0ff !important; }"
+        ></bsky-embed>
       </div>
     </div>
 
@@ -436,8 +441,18 @@
       // 等待 twttr.widgets 就绪后渲染
       if (window.twttr && twttr.widgets) {
         twttr.widgets.load(container).then(function() {
-          if (loading) loading.classList.add('hidden');
-          window.twitterLoaded = true;
+          // widgets.load() 解析成功不代表 widget 实际渲染了
+          // 检查容器内是否真的生成了 Twitter iframe
+          setTimeout(function() {
+            var rendered = container.querySelector('iframe.twitter-timeline');
+            if (rendered) {
+              if (loading) loading.classList.add('hidden');
+              window.twitterLoaded = true;
+            } else {
+              // 脚本加载了但 widget 没渲染（API 限制、网络问题等）
+              showTwitterFallback();
+            }
+          }, 2000);
         }).catch(function() {
           showTwitterFallback();
         });

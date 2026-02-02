@@ -15,6 +15,7 @@ import subprocess
 import logging
 from datetime import datetime
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import psutil
 import requests
@@ -330,21 +331,20 @@ def hidrs_proxy(path):
 
 @app.route('/api/feeds/news')
 def news_feeds():
-    """获取 RSS 新闻聚合"""
+    """获取 RSS 新闻聚合（并发抓取所有源）"""
     load_config()  # 确保读取最新配置
     feeds_config = config.get('right_screen', {}).get('news', {}).get('feeds', [])
     max_items = request.args.get('limit', 20, type=int)
 
-    all_items = []
+    enabled_feeds = [f for f in feeds_config if f.get('enabled', True)]
 
-    for feed_cfg in feeds_config:
-        if not feed_cfg.get('enabled', True):
-            continue
-
+    def fetch_one(feed_cfg):
+        """抓取单个 RSS 源"""
+        items = []
         try:
             feed = feedparser.parse(feed_cfg['url'])
             for entry in feed.entries[:10]:  # 每个源最多10条
-                all_items.append({
+                items.append({
                     "source": feed_cfg['name'],
                     "title": entry.get('title', ''),
                     "link": entry.get('link', ''),
@@ -353,6 +353,14 @@ def news_feeds():
                 })
         except Exception as e:
             logger.warning(f"获取 RSS 失败 [{feed_cfg['name']}]: {e}")
+        return items
+
+    # 并发抓取所有 RSS 源
+    all_items = []
+    with ThreadPoolExecutor(max_workers=len(enabled_feeds) or 1) as executor:
+        futures = {executor.submit(fetch_one, f): f['name'] for f in enabled_feeds}
+        for future in as_completed(futures):
+            all_items.extend(future.result())
 
     # 按时间排序（简单处理）
     all_items.sort(key=lambda x: x.get('published', ''), reverse=True)
