@@ -23,8 +23,8 @@
       },
       {
         "id": "map",
-        "name": "地图",
-        "icon": "🗺️",
+        "name": "卫星",
+        "icon": "🛰️",
         "url": "/widget/map",
         "category": "monitor",
         "loadStrategy": "background",
