@@ -478,22 +478,22 @@
           if (!ttydFrame.src || ttydFrame.src === '' || ttydFrame.src === 'about:blank') {
             ttydFrame.src = ttydUrl;
           }
-        } else if (ttydChecked && !ttydUrl) {
-          // 已探测过，没有 ttyd，直接显示回退终端
+        } else {
+          // 没有 ttyd 或尚未探测：立即显示回退终端
           content.style.display = 'block';
           ttydFrame.style.display = 'none';
           showFallbackTerminal(content);
-        } else {
-          // 首次：先显示 content 区域（清空旧内容），异步探测
-          content.style.display = 'block';
-          ttydFrame.style.display = 'none';
-          content.innerHTML = '';
-          var loadingMsg = document.createElement('div');
-          loadingMsg.className = 'terminal-line';
-          loadingMsg.style.color = 'var(--text-muted)';
-          loadingMsg.textContent = '正在检测终端服务...';
-          content.appendChild(loadingMsg);
-          loadTtydOrFallback(content, ttydFrame);
+
+          // 首次：在后台探测 ttyd，找到则自动切换
+          if (!ttydChecked) {
+            detectTtyd().then(function(url) {
+              if (url && currentTerminalTab === 'terminal') {
+                content.style.display = 'none';
+                ttydFrame.style.display = 'block';
+                ttydFrame.src = url;
+              }
+            });
+          }
         }
       } else {
         // 日志

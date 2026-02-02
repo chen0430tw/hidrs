@@ -177,6 +177,12 @@ def widget_terminal():
     return render_template('widgets/terminal.html')
 
 
+@app.route('/widget/cctv')
+def widget_cctv():
+    """内置 CCTV 多路监控小组件"""
+    return render_template('widgets/cctv.html')
+
+
 # ============================================================
 # 系统监控 API
 # ============================================================

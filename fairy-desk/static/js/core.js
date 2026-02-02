@@ -609,12 +609,20 @@ async function loadNewsFeeds() {
   const container = document.getElementById('news-feed');
   if (!container) return;
 
+  // 显示加载状态
+  container.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span>加载中...</span></div>';
+
   try {
     const resp = await fetch(`${API_BASE}/api/feeds/news?limit=20`);
-    if (!resp.ok) return;
+    if (!resp.ok) throw new Error('RSS 请求失败');
     const items = await resp.json();
 
     const keywords = FairyDesk.config?.right_screen?.news?.highlight_keywords || [];
+
+    if (items.length === 0) {
+      container.innerHTML = '<div style="padding:20px;text-align:center;color:#6b7280;font-size:12px;">暂无新闻数据</div>';
+      return;
+    }
 
     container.innerHTML = items.map(item => {
       const isHighlight = keywords.some(kw =>
@@ -631,6 +639,7 @@ async function loadNewsFeeds() {
 
   } catch (err) {
     console.error('加载新闻失败:', err);
+    container.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;font-size:12px;">加载失败，点击刷新重试</div>';
   }
 }
 
