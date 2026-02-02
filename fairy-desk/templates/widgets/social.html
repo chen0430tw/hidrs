@@ -550,6 +550,11 @@
         js = d.createElement(s);
         js.id = id;
         js.src = 'https://platform.twitter.com/widgets.js';
+        // 脚本加载失败时直接触发 fallback
+        js.onerror = function() {
+          console.warn('Twitter widgets.js 加载失败');
+          showTwitterFallback();
+        };
         fjs.parentNode.insertBefore(js, fjs);
         t._e = [];
         t.ready = function(f) { t._e.push(f); };
@@ -561,12 +566,12 @@
         loadTwitterWidget();
       });
 
-      // 超时保护：如果 15 秒后 widget 仍未加载成功，显示 fallback
+      // 超时保护：5 秒后若 widget 仍未加载，显示 fallback（网络受限时快速降级）
       setTimeout(function() {
         if (!window.twitterLoaded) {
           showTwitterFallback();
         }
-      }, 15000);
+      }, 5000);
     });
 
     // 监听 iframe 加载错误（Bluesky, Mastodon, Weibo 等）

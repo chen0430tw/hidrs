@@ -53,10 +53,20 @@ async function loadConfig() {
     const resp = await fetch(`${API_BASE}/api/config`);
     if (!resp.ok) throw new Error('配置加载失败');
     FairyDesk.config = await resp.json();
+    // 应用主题
+    applyTheme(FairyDesk.config?.theme?.name);
     return FairyDesk.config;
   } catch (err) {
     console.error('加载配置失败:', err);
     return null;
+  }
+}
+
+function applyTheme(themeName) {
+  if (themeName && themeName !== 'cyberpunk') {
+    document.documentElement.setAttribute('data-theme', themeName);
+  } else {
+    document.documentElement.removeAttribute('data-theme');
   }
 }
 
@@ -107,6 +117,9 @@ function startClock() {
 async function checkHIDRSStatus() {
   const statusEl = document.getElementById('hidrs-status');
   if (!statusEl) return;
+
+  // 如果配置中关闭了自动检测，跳过
+  if (FairyDesk.config?.hidrs?.auto_detect === false) return;
 
   try {
     const resp = await fetch(`${API_BASE}/api/hidrs/status`);
@@ -531,6 +544,16 @@ function updateMetric(id, value, suffix = '', extra = '') {
 function initSystemLogs() {
   const logContainer = document.getElementById('system-logs');
   if (!logContainer) return;
+
+  // 添加欢迎横幅
+  if (!logContainer.dataset.initialized) {
+    const banner = document.createElement('div');
+    banner.className = 'terminal-line';
+    banner.style.color = 'var(--neon-cyan)';
+    banner.textContent = '═══ FAIRY-DESK 系统控制台 ═══';
+    logContainer.appendChild(banner);
+    logContainer.dataset.initialized = 'true';
+  }
 
   // 加载历史日志
   fetch(`${API_BASE}/api/system/logs/history?limit=30`)

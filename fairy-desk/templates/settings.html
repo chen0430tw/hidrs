@@ -548,6 +548,8 @@
         opt.onclick = () => {
           document.querySelectorAll('.theme-option').forEach(o => o.classList.remove('active'));
           opt.classList.add('active');
+          // 实时预览主题
+          applyTheme(opt.dataset.theme);
         };
       });
     }
@@ -626,7 +628,9 @@
     async function testHIDRSConnection() {
       const endpoint = document.getElementById('hidrs-endpoint').value;
       try {
-        const resp = await fetch(`${endpoint}/health`, { timeout: 3000 });
+        const resp = await fetch(`${endpoint}/health`, {
+          signal: AbortSignal.timeout(3000)
+        });
         if (resp.ok) {
           showNotification('HIDRS 连接成功！', 'success');
         } else {
@@ -637,9 +641,20 @@
       }
     }
 
-    function resetToDefault() {
+    async function resetToDefault() {
       if (!confirm('确定恢复默认设置？所有自定义配置将丢失。')) return;
-      location.reload();
+      try {
+        const resp = await fetch(`${API_BASE}/api/config/reset`, { method: 'POST' });
+        if (resp.ok) {
+          showNotification('已恢复默认配置', 'success');
+          await loadConfig();
+          populateSettings();
+        } else {
+          showNotification('恢复失败', 'error');
+        }
+      } catch {
+        showNotification('恢复失败', 'error');
+      }
     }
 
     function exportConfig() {

@@ -10,6 +10,8 @@ FAIRY-DESK - 妖精桌面情报台
 import json
 import os
 import time
+import shutil
+import subprocess
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -323,6 +325,7 @@ def hidrs_proxy(path):
 @app.route('/api/feeds/news')
 def news_feeds():
     """获取 RSS 新闻聚合"""
+    load_config()  # 确保读取最新配置
     feeds_config = config.get('right_screen', {}).get('news', {}).get('feeds', [])
     max_items = request.args.get('limit', 20, type=int)
 
@@ -357,7 +360,8 @@ def news_feeds():
 
 @app.route('/api/config', methods=['GET'])
 def get_config():
-    """获取当前配置"""
+    """获取当前配置（每次从磁盘重新加载，确保外部修改生效）"""
+    load_config()
     return jsonify(config)
 
 
@@ -379,6 +383,21 @@ def update_config():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+
+
+@app.route('/api/config/reset', methods=['POST'])
+def reset_config():
+    """恢复默认配置"""
+    global config
+    try:
+        config = get_default_config()
+        if save_config():
+            add_system_log("info", "配置已恢复为默认值")
+            return jsonify({"success": True, "message": "已恢复默认配置"})
+        else:
+            return jsonify({"error": "保存失败"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/config/tabs', methods=['GET'])
@@ -528,9 +547,26 @@ if __name__ == '__main__':
     # 加载配置
     load_config()
 
+    # 自动启动 ttyd（如果已安装）
+    ttyd_path = shutil.which('ttyd')
+    if ttyd_path:
+        try:
+            subprocess.Popen(
+                [ttyd_path, '-p', '7681', '-W', 'bash'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            add_system_log("info", f"ttyd 已启动于端口 7681")
+        except Exception as e:
+            add_system_log("warning", f"ttyd 启动失败: {e}")
+    else:
+        add_system_log("info", "ttyd 未安装，终端使用模拟模式（安装: sudo apt install ttyd）")
+
     # 启动日志
     add_system_log("info", "FAIRY-DESK 启动中...")
     add_system_log("info", f"监听地址: {config['server']['host']}:{config['server']['port']}")
+    add_system_log("info", f"RSS 源数量: {len(config.get('right_screen', {}).get('news', {}).get('feeds', []))}")
+    add_system_log("info", f"股票标的: {', '.join(config.get('right_screen', {}).get('stocks', {}).get('symbols', []))}")
+    add_system_log("info", "系统控制台就绪，等待指令...")
 
     # 启动 Flask
     app.run(
