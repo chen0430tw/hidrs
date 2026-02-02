@@ -548,6 +548,8 @@
         opt.onclick = () => {
           document.querySelectorAll('.theme-option').forEach(o => o.classList.remove('active'));
           opt.classList.add('active');
+          // 实时预览主题
+          applyTheme(opt.dataset.theme);
         };
       });
     }

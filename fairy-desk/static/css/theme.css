@@ -48,6 +48,46 @@
 }
 
 /* ============================================================
+   主题变体：黑客帝国（Matrix）
+   ============================================================ */
+[data-theme="matrix"] {
+  --bg-primary: #0d1a0d;
+  --bg-secondary: #142814;
+  --bg-tertiary: #1a2e1a;
+  --bg-panel: rgba(20, 40, 20, 0.9);
+  --neon-cyan: #00ff00;
+  --neon-blue: #00cc00;
+  --neon-purple: #44bb44;
+  --neon-magenta: #33ff33;
+  --neon-amber: #88ff00;
+  --neon-green: #00ff88;
+  --neon-red: #ff4444;
+  --border-color: rgba(0, 255, 0, 0.2);
+  --border-glow: rgba(0, 255, 0, 0.4);
+  --text-terminal: #00ff00;
+}
+
+/* ============================================================
+   主题变体：午夜蓝（Midnight）
+   ============================================================ */
+[data-theme="midnight"] {
+  --bg-primary: #1a1a2e;
+  --bg-secondary: #252547;
+  --bg-tertiary: #2e2e4a;
+  --bg-panel: rgba(37, 37, 71, 0.9);
+  --neon-cyan: #6366f1;
+  --neon-blue: #818cf8;
+  --neon-purple: #a78bfa;
+  --neon-magenta: #c084fc;
+  --neon-amber: #f59e0b;
+  --neon-green: #34d399;
+  --neon-red: #f87171;
+  --border-color: rgba(99, 102, 241, 0.2);
+  --border-glow: rgba(99, 102, 241, 0.4);
+  --text-terminal: #a5b4fc;
+}
+
+/* ============================================================
    基础重置
    ============================================================ */
 *, *::before, *::after {

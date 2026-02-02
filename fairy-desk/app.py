@@ -357,7 +357,8 @@ def news_feeds():
 
 @app.route('/api/config', methods=['GET'])
 def get_config():
-    """获取当前配置"""
+    """获取当前配置（每次从磁盘重新加载，确保外部修改生效）"""
+    load_config()
     return jsonify(config)
 
 
@@ -531,6 +532,9 @@ if __name__ == '__main__':
     # 启动日志
     add_system_log("info", "FAIRY-DESK 启动中...")
     add_system_log("info", f"监听地址: {config['server']['host']}:{config['server']['port']}")
+    add_system_log("info", f"RSS 源数量: {len(config.get('right_screen', {}).get('news', {}).get('feeds', []))}")
+    add_system_log("info", f"股票标的: {', '.join(config.get('right_screen', {}).get('stocks', {}).get('symbols', []))}")
+    add_system_log("info", "系统控制台就绪，等待指令...")
 
     # 启动 Flask
     app.run(

@@ -330,7 +330,7 @@
       var chartsEl = document.getElementById('stock-charts');
       if (chartsEl) {
         chartsEl.innerHTML = '';
-        symbols.slice(0, 6).forEach(function(symbol) {
+        symbols.forEach(function(symbol) {
           var chartItem = document.createElement('div');
           chartItem.className = 'stock-chart-item';
 
