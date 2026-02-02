@@ -69,7 +69,14 @@
         {"name": "International Space Station", "url": "https://www.youtube.com/embed/P9C25Un7xaM?autoplay=1&mute=1&controls=0", "enabled": true},
         {"name": "Jackson Hole", "url": "https://www.youtube.com/embed/psfFJR3vZ78?autoplay=1&mute=1&controls=0", "enabled": true},
         {"name": "Dublin Temple Bar", "url": "https://www.youtube.com/embed/Y6a4Z5HJpXA?autoplay=1&mute=1&controls=0", "enabled": true},
-        {"name": "Miami Beach", "url": "https://www.youtube.com/embed/vnSSsNBwDXA?autoplay=1&mute=1&controls=0", "enabled": true}
+        {"name": "Miami Beach", "url": "https://www.youtube.com/embed/vnSSsNBwDXA?autoplay=1&mute=1&controls=0", "enabled": true},
+        {"name": "Seoul Gangnam", "url": "https://www.youtube.com/embed/HRJ91mNTxKI?autoplay=1&mute=1&controls=0", "enabled": true},
+        {"name": "Niagara Falls", "url": "https://www.youtube.com/embed/0Q05a8TLgUs?autoplay=1&mute=1&controls=0", "enabled": true},
+        {"name": "Lofi Radio", "url": "https://www.youtube.com/embed/jfKfPfyJRdk?autoplay=1&mute=1&controls=0", "enabled": true},
+        {"name": "Port of LA", "url": "https://www.youtube.com/embed/87zFagMmGSw?autoplay=1&mute=1&controls=0", "enabled": true},
+        {"name": "Paris Eiffel", "url": "https://www.youtube.com/embed/U7BjxnOIbGM?autoplay=1&mute=1&controls=0", "enabled": true},
+        {"name": "Taipei 101", "url": "https://www.youtube.com/embed/Ck_MaQHSDgM?autoplay=1&mute=1&controls=0", "enabled": true},
+        {"name": "Hong Kong Harbor", "url": "https://www.youtube.com/embed/7RpubGy5mBg?autoplay=1&mute=1&controls=0", "enabled": true}
       ]
     }
   },
@@ -150,6 +157,7 @@
     "background_color": "#0a0e17",
     "panel_color": "#111827",
     "text_color": "#e5e7eb",
-    "terminal_color": "#4ade80"
+    "terminal_color": "#4ade80",
+    "terminal_bg_color": "#0d1117"
   }
 }

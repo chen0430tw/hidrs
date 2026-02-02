@@ -486,6 +486,12 @@ function showEditTabModal(tab) {
 // ============================================================
 
 function initCenterScreen() {
+  // 应用终端背景色
+  const termBg = FairyDesk.config?.theme?.terminal_bg_color;
+  if (termBg) {
+    document.documentElement.style.setProperty('--terminal-bg', termBg);
+  }
+
   // 系统监控
   updateSystemStats();
   setInterval(updateSystemStats, FairyDesk.config?.center_screen?.refresh_interval * 1000 || 5000);
