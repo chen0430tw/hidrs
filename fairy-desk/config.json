@@ -90,8 +90,8 @@
           "enabled": true
         },
         {
-          "name": "人民日报",
-          "url": "http://en.people.cn/rss/90777.xml",
+          "name": "中新网",
+          "url": "https://www.chinanews.com.cn/rss/world.xml",
           "enabled": true
         },
         {
