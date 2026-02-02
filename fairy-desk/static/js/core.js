@@ -118,6 +118,9 @@ async function checkHIDRSStatus() {
   const statusEl = document.getElementById('hidrs-status');
   if (!statusEl) return;
 
+  // 如果配置中关闭了自动检测，跳过
+  if (FairyDesk.config?.hidrs?.auto_detect === false) return;
+
   try {
     const resp = await fetch(`${API_BASE}/api/hidrs/status`);
     const data = await resp.json();

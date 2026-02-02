@@ -10,6 +10,8 @@ FAIRY-DESK - 妖精桌面情报台
 import json
 import os
 import time
+import shutil
+import subprocess
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -323,6 +325,7 @@ def hidrs_proxy(path):
 @app.route('/api/feeds/news')
 def news_feeds():
     """获取 RSS 新闻聚合"""
+    load_config()  # 确保读取最新配置
     feeds_config = config.get('right_screen', {}).get('news', {}).get('feeds', [])
     max_items = request.args.get('limit', 20, type=int)
 
@@ -380,6 +383,21 @@ def update_config():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+
+
+@app.route('/api/config/reset', methods=['POST'])
+def reset_config():
+    """恢复默认配置"""
+    global config
+    try:
+        config = get_default_config()
+        if save_config():
+            add_system_log("info", "配置已恢复为默认值")
+            return jsonify({"success": True, "message": "已恢复默认配置"})
+        else:
+            return jsonify({"error": "保存失败"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/config/tabs', methods=['GET'])
@@ -528,6 +546,20 @@ def health_check():
 if __name__ == '__main__':
     # 加载配置
     load_config()
+
+    # 自动启动 ttyd（如果已安装）
+    ttyd_path = shutil.which('ttyd')
+    if ttyd_path:
+        try:
+            subprocess.Popen(
+                [ttyd_path, '-p', '7681', '-W', 'bash'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            add_system_log("info", f"ttyd 已启动于端口 7681")
+        except Exception as e:
+            add_system_log("warning", f"ttyd 启动失败: {e}")
+    else:
+        add_system_log("info", "ttyd 未安装，终端使用模拟模式（安装: sudo apt install ttyd）")
 
     # 启动日志
     add_system_log("info", "FAIRY-DESK 启动中...")

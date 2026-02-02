@@ -81,7 +81,7 @@
         },
         {
           "name": "CNN",
-          "url": "http://rss.cnn.com/rss/edition_world.rss",
+          "url": "https://rss.cnn.com/rss/edition.rss",
           "enabled": true
         },
         {
@@ -91,17 +91,17 @@
         },
         {
           "name": "人民日报",
-          "url": "http://www.people.com.cn/rss/world.xml",
+          "url": "http://en.people.cn/rss/90777.xml",
           "enabled": true
         },
         {
           "name": "CNA 中央社",
-          "url": "https://feeds.feedburner.com/rsscna/politics",
+          "url": "https://www.cna.com.tw/rss/aall.xml",
           "enabled": true
         },
         {
           "name": "Reuters",
-          "url": "https://www.reutersagency.com/feed/?best-regions=asia&post_type=best",
+          "url": "https://news.google.com/rss/search?q=when:24h+allinurl:reuters.com&hl=en-US&gl=US&ceid=US:en",
           "enabled": true
         },
         {
@@ -111,7 +111,7 @@
         },
         {
           "name": "Sputnik 卫星通讯社",
-          "url": "https://sputniknews.com/export/rss2/archive/index.xml",
+          "url": "https://sputnikglobe.com/export/rss2/archive/index.xml",
           "enabled": true
         }
       ],
