@@ -723,7 +723,8 @@
     }
 
     // Facebook Page Plugin 懒加载（等容器可见后再设置 src，避免 0 宽度）
-    // Page Plugin 内部布局比例约 2:8（header ~120px, timeline ~200px）
+    // Page Plugin 内部布局：small_header=true 时 header ~70px, timeline 需要至少 200px
+    // 推荐最小高度：270px (70 + 200), 但实际建议使用更大值以显示更多内容
     function loadFacebookPlugin() {
       var fbIframe = document.getElementById('facebook-iframe');
       if (!fbIframe || facebookLoaded) return;
@@ -734,15 +735,20 @@
       var fbWidth = fbContainer ? fbContainer.clientWidth : 400;
       if (fbWidth < 180) fbWidth = 340;
       if (fbWidth > 500) fbWidth = 500;
-      // height: 容器实际高度（保底 320 = header 120 + timeline 200）
+
+      // height: Facebook Page Plugin 的高度建议
+      // - small_header=true: header 约 70px
+      // - timeline 区域：建议至少 200px 才能显示内容
+      // - 总计最小：270px，但实际建议 500px 以上以显示更多帖子
       var fbHeight = fbContainer ? fbContainer.clientHeight : 600;
-      if (fbHeight < 320) fbHeight = 320;
+      // 强制最小高度 500px（而不是 320px），确保有足够空间显示帖子
+      if (fbHeight < 500) fbHeight = 500;
 
       var fbPage = facebookPageUrl || 'https://www.facebook.com/CNN';
       fbIframe.src = 'https://www.facebook.com/plugins/page.php?href=' +
         encodeURIComponent(fbPage) +
         '&tabs=timeline&width=' + fbWidth + '&height=' + fbHeight +
-        '&small_header=true&adapt_container_width=true&hide_cover=true&show_facepile=false';
+        '&small_header=false&adapt_container_width=true&hide_cover=false&show_facepile=true';
 
       // 超时保护
       setupIframeTimeout('facebook', fbIframe, 15000);
