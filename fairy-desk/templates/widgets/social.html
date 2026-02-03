@@ -307,6 +307,10 @@
       <span class="icon">🦋</span>
       <span>Bluesky</span>
     </button>
+    <button class="platform-tab" data-platform="facebook" onclick="switchPlatform('facebook')">
+      <span class="icon">📘</span>
+      <span>Facebook</span>
+    </button>
     <button class="platform-tab" data-platform="mastodon" onclick="switchPlatform('mastodon')">
       <span class="icon">🐘</span>
       <span>Mastodon</span>
@@ -371,6 +375,25 @@
       </div>
     </div>
 
+    <!-- Facebook (Page Plugin) -->
+    <div class="platform-content" id="content-facebook">
+      <div class="quick-actions">
+        <div class="quick-action" onclick="window.open('https://www.facebook.com/', '_blank')">🏠 首页</div>
+        <div class="quick-action" onclick="window.open('https://www.facebook.com/watch/', '_blank')">📺 Watch</div>
+        <div class="quick-action" onclick="window.open('https://www.facebook.com/marketplace/', '_blank')">🛒 市集</div>
+        <div class="quick-action" onclick="window.open('https://www.facebook.com/groups/', '_blank')">👥 社团</div>
+      </div>
+      <div class="embed-container" id="facebook-container">
+        <div class="loading-overlay" id="loading-facebook">
+          <div class="loading-spinner"></div>
+        </div>
+        <iframe id="facebook-iframe" src=""
+                style="width:100%;height:100%;border:none;background:#0a0e17;"
+                onload="hideLoading('facebook')"
+                onerror="showFacebookFallback()"></iframe>
+      </div>
+    </div>
+
     <!-- Mastodon -->
     <div class="platform-content" id="content-mastodon">
       <div class="quick-actions">
@@ -427,13 +450,14 @@
     <div class="carousel-dot" data-index="3" onclick="goToSlide(3)"></div>
     <div class="carousel-dot" data-index="4" onclick="goToSlide(4)"></div>
     <div class="carousel-dot" data-index="5" onclick="goToSlide(5)"></div>
+    <div class="carousel-dot" data-index="6" onclick="goToSlide(6)"></div>
     <button class="carousel-toggle" id="carousel-toggle" onclick="toggleCarousel()">
       ▶ 自动轮播
     </button>
   </div>
 
   <script>
-    const platforms = ['x', 'threads', 'bluesky', 'mastodon', 'reddit', 'weibo'];
+    const platforms = ['x', 'threads', 'bluesky', 'facebook', 'mastodon', 'reddit', 'weibo'];
     let currentIndex = 0;
     let carouselInterval = null;
     let isCarouselPlaying = false;
@@ -507,6 +531,25 @@
     function showFallback(platform) {
       hideLoading(platform);
       // 可以在这里添加更多 fallback 逻辑
+    }
+
+    function showFacebookFallback() {
+      hideLoading('facebook');
+      var container = document.getElementById('facebook-container');
+      if (container) {
+        container.innerHTML = '';
+        var fallback = document.createElement('div');
+        fallback.className = 'fallback-ui';
+        fallback.innerHTML = '<div class="platform-icon">📘</div>' +
+          '<h3>Facebook</h3>' +
+          '<p>Facebook 页面插件加载失败。点击下方按钮在新窗口中打开。</p>';
+        var btn = document.createElement('button');
+        btn.className = 'open-btn';
+        btn.textContent = '\uD83D\uDE80 打开 Facebook';
+        btn.addEventListener('click', function() { window.open('https://www.facebook.com/', '_blank'); });
+        fallback.appendChild(btn);
+        container.appendChild(fallback);
+      }
     }
 
     function showWeiboFallback() {
@@ -617,6 +660,15 @@
           if (bskyAccount) {
             var bskyEmbed = document.querySelector('bsky-embed');
             if (bskyEmbed) bskyEmbed.setAttribute('username', bskyAccount);
+          }
+
+          // Facebook Page Plugin
+          var fbPage = config.right_screen?.social?.facebook_page || 'https://www.facebook.com/CNN';
+          var fbIframe = document.getElementById('facebook-iframe');
+          if (fbIframe) {
+            fbIframe.src = 'https://www.facebook.com/plugins/page.php?href=' +
+              encodeURIComponent(fbPage) +
+              '&tabs=timeline&width=400&height=800&small_header=true&adapt_container_width=true&hide_cover=false&show_facepile=false';
           }
         })
         .catch(function() {
