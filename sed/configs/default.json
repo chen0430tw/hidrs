@@ -1,0 +1,18 @@
+{
+    "split": "----",
+    "fields": ["email", "password"],
+    "regex": {
+        "user": {
+            "re": "(.*?)@(.*?)",
+            "target": "email"
+        },
+        "suffix_email": {
+            "re": ".*?@(.*)",
+            "target": "email"
+        }
+    },
+    "custom_field": {
+        "source": "default_leak",
+        "xtime": "202504"
+    }
+}

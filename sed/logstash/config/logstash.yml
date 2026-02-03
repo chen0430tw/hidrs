@@ -1,0 +1,42 @@
+---
+## Logstash 配置文件
+## 这个配置文件包含 Logstash 的主要设置
+
+# 节点设置
+node.name: socialdb-logstash
+
+# 路径设置
+path.data: /usr/share/logstash/data
+path.logs: /usr/share/logstash/logs
+path.config: /usr/share/logstash/pipeline
+
+# Pipeline 设置
+pipeline.id: socialdb
+pipeline.workers: 2
+pipeline.batch.size: 125
+pipeline.batch.delay: 50
+
+# 队列设置 - 使用持久化队列提高可靠性
+queue.type: persisted
+queue.max_bytes: 1gb
+
+# API 设置
+api.enabled: true
+api.http.host: 0.0.0.0
+api.http.port: 9600
+
+# 监控和日志设置
+log.level: info
+monitoring.enabled: true
+
+# 性能设置
+config.reload.automatic: true
+config.reload.interval: 30s
+
+# Elasticsearch 输出设置（如果直接使用Elasticsearch输出）
+xpack.monitoring.elasticsearch.hosts: ["http://elasticsearch:9200"]
+xpack.monitoring.elasticsearch.username: ""
+xpack.monitoring.elasticsearch.password: ""
+
+# 其他设置
+http.host: "0.0.0.0"

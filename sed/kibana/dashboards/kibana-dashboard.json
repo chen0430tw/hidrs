@@ -1,0 +1,16 @@
+{
+    "attributes": {
+      "title": "社工库数据分析",
+      "hits": 0,
+      "description": "社工库数据统计分析仪表盘",
+      "panelsJSON": "[{\"embeddableConfig\":{},\"gridData\":{\"h\":15,\"i\":\"1\",\"w\":24,\"x\":0,\"y\":0},\"id\":\"socialdb-overview\",\"panelIndex\":\"1\",\"type\":\"visualization\",\"title\":\"数据总览\"},{\"embeddableConfig\":{},\"gridData\":{\"h\":15,\"i\":\"2\",\"w\":24,\"x\":24,\"y\":0},\"id\":\"socialdb-sources\",\"panelIndex\":\"2\",\"type\":\"visualization\",\"title\":\"数据来源分布\"},{\"embeddableConfig\":{},\"gridData\":{\"h\":15,\"i\":\"3\",\"w\":24,\"x\":0,\"y\":15},\"id\":\"socialdb-time\",\"panelIndex\":\"3\",\"type\":\"visualization\",\"title\":\"泄露时间分布\"},{\"embeddableConfig\":{},\"gridData\":{\"h\":15,\"i\":\"4\",\"w\":24,\"x\":24,\"y\":15},\"id\":\"socialdb-domains\",\"panelIndex\":\"4\",\"type\":\"visualization\",\"title\":\"邮箱域名分布\"},{\"embeddableConfig\":{},\"gridData\":{\"h\":15,\"i\":\"5\",\"w\":48,\"x\":0,\"y\":30},\"id\":\"socialdb-search\",\"panelIndex\":\"5\",\"type\":\"search\",\"title\":\"数据搜索\"}]",
+      "optionsJSON": "{\"darkTheme\":false,\"hidePanelTitles\":false,\"useMargins\":true}",
+      "version": 1,
+      "timeRestore": false,
+      "kibanaSavedObjectMeta": {
+        "searchSourceJSON": "{\"query\":{\"language\":\"lucene\",\"query\":\"\"},\"filter\":[]}"
+      }
+    },
+    "id": "socialdb-dashboard",
+    "type": "dashboard"
+  }

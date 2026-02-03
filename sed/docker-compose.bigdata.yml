@@ -1,0 +1,74 @@
+version: '3.7'
+
+# 为大数据量场景优化的Docker Compose配置
+services:
+  # Elasticsearch - 增大内存和存储
+  elasticsearch:
+    environment:
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"  # 增加到2GB内存
+      - "discovery.type=single-node"
+      - "xpack.security.enabled=false"
+      - "bootstrap.memory_lock=true"  
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - big-es-data:/usr/share/elasticsearch/data  # 使用单独的大容量卷
+    deploy:
+      resources:
+        limits:
+          memory: 4g  # 限制容器内存使用
+
+  # Kibana - 增大超时时间
+  kibana:
+    environment:
+      - "SERVER_MAXPAYLOADBYTES=10485760"  # 增大API请求体积限制到10MB
+      - "ELASTICSEARCH_REQUEST_TIMEOUT=300000"  # 增大ES请求超时到5分钟
+
+  # Logstash - 增大内存和批处理大小
+  logstash:
+    environment:
+      - "LS_JAVA_OPTS=-Xms1g -Xmx1g"  # 增加到1GB内存
+      - "pipeline.batch.size=2000"  # 增大批处理大小
+      - "pipeline.workers=4"  # 增加工作线程数
+
+  # 添加Redis用于缓存
+  redis:
+    image: redis:6.2-alpine
+    container_name: redis
+    ports:
+      - 6379:6379
+    volumes:
+      - redis-data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    networks:
+      - elk-net
+    restart: unless-stopped
+
+  # Flask API - 配置为引用模式
+  flask-api:
+    environment:
+      - STORAGE_MODE=reference  # 使用引用模式
+      - SOURCE_DATA_DIR=/app/data
+      - USE_PARTITIONING=true
+      - PARTITION_STRATEGY=source
+      - REDIS_URL=redis://redis:6379/0  # 使用Redis缓存
+    depends_on:
+      - elasticsearch
+      - redis  # 添加Redis依赖
+    volumes:
+      - ./data:/app/data:ro  # 只读挂载数据目录
+      - ./backend:/app
+      - api-logs:/app/logs  # 单独的日志卷
+
+volumes:
+  big-es-data:
+    driver: local
+  redis-data:
+    driver: local
+  api-logs:
+    driver: local

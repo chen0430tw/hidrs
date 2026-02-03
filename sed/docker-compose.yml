@@ -1,0 +1,99 @@
+version: '3.7'
+
+services:
+  # Elasticsearch
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.15.0
+    container_name: elasticsearch
+    environment:
+      - node.name=elasticsearch
+      - cluster.name=socialdb-cluster
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    ports:
+      - 9200:9200
+    networks:
+      - elk-net
+
+  # Kibana
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.15.0
+    container_name: kibana
+    ports:
+      - 5601:5601
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+    networks:
+      - elk-net
+
+  # Logstash
+  logstash:
+    image: docker.elastic.co/logstash/logstash:7.15.0
+    container_name: logstash
+    volumes:
+      - ./logstash/pipeline:/usr/share/logstash/pipeline
+      - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml
+      - ./data:/data
+    environment:
+      - "LS_JAVA_OPTS=-Xms256m -Xmx256m"
+      - "DATA_PATH=/data"
+    ports:
+      - 5044:5044
+      - 9600:9600
+    depends_on:
+      - elasticsearch
+    networks:
+      - elk-net
+
+  # Flask API
+  flask-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: socialdb-api
+    volumes:
+      - ./backend:/app
+      - ./data:/app/data
+    ports:
+      - 5000:5000
+    environment:
+      - ES_HOST=elasticsearch
+      - ES_PORT=9200
+      - ES_INDEX=socialdb
+      - DEBUG=True
+    depends_on:
+      - elasticsearch
+    networks:
+      - elk-net
+
+  # Frontend (Vue.js)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: socialdb-frontend
+    volumes:
+      - ./frontend:/app
+    ports:
+      - 8080:8080
+    depends_on:
+      - flask-api
+    networks:
+      - elk-net
+
+networks:
+  elk-net:
+    driver: bridge
+
+volumes:
+  es-data:
+    driver: local
