@@ -13,6 +13,7 @@ import time
 import shutil
 import subprocess
 import logging
+import threading
 from datetime import datetime
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -145,6 +146,119 @@ def add_system_log(level, message):
     if len(events) > MAX_EVENTS:
         events[:] = events[-MAX_EVENTS:]
     save_events()
+
+
+# ============================================================
+# 系统监控告警生成器
+# ============================================================
+
+# 系统监控状态
+last_network_io = None
+last_check_time = None
+monitor_running = False
+
+
+def add_alert(alert_type, message):
+    """添加告警到事件流（不记录到系统日志，避免重复）"""
+    global events
+    event = {
+        "type": alert_type,  # 'info', 'warning', 'critical'
+        "message": message,
+        "timestamp": datetime.now().isoformat()
+    }
+    events.append(event)
+    if len(events) > MAX_EVENTS:
+        events[:] = events[-MAX_EVENTS:]
+    save_events()
+
+
+def check_system_status():
+    """检查系统状态并生成告警"""
+    global last_network_io, last_check_time
+
+    try:
+        # 1. CPU 使用率检查
+        cpu_percent = psutil.cpu_percent(interval=1)
+        if cpu_percent > 85:
+            add_alert("critical", f"⚠️ CPU 使用率过高: {cpu_percent:.1f}%")
+        elif cpu_percent > 70:
+            add_alert("warning", f"⚡ CPU 使用率较高: {cpu_percent:.1f}%")
+        elif cpu_percent < 20:
+            add_alert("info", f"✅ CPU 使用率正常: {cpu_percent:.1f}%")
+
+        # 2. 内存使用率检查
+        memory = psutil.virtual_memory()
+        mem_percent = memory.percent
+        if mem_percent > 85:
+            add_alert("critical", f"⚠️ 内存使用率过高: {mem_percent:.1f}% ({memory.used // (1024**3)}GB / {memory.total // (1024**3)}GB)")
+        elif mem_percent > 70:
+            add_alert("warning", f"💾 内存使用率较高: {mem_percent:.1f}%")
+
+        # 3. 磁盘空间检查
+        disk = psutil.disk_usage('/')
+        disk_percent = disk.percent
+        if disk_percent > 90:
+            add_alert("critical", f"⚠️ 磁盘空间不足: {disk_percent:.1f}% ({disk.free // (1024**3)}GB 剩余)")
+        elif disk_percent > 80:
+            add_alert("warning", f"💿 磁盘空间紧张: {disk_percent:.1f}%")
+
+        # 4. 网络流量检查
+        current_network = psutil.net_io_counters()
+        current_time = time.time()
+
+        if last_network_io is not None and last_check_time is not None:
+            time_delta = current_time - last_check_time
+            bytes_sent_delta = current_network.bytes_sent - last_network_io.bytes_sent
+            bytes_recv_delta = current_network.bytes_recv - last_network_io.bytes_recv
+
+            # 计算速率 (MB/s)
+            send_rate = (bytes_sent_delta / time_delta) / (1024 * 1024)
+            recv_rate = (bytes_recv_delta / time_delta) / (1024 * 1024)
+
+            if send_rate > 50 or recv_rate > 50:
+                add_alert("warning", f"🌐 网络流量异常: ↑{send_rate:.1f}MB/s ↓{recv_rate:.1f}MB/s")
+            elif send_rate > 10 or recv_rate > 10:
+                add_alert("info", f"📡 网络活动正常: ↑{send_rate:.1f}MB/s ↓{recv_rate:.1f}MB/s")
+
+        last_network_io = current_network
+        last_check_time = current_time
+
+        # 5. 系统负载检查 (仅 Linux/Unix)
+        if hasattr(os, 'getloadavg'):
+            load1, load5, load15 = os.getloadavg()
+            cpu_count = psutil.cpu_count()
+            if load1 > cpu_count * 0.8:
+                add_alert("warning", f"📊 系统负载较高: {load1:.2f} ({cpu_count} 核心)")
+
+    except Exception as e:
+        logger.error(f"系统监控检查失败: {e}")
+
+
+def system_monitor_loop():
+    """系统监控主循环（后台线程）"""
+    global monitor_running
+    logger.info("系统监控线程已启动")
+
+    while monitor_running:
+        try:
+            check_system_status()
+            # 每 60 秒检查一次
+            time.sleep(60)
+        except Exception as e:
+            logger.error(f"系统监控循环错误: {e}")
+            time.sleep(60)
+
+    logger.info("系统监控线程已停止")
+
+
+def start_system_monitor():
+    """启动系统监控后台线程"""
+    global monitor_running
+    if not monitor_running:
+        monitor_running = True
+        monitor_thread = threading.Thread(target=system_monitor_loop, daemon=True)
+        monitor_thread.start()
+        logger.info("系统监控已启动（每 60 秒检查一次）")
 
 
 # ============================================================
@@ -825,6 +939,10 @@ if __name__ == '__main__':
     add_system_log("info", f"RSS 源数量: {len(config.get('right_screen', {}).get('news', {}).get('feeds', []))}")
     add_system_log("info", f"股票标的: {', '.join(config.get('right_screen', {}).get('stocks', {}).get('symbols', []))}")
     add_system_log("info", "系统控制台就绪，等待指令...")
+
+    # 启动系统监控线程
+    start_system_monitor()
+    add_system_log("info", "系统监控告警已启用（CPU/内存/网络/磁盘）")
 
     # 启动 Flask
     app.run(
