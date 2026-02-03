@@ -369,6 +369,90 @@ def news_feeds():
 
 
 # ============================================================
+# Twitter 代理 API（绕过 X-Frame-Options 限制）
+# ============================================================
+
+@app.route('/api/twitter/timeline/<username>')
+def twitter_timeline_proxy(username):
+    """代理 Twitter syndication timeline，绕过 iframe 嵌入限制"""
+    try:
+        # Twitter 官方 syndication endpoint（无需认证）
+        url = f'https://syndication.twitter.com/srv/timeline-profile/screen-name/{username}'
+        resp = requests.get(url, timeout=10, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        })
+
+        if resp.status_code != 200:
+            # 如果 syndication 失败，返回一个简单的 fallback 页面
+            return Response(
+                _twitter_fallback_html(username),
+                mimetype='text/html'
+            )
+
+        # 获取原始 HTML，注入深色主题样式
+        html = resp.text
+
+        # 注入自定义 CSS 使其匹配深色主题
+        dark_css = """
+        <style>
+          body { background: #0a0e17 !important; color: #e5e7eb !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+          a { color: #00f0ff !important; }
+          .timeline-Widget { background: #0a0e17 !important; border: none !important; }
+          .timeline-Header { background: transparent !important; border-bottom: 1px solid rgba(0,240,255,0.2) !important; }
+          .timeline-Tweet { border-bottom: 1px solid rgba(0,240,255,0.1) !important; }
+          .timeline-Tweet-text { color: #e5e7eb !important; }
+          .timeline-Tweet-author { color: #9ca3af !important; }
+          .TweetAuthor-name { color: #e5e7eb !important; }
+          .TweetAuthor-screenName { color: #6b7280 !important; }
+          .timeline-Footer { background: transparent !important; border-top: 1px solid rgba(0,240,255,0.2) !important; }
+          /* 覆盖所有白色背景 */
+          [style*="background-color: white"], [style*="background: white"],
+          [style*="background-color: rgb(255, 255, 255)"] {
+            background-color: #0a0e17 !important;
+          }
+        </style>
+        """
+
+        # 在 </head> 前注入样式
+        if '</head>' in html:
+            html = html.replace('</head>', dark_css + '</head>')
+        else:
+            html = dark_css + html
+
+        return Response(html, mimetype='text/html')
+
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"Twitter syndication 代理失败: {e}")
+        return Response(
+            _twitter_fallback_html(username),
+            mimetype='text/html'
+        )
+
+
+def _twitter_fallback_html(username):
+    """Twitter 代理失败时的 fallback HTML"""
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<style>
+  body {{ background: #0a0e17; color: #e5e7eb; font-family: -apple-system, sans-serif;
+         display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }}
+  .container {{ text-align: center; }}
+  .icon {{ font-size: 48px; margin-bottom: 16px; }}
+  h3 {{ color: #00f0ff; font-weight: normal; margin-bottom: 8px; }}
+  p {{ color: #6b7280; font-size: 12px; margin-bottom: 20px; max-width: 280px; line-height: 1.6; }}
+  .btn {{ padding: 10px 24px; background: rgba(0,240,255,0.15); border: 1px solid #00f0ff;
+          border-radius: 6px; color: #00f0ff; font-size: 13px; cursor: pointer; text-decoration: none; display: inline-block; }}
+  .btn:hover {{ background: #00f0ff; color: #0a0e17; }}
+</style></head><body>
+<div class="container">
+  <div class="icon">\U0001D54F</div>
+  <h3>X / Twitter</h3>
+  <p>Timeline 加载失败。可能是网络限制。</p>
+  <a class="btn" href="https://x.com/{username}" target="_blank">\U0001F680 打开 @{username}</a>
+</div></body></html>"""
+
+
+# ============================================================
 # 配置管理 API
 # ============================================================
 
