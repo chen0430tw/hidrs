@@ -358,7 +358,7 @@ def hidrs_proxy(path):
 _rss_cache = {
     'items': [],
     'timestamp': 0,
-    'ttl': 120  # 缓存 2 分钟
+    'ttl': 300  # 缓存 5 分钟
 }
 
 
@@ -382,12 +382,16 @@ def news_feeds():
         try:
             feed = feedparser.parse(feed_cfg['url'])
             for entry in feed.entries[:10]:
+                # 用 feedparser 解析后的 UTC 时间戳排序（避免时区字符串乱序）
+                parsed_time = entry.get('published_parsed') or entry.get('updated_parsed')
+                ts = time.mktime(parsed_time) if parsed_time else 0
                 items.append({
                     "source": feed_cfg['name'],
                     "title": entry.get('title', ''),
                     "link": entry.get('link', ''),
                     "published": entry.get('published', ''),
-                    "summary": entry.get('summary', '')[:200] if entry.get('summary') else ''
+                    "summary": entry.get('summary', '')[:200] if entry.get('summary') else '',
+                    "_ts": ts
                 })
         except Exception as e:
             logger.warning(f"获取 RSS 失败 [{feed_cfg['name']}]: {e}")
@@ -400,7 +404,11 @@ def news_feeds():
         for future in as_completed(futures):
             all_items.extend(future.result())
 
-    all_items.sort(key=lambda x: x.get('published', ''), reverse=True)
+    # 用 UTC 时间戳排序，各语言源自然交错
+    all_items.sort(key=lambda x: x.get('_ts', 0), reverse=True)
+    # 移除内部排序字段
+    for item in all_items:
+        item.pop('_ts', None)
 
     # 更新缓存
     _rss_cache['items'] = all_items
@@ -501,6 +509,60 @@ def _twitter_fallback_html(username):
   <p>Timeline 加载失败。可能是网络限制。</p>
   <a class="btn" href="https://x.com/{username}" target="_blank">\U0001F680 打开 @{username}</a>
 </div></body></html>"""
+
+
+# ============================================================
+# 天气 API（wttr.in，免费无需 API key）
+# ============================================================
+
+_weather_cache = {'data': None, 'timestamp': 0, 'ttl': 1800, 'city': ''}
+
+
+@app.route('/api/weather')
+def weather():
+    """获取天气信息（wttr.in，30 分钟缓存）"""
+    load_config()
+    now = time.time()
+    city = config.get('weather', {}).get('city', 'Taipei')
+
+    # 缓存未过期且城市未变，直接返回
+    if (_weather_cache['data']
+            and (now - _weather_cache['timestamp']) < _weather_cache['ttl']
+            and _weather_cache.get('city') == city):
+        return jsonify(_weather_cache['data'])
+
+    try:
+        resp = requests.get(
+            f'https://wttr.in/{city}?format=j1',
+            timeout=8,
+            headers={'User-Agent': 'curl/7.68.0', 'Accept-Language': 'en'}
+        )
+        if resp.status_code != 200:
+            if _weather_cache['data']:
+                return jsonify(_weather_cache['data'])
+            return jsonify({'error': 'weather API error'}), 502
+
+        data = resp.json()
+        current = data['current_condition'][0]
+        result = {
+            'temp_c': current['temp_C'],
+            'condition': current['weatherDesc'][0]['value'],
+            'humidity': current['humidity'],
+            'feels_like': current['FeelsLikeC'],
+            'city': city
+        }
+
+        _weather_cache['data'] = result
+        _weather_cache['timestamp'] = now
+        _weather_cache['city'] = city
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.warning(f"天气获取失败: {e}")
+        if _weather_cache['data']:
+            return jsonify(_weather_cache['data'])
+        return jsonify({'error': str(e)}), 502
 
 
 # ============================================================

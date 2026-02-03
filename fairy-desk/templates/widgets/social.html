@@ -37,13 +37,26 @@
       border: none;
       color: #6b7280;
       font-size: 12px;
-      cursor: pointer;
+      cursor: grab;
       display: flex;
       align-items: center;
       gap: 6px;
       white-space: nowrap;
       border-bottom: 2px solid transparent;
       transition: all 0.2s;
+      user-select: none;
+    }
+
+    .platform-tab:active {
+      cursor: grabbing;
+    }
+
+    .platform-tab.dragging {
+      opacity: 0.4;
+    }
+
+    .platform-tab.drag-over {
+      border-left: 2px solid #00f0ff;
     }
 
     .platform-tab:hover {
@@ -293,37 +306,8 @@
   </style>
 </head>
 <body>
-  <!-- 平台切换标签 -->
-  <div class="platform-tabs">
-    <button class="platform-tab active" data-platform="x" onclick="switchPlatform('x')">
-      <span class="icon">𝕏</span>
-      <span>X / Twitter</span>
-    </button>
-    <button class="platform-tab" data-platform="threads" onclick="switchPlatform('threads')">
-      <span class="icon">🔗</span>
-      <span>Threads</span>
-    </button>
-    <button class="platform-tab" data-platform="bluesky" onclick="switchPlatform('bluesky')">
-      <span class="icon">🦋</span>
-      <span>Bluesky</span>
-    </button>
-    <button class="platform-tab" data-platform="facebook" onclick="switchPlatform('facebook')">
-      <span class="icon">📘</span>
-      <span>Facebook</span>
-    </button>
-    <button class="platform-tab" data-platform="mastodon" onclick="switchPlatform('mastodon')">
-      <span class="icon">🐘</span>
-      <span>Mastodon</span>
-    </button>
-    <button class="platform-tab" data-platform="reddit" onclick="switchPlatform('reddit')">
-      <span class="icon">🤖</span>
-      <span>Reddit</span>
-    </button>
-    <button class="platform-tab" data-platform="weibo" onclick="switchPlatform('weibo')">
-      <span class="icon">🔴</span>
-      <span>微博</span>
-    </button>
-  </div>
+  <!-- 平台切换标签（由 JS 动态生成，支持拖动排序） -->
+  <div class="platform-tabs" id="platform-tabs"></div>
 
   <!-- 内容区域 -->
   <div class="content-area">
@@ -442,49 +426,159 @@
     </div>
   </div>
 
-  <!-- 轮播控制 -->
+  <!-- 轮播控制（圆点由 JS 动态生成） -->
   <div class="carousel-controls">
-    <div class="carousel-dot active" data-index="0" onclick="goToSlide(0)"></div>
-    <div class="carousel-dot" data-index="1" onclick="goToSlide(1)"></div>
-    <div class="carousel-dot" data-index="2" onclick="goToSlide(2)"></div>
-    <div class="carousel-dot" data-index="3" onclick="goToSlide(3)"></div>
-    <div class="carousel-dot" data-index="4" onclick="goToSlide(4)"></div>
-    <div class="carousel-dot" data-index="5" onclick="goToSlide(5)"></div>
-    <div class="carousel-dot" data-index="6" onclick="goToSlide(6)"></div>
     <button class="carousel-toggle" id="carousel-toggle" onclick="toggleCarousel()">
       ▶ 自动轮播
     </button>
   </div>
 
   <script>
-    const platforms = ['x', 'threads', 'bluesky', 'facebook', 'mastodon', 'reddit', 'weibo'];
+    // 平台定义（可拖动排序）
+    var platformDefs = [
+      { id: 'x', icon: '\u{1D54F}', label: 'X / Twitter' },
+      { id: 'threads', icon: '🔗', label: 'Threads' },
+      { id: 'bluesky', icon: '🦋', label: 'Bluesky' },
+      { id: 'facebook', icon: '📘', label: 'Facebook' },
+      { id: 'mastodon', icon: '🐘', label: 'Mastodon' },
+      { id: 'reddit', icon: '🤖', label: 'Reddit' },
+      { id: 'weibo', icon: '🔴', label: '微博' }
+    ];
+
     let currentIndex = 0;
     let carouselInterval = null;
     let isCarouselPlaying = false;
+    var dragSrcEl = null;
+
+    function getPlatforms() {
+      return platformDefs.map(function(p) { return p.id; });
+    }
+
+    // 渲染页签栏
+    function renderTabs() {
+      var container = document.getElementById('platform-tabs');
+      container.innerHTML = '';
+      platformDefs.forEach(function(p, i) {
+        var btn = document.createElement('button');
+        btn.className = 'platform-tab' + (i === currentIndex ? ' active' : '');
+        btn.dataset.platform = p.id;
+        btn.dataset.index = i;
+        btn.draggable = true;
+
+        var iconSpan = document.createElement('span');
+        iconSpan.className = 'icon';
+        iconSpan.textContent = p.icon;
+        btn.appendChild(iconSpan);
+
+        var labelSpan = document.createElement('span');
+        labelSpan.textContent = p.label;
+        btn.appendChild(labelSpan);
+
+        btn.addEventListener('click', function() { switchPlatform(p.id); });
+        btn.addEventListener('dragstart', handleDragStart);
+        btn.addEventListener('dragover', handleDragOver);
+        btn.addEventListener('dragenter', handleDragEnter);
+        btn.addEventListener('dragleave', handleDragLeave);
+        btn.addEventListener('drop', handleDrop);
+        btn.addEventListener('dragend', handleDragEnd);
+
+        container.appendChild(btn);
+      });
+      renderDots();
+    }
+
+    // 拖动排序逻辑
+    function handleDragStart(e) {
+      dragSrcEl = this;
+      this.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', this.dataset.index);
+    }
+
+    function handleDragOver(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+    }
+
+    function handleDragEnter(e) {
+      e.preventDefault();
+      this.classList.add('drag-over');
+    }
+
+    function handleDragLeave() {
+      this.classList.remove('drag-over');
+    }
+
+    function handleDrop(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.classList.remove('drag-over');
+
+      var fromIdx = parseInt(e.dataTransfer.getData('text/plain'));
+      var toIdx = parseInt(this.dataset.index);
+
+      if (fromIdx === toIdx) return;
+
+      // 保存当前激活平台 ID（必须在 splice 之前）
+      var activePlatformId = platformDefs[currentIndex] ? platformDefs[currentIndex].id : platformDefs[0].id;
+
+      // 重新排列 platformDefs
+      var moved = platformDefs.splice(fromIdx, 1)[0];
+      platformDefs.splice(toIdx, 0, moved);
+
+      // 找到激活平台在新顺序中的位置
+      var newIdx = platformDefs.findIndex(function(p) { return p.id === activePlatformId; });
+      currentIndex = newIdx >= 0 ? newIdx : 0;
+
+      renderTabs();
+    }
+
+    function handleDragEnd() {
+      document.querySelectorAll('.platform-tab').forEach(function(tab) {
+        tab.classList.remove('dragging', 'drag-over');
+      });
+    }
+
+    // 渲染轮播圆点
+    function renderDots() {
+      var dotsContainer = document.querySelector('.carousel-controls');
+      if (!dotsContainer) return;
+      // 清除旧圆点（保留 toggle 按钮）
+      var toggle = document.getElementById('carousel-toggle');
+      dotsContainer.innerHTML = '';
+      platformDefs.forEach(function(p, i) {
+        var dot = document.createElement('div');
+        dot.className = 'carousel-dot' + (i === currentIndex ? ' active' : '');
+        dot.dataset.index = i;
+        dot.addEventListener('click', function() { goToSlide(i); });
+        dotsContainer.appendChild(dot);
+      });
+      dotsContainer.appendChild(toggle);
+    }
 
     // 切换平台
     function switchPlatform(platform) {
+      var platforms = getPlatforms();
       const index = platforms.indexOf(platform);
       if (index === -1) return;
 
       currentIndex = index;
 
       // 更新标签状态
-      document.querySelectorAll('.platform-tab').forEach(tab => {
+      document.querySelectorAll('.platform-tab').forEach(function(tab) {
         tab.classList.toggle('active', tab.dataset.platform === platform);
       });
 
       // 更新内容显示
-      document.querySelectorAll('.platform-content').forEach(content => {
+      document.querySelectorAll('.platform-content').forEach(function(content) {
         content.classList.remove('active');
       });
       document.getElementById('content-' + platform).classList.add('active');
 
       // 更新轮播指示器
-      document.querySelectorAll('.carousel-dot').forEach((dot, i) => {
+      document.querySelectorAll('.carousel-dot').forEach(function(dot, i) {
         dot.classList.toggle('active', i === index);
       });
-
     }
 
     // Twitter fallback（iframe 加载失败时调用）
@@ -571,6 +665,7 @@
 
     // 轮播控制
     function goToSlide(index) {
+      var platforms = getPlatforms();
       if (index >= 0 && index < platforms.length) {
         switchPlatform(platforms[index]);
       }
@@ -591,6 +686,7 @@
         btn.classList.add('playing');
 
         carouselInterval = setInterval(() => {
+          var platforms = getPlatforms();
           currentIndex = (currentIndex + 1) % platforms.length;
           switchPlatform(platforms[currentIndex]);
         }, 10000); // 每10秒切换
@@ -645,6 +741,9 @@
 
     // 初始化
     document.addEventListener('DOMContentLoaded', function() {
+      // 渲染可拖动页签
+      renderTabs();
+
       // 从配置加载 Twitter 帐号列表
       fetch('/api/config')
         .then(function(r) { return r.json(); })
@@ -662,13 +761,17 @@
             if (bskyEmbed) bskyEmbed.setAttribute('username', bskyAccount);
           }
 
-          // Facebook Page Plugin
+          // Facebook Page Plugin（宽度适应容器）
           var fbPage = config.right_screen?.social?.facebook_page || 'https://www.facebook.com/CNN';
           var fbIframe = document.getElementById('facebook-iframe');
           if (fbIframe) {
+            var fbContainer = document.getElementById('facebook-container');
+            var fbWidth = fbContainer ? Math.min(fbContainer.clientWidth, 500) : 400;
+            var fbHeight = fbContainer ? fbContainer.clientHeight : 800;
             fbIframe.src = 'https://www.facebook.com/plugins/page.php?href=' +
               encodeURIComponent(fbPage) +
-              '&tabs=timeline&width=400&height=800&small_header=true&adapt_container_width=true&hide_cover=false&show_facepile=false';
+              '&tabs=timeline&width=' + fbWidth + '&height=' + fbHeight +
+              '&small_header=true&adapt_container_width=true&hide_cover=true&show_facepile=false';
           }
         })
         .catch(function() {
