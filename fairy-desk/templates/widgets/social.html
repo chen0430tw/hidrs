@@ -531,6 +531,22 @@
       currentIndex = newIdx >= 0 ? newIdx : 0;
 
       renderTabs();
+
+      // 保存排序到配置
+      var order = platformDefs.map(function(p) { return p.id; });
+      fetch('/api/config')
+        .then(function(r) { return r.json(); })
+        .then(function(cfg) {
+          if (!cfg.right_screen) cfg.right_screen = {};
+          if (!cfg.right_screen.social) cfg.right_screen.social = {};
+          cfg.right_screen.social.platform_order = order;
+          return fetch('/api/config', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(cfg)
+          });
+        })
+        .catch(function() {});
     }
 
     function handleDragEnd() {
@@ -557,6 +573,8 @@
     }
 
     // 切换平台
+    var facebookLoaded = false;
+
     function switchPlatform(platform) {
       var platforms = getPlatforms();
       const index = platforms.indexOf(platform);
@@ -579,6 +597,11 @@
       document.querySelectorAll('.carousel-dot').forEach(function(dot, i) {
         dot.classList.toggle('active', i === index);
       });
+
+      // Facebook 懒加载：只在第一次切换到 Facebook 时加载 Page Plugin
+      if (platform === 'facebook' && !facebookLoaded) {
+        loadFacebookPlugin();
+      }
     }
 
     // Twitter fallback（iframe 加载失败时调用）
@@ -615,7 +638,80 @@
       container.appendChild(fallback);
     }
 
+    // ===== iframe 离线检测 =====
+    var iframeTimeouts = {};
+
+    function setupIframeTimeout(platform, iframe, ms) {
+      // 清除旧的 timeout
+      if (iframeTimeouts[platform]) clearTimeout(iframeTimeouts[platform]);
+
+      iframeTimeouts[platform] = setTimeout(function() {
+        var loading = document.getElementById('loading-' + platform);
+        if (loading && !loading.classList.contains('hidden')) {
+          // 超时：替换 loading 为离线提示
+          showOfflineOverlay(platform, iframe);
+        }
+      }, ms || 15000);
+
+      // iframe 加载成功时清除 timeout
+      iframe.addEventListener('load', function onLoad() {
+        clearTimeout(iframeTimeouts[platform]);
+        iframe.removeEventListener('load', onLoad);
+      });
+    }
+
+    function showOfflineOverlay(platform, iframe) {
+      var loading = document.getElementById('loading-' + platform);
+      if (!loading) return;
+
+      loading.innerHTML = '';
+      loading.classList.remove('hidden');
+      loading.style.flexDirection = 'column';
+      loading.style.gap = '12px';
+
+      var icon = document.createElement('div');
+      icon.style.cssText = 'font-size:36px;';
+      icon.textContent = '📡';
+      loading.appendChild(icon);
+
+      var msg = document.createElement('div');
+      msg.style.cssText = 'color:#6b7280;font-size:12px;text-align:center;max-width:240px;line-height:1.6;';
+      msg.textContent = '无法连接到服务，可能是网络问题或该服务已离线。';
+      loading.appendChild(msg);
+
+      var retryBtn = document.createElement('button');
+      retryBtn.style.cssText = 'padding:8px 20px;background:rgba(0,240,255,0.15);border:1px solid #00f0ff;border-radius:4px;color:#00f0ff;font-size:12px;cursor:pointer;transition:all 0.2s;';
+      retryBtn.textContent = '🔄 重试';
+      retryBtn.addEventListener('click', function() {
+        // 恢复 loading spinner
+        loading.innerHTML = '';
+        loading.style.flexDirection = '';
+        loading.style.gap = '';
+        var spinner = document.createElement('div');
+        spinner.className = 'loading-spinner';
+        loading.appendChild(spinner);
+        loading.classList.remove('hidden');
+
+        // 重新加载 iframe
+        if (platform === 'facebook') {
+          facebookLoaded = false;
+          loadFacebookPlugin();
+        } else {
+          var currentSrc = iframe.src;
+          iframe.src = '';
+          setTimeout(function() { iframe.src = currentSrc; }, 100);
+          setupIframeTimeout(platform, iframe, 15000);
+        }
+      });
+      loading.appendChild(retryBtn);
+    }
+
     function hideLoading(platform) {
+      // 清除超时计时器
+      if (iframeTimeouts[platform]) {
+        clearTimeout(iframeTimeouts[platform]);
+        delete iframeTimeouts[platform];
+      }
       const loading = document.getElementById('loading-' + platform);
       if (loading) {
         setTimeout(() => loading.classList.add('hidden'), 300);
@@ -624,7 +720,27 @@
 
     function showFallback(platform) {
       hideLoading(platform);
-      // 可以在这里添加更多 fallback 逻辑
+    }
+
+    // Facebook Page Plugin 懒加载（等容器可见后再设置 src，避免 0 宽度）
+    function loadFacebookPlugin() {
+      var fbIframe = document.getElementById('facebook-iframe');
+      if (!fbIframe || facebookLoaded) return;
+      facebookLoaded = true;
+
+      var fbContainer = document.getElementById('facebook-container');
+      var fbWidth = fbContainer ? Math.max(fbContainer.clientWidth, 340) : 400;
+      if (fbWidth > 500) fbWidth = 500;
+      var fbHeight = fbContainer ? Math.max(fbContainer.clientHeight, 400) : 800;
+
+      var fbPage = facebookPageUrl || 'https://www.facebook.com/CNN';
+      fbIframe.src = 'https://www.facebook.com/plugins/page.php?href=' +
+        encodeURIComponent(fbPage) +
+        '&tabs=timeline&width=' + fbWidth + '&height=' + fbHeight +
+        '&small_header=true&adapt_container_width=true&hide_cover=true&show_facepile=false';
+
+      // 超时保护
+      setupIframeTimeout('facebook', fbIframe, 15000);
     }
 
     function showFacebookFallback() {
@@ -739,19 +855,38 @@
       bar.appendChild(openBtn);
     }
 
+    // Facebook 页面 URL（配置加载后赋值，懒加载时使用）
+    var facebookPageUrl = '';
+
     // 初始化
     document.addEventListener('DOMContentLoaded', function() {
-      // 渲染可拖动页签
-      renderTabs();
-
-      // 从配置加载 Twitter 帐号列表
+      // 从配置加载
       fetch('/api/config')
         .then(function(r) { return r.json(); })
         .then(function(config) {
+          // 恢复平台排序（从 config 持久化的顺序）
+          var savedOrder = config.right_screen?.social?.platform_order;
+          if (savedOrder && Array.isArray(savedOrder) && savedOrder.length > 0) {
+            var reordered = [];
+            savedOrder.forEach(function(id) {
+              var found = platformDefs.find(function(p) { return p.id === id; });
+              if (found) reordered.push(found);
+            });
+            // 添加不在 savedOrder 中的新平台（可能后续新增）
+            platformDefs.forEach(function(p) {
+              if (!reordered.find(function(r) { return r.id === p.id; })) {
+                reordered.push(p);
+              }
+            });
+            platformDefs = reordered;
+          }
+
+          // 渲染可拖动页签
+          renderTabs();
+
           // Twitter 帐号
           twitterAccounts = config.right_screen?.social?.twitter_accounts || ['X'];
           buildTwitterAccountBar(twitterAccounts);
-          // 加载第一个帐号
           switchTwitterAccount(twitterAccounts[0]);
 
           // Bluesky 帐号
@@ -761,21 +896,18 @@
             if (bskyEmbed) bskyEmbed.setAttribute('username', bskyAccount);
           }
 
-          // Facebook Page Plugin（宽度适应容器）
-          var fbPage = config.right_screen?.social?.facebook_page || 'https://www.facebook.com/CNN';
-          var fbIframe = document.getElementById('facebook-iframe');
-          if (fbIframe) {
-            var fbContainer = document.getElementById('facebook-container');
-            var fbWidth = fbContainer ? Math.min(fbContainer.clientWidth, 500) : 400;
-            var fbHeight = fbContainer ? fbContainer.clientHeight : 800;
-            fbIframe.src = 'https://www.facebook.com/plugins/page.php?href=' +
-              encodeURIComponent(fbPage) +
-              '&tabs=timeline&width=' + fbWidth + '&height=' + fbHeight +
-              '&small_header=true&adapt_container_width=true&hide_cover=true&show_facepile=false';
-          }
+          // 缓存 Facebook 页面 URL（懒加载时使用，不在此处设 src）
+          facebookPageUrl = config.right_screen?.social?.facebook_page || 'https://www.facebook.com/CNN';
+
+          // 为 Mastodon / Weibo 设置超时保护
+          var mastodonIframe = document.querySelector('#content-mastodon iframe');
+          if (mastodonIframe) setupIframeTimeout('mastodon', mastodonIframe, 15000);
+          var weiboIframe = document.querySelector('#content-weibo iframe');
+          if (weiboIframe) setupIframeTimeout('weibo', weiboIframe, 15000);
         })
         .catch(function() {
           // 配置加载失败，用默认
+          renderTabs();
           twitterAccounts = ['X'];
           buildTwitterAccountBar(twitterAccounts);
           switchTwitterAccount('X');
@@ -790,11 +922,14 @@
       }, 10000);
     });
 
-    // 监听 iframe 加载错误（Bluesky, Mastodon, Weibo 等）
+    // 监听 iframe 加载错误
     document.querySelectorAll('iframe').forEach(function(iframe) {
       iframe.addEventListener('error', function() {
-        var platform = iframe.closest('.platform-content').id.replace('content-', '');
-        showFallback(platform);
+        var contentEl = iframe.closest('.platform-content');
+        if (contentEl) {
+          var platform = contentEl.id.replace('content-', '');
+          showOfflineOverlay(platform, iframe);
+        }
       });
     });
   </script>

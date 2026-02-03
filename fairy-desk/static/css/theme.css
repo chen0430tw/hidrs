@@ -820,6 +820,60 @@ body {
 }
 
 /* ============================================================
+   iframe 离线检测覆盖层
+   ============================================================ */
+.iframe-offline-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  gap: 10px;
+}
+
+.iframe-offline-overlay .offline-icon {
+  font-size: 40px;
+  opacity: 0.6;
+}
+
+.iframe-offline-overlay .offline-title {
+  color: var(--text-secondary);
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.iframe-offline-overlay .offline-message {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+  max-width: 260px;
+  line-height: 1.6;
+}
+
+.iframe-offline-overlay .offline-retry-btn {
+  margin-top: 8px;
+  padding: 8px 24px;
+  background: rgba(0, 240, 255, 0.1);
+  border: 1px solid var(--neon-cyan);
+  border-radius: 4px;
+  color: var(--neon-cyan);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.iframe-offline-overlay .offline-retry-btn:hover {
+  background: var(--neon-cyan);
+  color: var(--bg-primary);
+}
+
+/* ============================================================
    响应式（可选，MVP 先不实现）
    ============================================================ */
 @media (max-width: 1200px) {

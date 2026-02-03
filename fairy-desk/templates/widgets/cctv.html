@@ -317,6 +317,40 @@
       text-transform: uppercase;
     }
 
+    /* 摄像头离线覆盖层 */
+    .cam-offline-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(10, 14, 23, 0.92);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 5;
+      gap: 6px;
+      cursor: pointer;
+    }
+
+    .cam-offline-overlay .cam-offline-icon {
+      font-size: 24px;
+      opacity: 0.5;
+    }
+
+    .cam-offline-overlay .cam-offline-text {
+      color: #6b7280;
+      font-size: 10px;
+      letter-spacing: 1px;
+    }
+
+    .cam-offline-overlay .cam-retry-text {
+      color: rgba(0,240,255,0.5);
+      font-size: 9px;
+      margin-top: 2px;
+    }
+
     /* 全屏单摄像头 */
     .camera-cell.fullscreen {
       position: fixed;
@@ -463,6 +497,119 @@
       }
     }
 
+    // ===== 摄像头离线检测 =====
+    var camTimeouts = {};
+
+    function setupCamOfflineDetection(cell, mediaEl, cam, camIndex) {
+      var timeoutKey = 'cam-' + camIndex;
+
+      // 清除旧计时器
+      if (camTimeouts[timeoutKey]) clearTimeout(camTimeouts[timeoutKey]);
+
+      var timeoutMs = 20000; // 20 秒超时（摄像头流通常较慢）
+
+      camTimeouts[timeoutKey] = setTimeout(function() {
+        // 超时：显示离线覆盖层
+        if (!cell.querySelector('.cam-offline-overlay')) {
+          showCamOffline(cell, cam, camIndex);
+        }
+      }, timeoutMs);
+
+      var tagName = mediaEl.tagName.toLowerCase();
+
+      if (tagName === 'iframe') {
+        mediaEl.addEventListener('load', function onLoad() {
+          clearTimeout(camTimeouts[timeoutKey]);
+          removeCamOffline(cell);
+          mediaEl.removeEventListener('load', onLoad);
+        });
+      } else if (tagName === 'video') {
+        mediaEl.addEventListener('loadeddata', function onLoaded() {
+          clearTimeout(camTimeouts[timeoutKey]);
+          removeCamOffline(cell);
+          mediaEl.removeEventListener('loadeddata', onLoaded);
+        });
+        mediaEl.addEventListener('error', function() {
+          clearTimeout(camTimeouts[timeoutKey]);
+          showCamOffline(cell, cam, camIndex);
+        });
+      } else if (tagName === 'img') {
+        mediaEl.addEventListener('load', function onLoad() {
+          clearTimeout(camTimeouts[timeoutKey]);
+          removeCamOffline(cell);
+          mediaEl.removeEventListener('load', onLoad);
+        });
+        mediaEl.addEventListener('error', function() {
+          clearTimeout(camTimeouts[timeoutKey]);
+          showCamOffline(cell, cam, camIndex);
+        });
+      }
+    }
+
+    function showCamOffline(cell, cam, camIndex) {
+      if (cell.querySelector('.cam-offline-overlay')) return;
+
+      var overlay = document.createElement('div');
+      overlay.className = 'cam-offline-overlay';
+
+      var icon = document.createElement('div');
+      icon.className = 'cam-offline-icon';
+      icon.textContent = '📡';
+      overlay.appendChild(icon);
+
+      var text = document.createElement('div');
+      text.className = 'cam-offline-text';
+      text.textContent = 'OFFLINE';
+      overlay.appendChild(text);
+
+      var retry = document.createElement('div');
+      retry.className = 'cam-retry-text';
+      retry.textContent = '点击重试';
+      overlay.appendChild(retry);
+
+      overlay.addEventListener('click', function(e) {
+        e.stopPropagation();
+        overlay.remove();
+        // 重新加载摄像头
+        reloadCamera(cell, cam, camIndex);
+      });
+
+      cell.appendChild(overlay);
+    }
+
+    function removeCamOffline(cell) {
+      var overlay = cell.querySelector('.cam-offline-overlay');
+      if (overlay) overlay.remove();
+    }
+
+    function reloadCamera(cell, cam, camIndex) {
+      // 移除旧的媒体元素
+      var oldMedia = cell.querySelectorAll('iframe, video, img.cam-stream');
+      oldMedia.forEach(function(el) { el.remove(); });
+
+      // 销毁 HLS（如有）
+      hlsInstances = hlsInstances.filter(function(hls) {
+        if (cell.contains(hls.media)) {
+          try { hls.destroy(); } catch(e) {}
+          return false;
+        }
+        return true;
+      });
+
+      // 创建新媒体
+      var result = createMediaElement(cam);
+      // 插入到 overlay/label 之前
+      var label = cell.querySelector('.camera-label');
+      if (label) {
+        cell.insertBefore(result.element, cell.firstChild);
+      } else {
+        cell.appendChild(result.element);
+      }
+      if (result.hls) hlsInstances.push(result.hls);
+
+      setupCamOfflineDetection(cell, result.element, cam, camIndex);
+    }
+
     // ===== 网格控制 =====
 
     function setGrid(size) {
@@ -509,6 +656,9 @@
           var result = createMediaElement(cam);
           cell.appendChild(result.element);
           if (result.hls) hlsInstances.push(result.hls);
+
+          // 离线检测
+          setupCamOfflineDetection(cell, result.element, cam, i);
 
           // REC 点 + 时间
           var overlay = document.createElement('div');
