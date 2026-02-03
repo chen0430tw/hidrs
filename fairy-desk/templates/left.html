@@ -104,6 +104,34 @@
       border-left: 2px solid var(--neon-cyan);
     }
 
+    /* CCTV 摄像头拖入分页栏 */
+    .tab-bar.camera-drop-target {
+      background: rgba(0,240,255,0.08);
+    }
+
+    .camera-drop-tab {
+      border: 1px dashed var(--neon-cyan) !important;
+      color: var(--neon-cyan) !important;
+      background: rgba(0,240,255,0.1) !important;
+      animation: blink 1s infinite;
+    }
+
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+    .camera-drag-ghost {
+      position: fixed;
+      padding: 6px 12px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--neon-cyan);
+      border-radius: 4px;
+      color: var(--neon-cyan);
+      font-size: 12px;
+      pointer-events: none;
+      z-index: 10000;
+      white-space: nowrap;
+      box-shadow: 0 4px 12px rgba(0,240,255,0.2);
+    }
+
     /* iframe 加载状态 */
     .tab-pane.loading::before {
       content: '';
@@ -302,6 +330,135 @@
       addBtn.title = '添加新分页';
       tabBar.appendChild(addBtn);
     };
+
+    // ===== CCTV 摄像头 → 分页栏（跨 iframe 通信） =====
+
+    var pendingCameraDrag = null;
+    var cameraDragGhost = null;
+
+    /**
+     * 将摄像头添加为新分页
+     */
+    async function addCameraTab(camera) {
+      try {
+        var resp = await fetch('/api/config/tabs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: camera.name,
+            icon: '📹',
+            url: camera.url,
+            loadStrategy: 'lazy'
+          })
+        });
+        if (!resp.ok) throw new Error('添加失败');
+        var result = await resp.json();
+
+        await loadConfig();
+        renderTabs(FairyDesk.config.left_screen.tabs);
+
+        if (result.tab && result.tab.id) {
+          switchTab(result.tab.id);
+        }
+        showNotification('已添加摄像头分页: ' + camera.name, 'success');
+      } catch(err) {
+        showNotification('添加分页失败: ' + err.message, 'error');
+      }
+    }
+
+    /**
+     * 监听来自 CCTV iframe 的 postMessage
+     */
+    window.addEventListener('message', function(e) {
+      if (!e.data || !e.data.type) return;
+
+      // 📌 点击添加为分页
+      if (e.data.type === 'add-camera-tab' && e.data.camera) {
+        addCameraTab(e.data.camera);
+      }
+
+      // 拖动开始：在分页栏显示拖放提示 + 跟踪鼠标
+      if (e.data.type === 'camera-drag-start' && e.data.camera) {
+        startCameraDrag(e.data.camera);
+      }
+
+      // 拖动结束（鼠标在 iframe 内释放）
+      if (e.data.type === 'camera-drag-end') {
+        cancelCameraDrag();
+      }
+    });
+
+    function startCameraDrag(camera) {
+      pendingCameraDrag = camera;
+
+      // 在分页栏末尾添加拖放目标 Tab
+      var tabBar = document.getElementById('tab-bar');
+      tabBar.classList.add('camera-drop-target');
+      var dropTab = document.createElement('button');
+      dropTab.className = 'tab-item camera-drop-tab';
+      dropTab.id = 'camera-drop-tab';
+      dropTab.innerHTML = '<span class="tab-icon">📹</span><span>放开添加分页</span>';
+      var addBtn = tabBar.querySelector('.tab-add');
+      if (addBtn) {
+        tabBar.insertBefore(dropTab, addBtn);
+      } else {
+        tabBar.appendChild(dropTab);
+      }
+
+      // 创建跟随鼠标的 Ghost
+      cameraDragGhost = document.createElement('div');
+      cameraDragGhost.className = 'camera-drag-ghost';
+      cameraDragGhost.textContent = '📹 ' + camera.name;
+      cameraDragGhost.style.display = 'none';
+      document.body.appendChild(cameraDragGhost);
+
+      document.addEventListener('mousemove', onCameraDragMove);
+      document.addEventListener('mouseup', onCameraDragEnd);
+    }
+
+    function onCameraDragMove(e) {
+      if (cameraDragGhost) {
+        cameraDragGhost.style.display = 'block';
+        cameraDragGhost.style.left = (e.clientX + 14) + 'px';
+        cameraDragGhost.style.top = (e.clientY + 14) + 'px';
+      }
+
+      // 判断鼠标是否在分页栏上方
+      var tabBar = document.getElementById('tab-bar');
+      var rect = tabBar.getBoundingClientRect();
+      var isOver = e.clientY >= rect.top && e.clientY <= rect.bottom &&
+                   e.clientX >= rect.left && e.clientX <= rect.right;
+
+      var dropTab = document.getElementById('camera-drop-tab');
+      if (dropTab) {
+        dropTab.style.background = isOver ? 'rgba(0,240,255,0.25)' : '';
+      }
+    }
+
+    function onCameraDragEnd(e) {
+      // 判断是否落在分页栏区域
+      var tabBar = document.getElementById('tab-bar');
+      var rect = tabBar.getBoundingClientRect();
+      var isOver = e.clientY >= rect.top && e.clientY <= rect.bottom &&
+                   e.clientX >= rect.left && e.clientX <= rect.right;
+
+      if (pendingCameraDrag && isOver) {
+        addCameraTab(pendingCameraDrag);
+      }
+
+      cancelCameraDrag();
+    }
+
+    function cancelCameraDrag() {
+      pendingCameraDrag = null;
+      if (cameraDragGhost) { cameraDragGhost.remove(); cameraDragGhost = null; }
+      var dropTab = document.getElementById('camera-drop-tab');
+      if (dropTab) dropTab.remove();
+      var tabBar = document.getElementById('tab-bar');
+      if (tabBar) tabBar.classList.remove('camera-drop-target');
+      document.removeEventListener('mousemove', onCameraDragMove);
+      document.removeEventListener('mouseup', onCameraDragEnd);
+    }
   </script>
 </body>
 </html>

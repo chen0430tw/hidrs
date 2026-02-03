@@ -313,12 +313,13 @@ function showOrCreateIframe(tab, container) {
   let pane = container.querySelector(`[data-tab-id="${tab.id}"]`);
   if (!pane) {
     pane = document.createElement('div');
-    pane.className = 'tab-pane';
+    pane.className = 'tab-pane loading';
     pane.dataset.tabId = tab.id;
     const iframe = document.createElement('iframe');
     iframe.src = tab.url;
     iframe.setAttribute('loading', 'lazy');
     iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms');
+    setupIframeOfflineDetection(iframe, pane, tab);
     pane.appendChild(iframe);
     container.appendChild(pane);
   }
@@ -327,14 +328,83 @@ function showOrCreateIframe(tab, container) {
 
 function createIframe(tab, container) {
   const pane = document.createElement('div');
-  pane.className = 'tab-pane active';
+  pane.className = 'tab-pane active loading';
   pane.dataset.tabId = tab.id;
   const iframe = document.createElement('iframe');
   iframe.src = tab.url;
   iframe.setAttribute('loading', 'lazy');
   iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms');
+  setupIframeOfflineDetection(iframe, pane, tab);
   pane.appendChild(iframe);
   container.appendChild(pane);
+}
+
+/**
+ * iframe 离线检测：超时未加载 → 显示离线覆盖层 + 重试按钮
+ */
+function setupIframeOfflineDetection(iframe, pane, tab) {
+  let timeoutId = setTimeout(() => {
+    // 仍在 loading 状态 → 显示离线覆盖层
+    if (pane.classList.contains('loading')) {
+      showIframeOffline(pane, iframe, tab);
+    }
+  }, 15000);
+
+  iframe.addEventListener('load', function onLoad() {
+    clearTimeout(timeoutId);
+    pane.classList.remove('loading');
+    // 移除离线覆盖层（如有）
+    const overlay = pane.querySelector('.iframe-offline-overlay');
+    if (overlay) overlay.remove();
+    iframe.removeEventListener('load', onLoad);
+  });
+
+  iframe.addEventListener('error', function onError() {
+    clearTimeout(timeoutId);
+    showIframeOffline(pane, iframe, tab);
+    iframe.removeEventListener('error', onError);
+  });
+}
+
+function showIframeOffline(pane, iframe, tab) {
+  pane.classList.remove('loading');
+  // 避免重复添加
+  if (pane.querySelector('.iframe-offline-overlay')) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'iframe-offline-overlay';
+
+  const icon = document.createElement('div');
+  icon.className = 'offline-icon';
+  icon.textContent = '📡';
+  overlay.appendChild(icon);
+
+  const title = document.createElement('div');
+  title.className = 'offline-title';
+  title.textContent = '无法连接';
+  overlay.appendChild(title);
+
+  const msg = document.createElement('div');
+  msg.className = 'offline-message';
+  msg.textContent = `${tab.name} 服务未响应或网络不可达`;
+  overlay.appendChild(msg);
+
+  const retryBtn = document.createElement('button');
+  retryBtn.className = 'offline-retry-btn';
+  retryBtn.textContent = '🔄 重试';
+  retryBtn.onclick = () => {
+    overlay.remove();
+    pane.classList.add('loading');
+    const src = iframe.src;
+    iframe.src = '';
+    setTimeout(() => {
+      iframe.src = src;
+      setupIframeOfflineDetection(iframe, pane, tab);
+    }, 100);
+  };
+  overlay.appendChild(retryBtn);
+
+  pane.appendChild(overlay);
 }
 
 // Tab 右键菜单
