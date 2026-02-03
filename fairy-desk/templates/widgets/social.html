@@ -723,15 +723,20 @@
     }
 
     // Facebook Page Plugin 懒加载（等容器可见后再设置 src，避免 0 宽度）
+    // Page Plugin 内部布局比例约 2:8（header ~120px, timeline ~200px）
     function loadFacebookPlugin() {
       var fbIframe = document.getElementById('facebook-iframe');
       if (!fbIframe || facebookLoaded) return;
       facebookLoaded = true;
 
       var fbContainer = document.getElementById('facebook-container');
-      var fbWidth = fbContainer ? Math.max(fbContainer.clientWidth, 340) : 400;
+      // width: 容器实际宽度（Page Plugin 限制 180-500）
+      var fbWidth = fbContainer ? fbContainer.clientWidth : 400;
+      if (fbWidth < 180) fbWidth = 340;
       if (fbWidth > 500) fbWidth = 500;
-      var fbHeight = fbContainer ? Math.max(fbContainer.clientHeight, 400) : 800;
+      // height: 容器实际高度（保底 320 = header 120 + timeline 200）
+      var fbHeight = fbContainer ? fbContainer.clientHeight : 600;
+      if (fbHeight < 320) fbHeight = 320;
 
       var fbPage = facebookPageUrl || 'https://www.facebook.com/CNN';
       fbIframe.src = 'https://www.facebook.com/plugins/page.php?href=' +
