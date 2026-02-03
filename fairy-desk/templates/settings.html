@@ -230,6 +230,127 @@
       color: var(--text-secondary);
     }
 
+    /* CCTV 摄像头管理 */
+    .camera-list {
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .camera-item {
+      display: flex;
+      align-items: center;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border-color);
+      gap: 10px;
+    }
+
+    .camera-item:last-child {
+      border-bottom: none;
+    }
+
+    .camera-item input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+    }
+
+    .camera-item .cam-index {
+      font-size: 10px;
+      color: var(--text-muted);
+      width: 36px;
+      flex-shrink: 0;
+      font-family: monospace;
+    }
+
+    .camera-item .cam-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .camera-item .cam-name-text {
+      font-size: 13px;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .camera-item .cam-url-text {
+      font-size: 10px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .camera-item .cam-actions {
+      display: flex;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .camera-item .cam-actions button {
+      background: transparent;
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+      padding: 3px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+    }
+
+    .camera-item .cam-actions button:hover {
+      border-color: var(--neon-cyan);
+      color: var(--neon-cyan);
+    }
+
+    .camera-item .cam-actions button.danger:hover {
+      border-color: var(--status-danger);
+      color: var(--status-danger);
+    }
+
+    .camera-edit-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+      align-items: center;
+    }
+
+    .camera-edit-row input {
+      font-size: 13px;
+    }
+
+    .grid-size-options {
+      display: flex;
+      gap: 8px;
+    }
+
+    .grid-size-option {
+      padding: 8px 16px;
+      border: 2px solid var(--border-color);
+      border-radius: 6px;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.2s;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+
+    .grid-size-option:hover {
+      border-color: var(--neon-cyan);
+      color: var(--neon-cyan);
+    }
+
+    .grid-size-option.active {
+      border-color: var(--neon-cyan);
+      color: var(--neon-cyan);
+      background: rgba(0, 240, 255, 0.1);
+      box-shadow: 0 0 8px rgba(0, 240, 255, 0.2);
+    }
+
     /* 底部操作栏 */
     .settings-footer {
       position: fixed;
@@ -305,6 +426,42 @@
               <button class="btn btn-secondary" style="margin-top: 12px;" onclick="showAddTabModal()">
                 + 添加新分页
               </button>
+            </div>
+          </div>
+
+          <!-- CCTV 摄像头管理 -->
+          <div class="settings-row">
+            <div class="settings-label">
+              <div class="label-title">CCTV 网格</div>
+              <div class="label-desc">摄像头显示布局</div>
+            </div>
+            <div class="settings-control">
+              <div class="grid-size-options" id="grid-size-options">
+                <button class="grid-size-option" data-grid="2x2" onclick="selectGrid('2x2')">2×2</button>
+                <button class="grid-size-option active" data-grid="3x3" onclick="selectGrid('3x3')">3×3</button>
+                <button class="grid-size-option" data-grid="4x4" onclick="selectGrid('4x4')">4×4</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-row">
+            <div class="settings-label">
+              <div class="label-title">摄像头管理</div>
+              <div class="label-desc">添加、编辑或删除 CCTV 摄像头源</div>
+            </div>
+            <div class="settings-control">
+              <div class="camera-list" id="camera-list">
+                <!-- 由 JS 填充 -->
+              </div>
+              <div class="camera-edit-row">
+                <input type="text" id="new-cam-name" class="form-input" style="width: 140px;" placeholder="摄像头名称">
+                <input type="text" id="new-cam-url" class="form-input" style="flex: 1;" placeholder="任意可嵌入的视频流 URL">
+                <button class="btn btn-secondary" onclick="addCamera()">添加</button>
+              </div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 8px; line-height: 1.6;">
+                支持格式：iframe 嵌入页（YouTube/网站）、MJPEG 串流（.mjpg）、HLS 串流（.m3u8）、图片快照（.jpg）<br>
+                YouTube 会自动转换 watch 链接为 embed 格式 ｜ MJPEG/图片会以 &lt;img&gt; 方式嵌入
+              </div>
             </div>
           </div>
         </div>
@@ -539,6 +696,9 @@
         </div>
       `).join('');
 
+      // CCTV 摄像头
+      populateCameras();
+
       // 中屏
       document.getElementById('refresh-interval').value = config.center_screen?.refresh_interval || 5;
       document.getElementById('terminal-command').value = config.center_screen?.terminal_command || 'claude';
@@ -595,6 +755,139 @@
       }
     });
 
+    // ===== CCTV 摄像头管理 =====
+
+    function selectGrid(size) {
+      document.querySelectorAll('.grid-size-option').forEach(function(btn) {
+        btn.classList.toggle('active', btn.dataset.grid === size);
+      });
+    }
+
+    function populateCameras() {
+      var cctvCfg = FairyDesk.config.left_screen?.cctv || { grid: '3x3', cameras: [] };
+      var cameras = cctvCfg.cameras || [];
+
+      // 网格大小
+      selectGrid(cctvCfg.grid || '3x3');
+
+      // 摄像头列表
+      var list = document.getElementById('camera-list');
+      list.innerHTML = '';
+
+      cameras.forEach(function(cam, i) {
+        var item = document.createElement('div');
+        item.className = 'camera-item';
+        item.dataset.index = i;
+
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = cam.enabled !== false;
+        cb.dataset.camIndex = i;
+        item.appendChild(cb);
+
+        var idx = document.createElement('span');
+        idx.className = 'cam-index';
+        idx.textContent = 'CAM-' + String(i + 1).padStart(2, '0');
+        item.appendChild(idx);
+
+        var info = document.createElement('div');
+        info.className = 'cam-info';
+        var nameSpan = document.createElement('div');
+        nameSpan.className = 'cam-name-text';
+        nameSpan.textContent = cam.name || '(未命名)';
+        info.appendChild(nameSpan);
+        var urlSpan = document.createElement('div');
+        urlSpan.className = 'cam-url-text';
+        urlSpan.textContent = cam.url || '';
+        info.appendChild(urlSpan);
+        item.appendChild(info);
+
+        var actions = document.createElement('div');
+        actions.className = 'cam-actions';
+
+        var editBtn = document.createElement('button');
+        editBtn.textContent = '编辑';
+        editBtn.addEventListener('click', function() { editCamera(i); });
+        actions.appendChild(editBtn);
+
+        var delBtn = document.createElement('button');
+        delBtn.className = 'danger';
+        delBtn.textContent = '删除';
+        delBtn.addEventListener('click', function() { removeCamera(i); });
+        actions.appendChild(delBtn);
+
+        item.appendChild(actions);
+        list.appendChild(item);
+      });
+    }
+
+    function addCamera() {
+      var name = document.getElementById('new-cam-name').value.trim();
+      var url = document.getElementById('new-cam-url').value.trim();
+
+      if (!name || !url) {
+        showNotification('请填写摄像头名称和 URL', 'error');
+        return;
+      }
+
+      // 自动补全 YouTube embed URL
+      var ytMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]+)/);
+      if (ytMatch) {
+        url = 'https://www.youtube.com/embed/' + ytMatch[1] + '?autoplay=1&mute=1&controls=0';
+      }
+
+      if (!FairyDesk.config.left_screen.cctv) {
+        FairyDesk.config.left_screen.cctv = { grid: '3x3', cameras: [] };
+      }
+
+      FairyDesk.config.left_screen.cctv.cameras.push({
+        name: name,
+        url: url,
+        enabled: true
+      });
+
+      document.getElementById('new-cam-name').value = '';
+      document.getElementById('new-cam-url').value = '';
+
+      populateCameras();
+      showNotification('摄像头已添加（保存后生效）', 'success');
+    }
+
+    function editCamera(index) {
+      var cameras = FairyDesk.config.left_screen?.cctv?.cameras;
+      if (!cameras || !cameras[index]) return;
+
+      var cam = cameras[index];
+      var newName = prompt('摄像头名称：', cam.name);
+      if (newName === null) return;
+
+      var newUrl = prompt('视频流 URL：', cam.url);
+      if (newUrl === null) return;
+
+      // 自动补全 YouTube embed URL
+      var ytMatch = newUrl.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]+)/);
+      if (ytMatch) {
+        newUrl = 'https://www.youtube.com/embed/' + ytMatch[1] + '?autoplay=1&mute=1&controls=0';
+      }
+
+      cam.name = newName.trim() || cam.name;
+      cam.url = newUrl.trim() || cam.url;
+
+      populateCameras();
+      showNotification('摄像头已更新（保存后生效）', 'success');
+    }
+
+    function removeCamera(index) {
+      if (!confirm('确定删除此摄像头？')) return;
+
+      var cameras = FairyDesk.config.left_screen?.cctv?.cameras;
+      if (cameras) {
+        cameras.splice(index, 1);
+        populateCameras();
+        showNotification('摄像头已删除（保存后生效）', 'success');
+      }
+    }
+
     async function saveAllSettings() {
       const config = FairyDesk.config;
 
@@ -624,6 +917,19 @@
 
       config.theme.name = document.querySelector('.theme-option.active')?.dataset.theme || 'cyberpunk';
       config.theme.terminal_bg_color = document.getElementById('terminal-bg-color').value || '#0d1117';
+
+      // CCTV 摄像头
+      var activeGrid = document.querySelector('.grid-size-option.active');
+      if (!config.left_screen.cctv) config.left_screen.cctv = { grid: '3x3', cameras: [] };
+      config.left_screen.cctv.grid = activeGrid ? activeGrid.dataset.grid : '3x3';
+
+      // 更新摄像头启用状态
+      document.querySelectorAll('#camera-list input[type="checkbox"]').forEach(function(cb) {
+        var idx = parseInt(cb.dataset.camIndex);
+        if (config.left_screen.cctv.cameras[idx]) {
+          config.left_screen.cctv.cameras[idx].enabled = cb.checked;
+        }
+      });
 
       // 保存
       const success = await saveConfig(config);

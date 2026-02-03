@@ -73,10 +73,17 @@
       overflow: hidden;
     }
 
-    .camera-cell iframe {
+    .camera-cell iframe,
+    .camera-cell video,
+    .camera-cell img.cam-stream {
       width: 100%;
       height: 100%;
       border: none;
+      object-fit: cover;
+    }
+
+    .camera-cell video {
+      background: #000;
     }
 
     .camera-label {
@@ -182,9 +189,30 @@
     <!-- 由 JS 动态填充 -->
   </div>
 
+  <!-- HLS.js for .m3u8 streams (OBS/RTMP output) -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js"></script>
+
   <script>
     var cameras = [];
     var currentGrid = '3x3';
+    var hlsInstances = [];  // 追踪 HLS 实例以便清理
+
+    /**
+     * 根据 URL 判断媒体类型
+     * - hls: .m3u8 (OBS/RTMP → HLS, IP cameras)
+     * - mjpeg: .mjpg, .mjpeg, /mjpg/, /video (MJPEG streams from IP cameras)
+     * - image: .jpg, .jpeg, .png, .gif (静态快照，定时刷新)
+     * - video: .mp4, .webm, .ogg (direct video)
+     * - iframe: everything else (YouTube, web embeds, etc.)
+     */
+    function detectStreamType(url) {
+      var lower = url.toLowerCase();
+      if (lower.includes('.m3u8')) return 'hls';
+      if (lower.includes('.mjpg') || lower.includes('.mjpeg') || lower.includes('/mjpg/') || lower.match(/[?&]action=stream/)) return 'mjpeg';
+      if (lower.match(/\.(jpe?g|png|gif|bmp)(\?|$)/)) return 'image';
+      if (lower.match(/\.(mp4|webm|ogg)(\?|$)/)) return 'video';
+      return 'iframe';
+    }
 
     function setGrid(size) {
       currentGrid = size;
@@ -204,7 +232,15 @@
       return parseInt(parts[0]) * parseInt(parts[1]);
     }
 
+    function destroyHlsInstances() {
+      hlsInstances.forEach(function(hls) {
+        try { hls.destroy(); } catch(e) {}
+      });
+      hlsInstances = [];
+    }
+
     function renderCameras() {
+      destroyHlsInstances();
       var grid = document.getElementById('cctv-grid');
       grid.innerHTML = '';
       var max = getMaxCameras();
@@ -216,14 +252,63 @@
 
         if (i < enabled.length) {
           var cam = enabled[i];
+          var streamType = detectStreamType(cam.url);
 
-          // iframe
-          var iframe = document.createElement('iframe');
-          iframe.src = cam.url;
-          iframe.allow = 'autoplay; encrypted-media';
-          iframe.allowFullscreen = true;
-          iframe.loading = 'lazy';
-          cell.appendChild(iframe);
+          if (streamType === 'hls') {
+            // HLS 串流 (.m3u8) — OBS/RTMP 输出
+            var video = document.createElement('video');
+            video.autoplay = true;
+            video.muted = true;
+            video.loop = true;
+            video.playsInline = true;
+            video.setAttribute('playsinline', '');
+            if (window.Hls && Hls.isSupported()) {
+              var hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+              hls.loadSource(cam.url);
+              hls.attachMedia(video);
+              hlsInstances.push(hls);
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+              // Safari 原生 HLS
+              video.src = cam.url;
+            }
+            cell.appendChild(video);
+
+          } else if (streamType === 'mjpeg') {
+            // MJPEG 串流 — IP 摄像头常见格式
+            var img = document.createElement('img');
+            img.className = 'cam-stream';
+            img.src = cam.url;
+            img.alt = cam.name;
+            cell.appendChild(img);
+
+          } else if (streamType === 'image') {
+            // 静态图片快照 — 每 5 秒刷新
+            var img = document.createElement('img');
+            img.className = 'cam-stream';
+            img.src = cam.url + (cam.url.includes('?') ? '&' : '?') + '_t=' + Date.now();
+            img.alt = cam.name;
+            img.dataset.baseUrl = cam.url;
+            cell.appendChild(img);
+
+          } else if (streamType === 'video') {
+            // 直接视频文件
+            var video = document.createElement('video');
+            video.src = cam.url;
+            video.autoplay = true;
+            video.muted = true;
+            video.loop = true;
+            video.playsInline = true;
+            cell.appendChild(video);
+
+          } else {
+            // iframe（YouTube, 网页嵌入等）
+            var iframe = document.createElement('iframe');
+            iframe.src = cam.url;
+            iframe.allow = 'autoplay; encrypted-media';
+            iframe.allowFullscreen = true;
+            iframe.loading = 'lazy';
+            cell.appendChild(iframe);
+          }
 
           // REC 点 + 时间
           var overlay = document.createElement('div');
@@ -283,6 +368,13 @@
       var now = new Date().toLocaleTimeString('zh-CN', {hour12: false});
       timeEls.forEach(function(el) { el.textContent = now; });
     }, 1000);
+
+    // 图片快照定时刷新（每 5 秒）
+    setInterval(function() {
+      document.querySelectorAll('img.cam-stream[data-base-url]').forEach(function(img) {
+        img.src = img.dataset.baseUrl + (img.dataset.baseUrl.includes('?') ? '&' : '?') + '_t=' + Date.now();
+      });
+    }, 5000);
 
     // 从 API 加载配置
     fetch('/api/config')

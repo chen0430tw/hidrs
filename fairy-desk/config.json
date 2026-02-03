@@ -64,19 +64,12 @@
         {"name": "NYC Times Square", "url": "https://www.youtube.com/embed/1EiC9bvVGnk?autoplay=1&mute=1&controls=0", "enabled": true},
         {"name": "Tokyo Shibuya", "url": "https://www.youtube.com/embed/gFRtAAmiFbE?autoplay=1&mute=1&controls=0", "enabled": true},
         {"name": "Namib Desert", "url": "https://www.youtube.com/embed/ydYDqZQpim8?autoplay=1&mute=1&controls=0", "enabled": true},
-        {"name": "Venice Italy", "url": "https://www.youtube.com/embed/vPwD4UxBBSk?autoplay=1&mute=1&controls=0", "enabled": true},
-        {"name": "Abbey Road London", "url": "https://www.youtube.com/embed/dqBs2x_qb5M?autoplay=1&mute=1&controls=0", "enabled": true},
-        {"name": "International Space Station", "url": "https://www.youtube.com/embed/P9C25Un7xaM?autoplay=1&mute=1&controls=0", "enabled": true},
-        {"name": "Jackson Hole", "url": "https://www.youtube.com/embed/psfFJR3vZ78?autoplay=1&mute=1&controls=0", "enabled": true},
-        {"name": "Dublin Temple Bar", "url": "https://www.youtube.com/embed/Y6a4Z5HJpXA?autoplay=1&mute=1&controls=0", "enabled": true},
-        {"name": "Miami Beach", "url": "https://www.youtube.com/embed/vnSSsNBwDXA?autoplay=1&mute=1&controls=0", "enabled": true},
-        {"name": "Seoul Gangnam", "url": "https://www.youtube.com/embed/HRJ91mNTxKI?autoplay=1&mute=1&controls=0", "enabled": true},
-        {"name": "Niagara Falls", "url": "https://www.youtube.com/embed/0Q05a8TLgUs?autoplay=1&mute=1&controls=0", "enabled": true},
         {"name": "Lofi Radio", "url": "https://www.youtube.com/embed/jfKfPfyJRdk?autoplay=1&mute=1&controls=0", "enabled": true},
-        {"name": "Port of LA", "url": "https://www.youtube.com/embed/87zFagMmGSw?autoplay=1&mute=1&controls=0", "enabled": true},
-        {"name": "Paris Eiffel", "url": "https://www.youtube.com/embed/U7BjxnOIbGM?autoplay=1&mute=1&controls=0", "enabled": true},
-        {"name": "Taipei 101", "url": "https://www.youtube.com/embed/Ck_MaQHSDgM?autoplay=1&mute=1&controls=0", "enabled": true},
-        {"name": "Hong Kong Harbor", "url": "https://www.youtube.com/embed/7RpubGy5mBg?autoplay=1&mute=1&controls=0", "enabled": true}
+        {"name": "Venice Italy", "url": "https://www.youtube.com/embed/vPwD4UxBBSk?autoplay=1&mute=1&controls=0", "enabled": true},
+        {"name": "Jackson Hole", "url": "https://www.youtube.com/embed/psfFJR3vZ78?autoplay=1&mute=1&controls=0", "enabled": true},
+        {"name": "Miami Beach", "url": "https://www.youtube.com/embed/vnSSsNBwDXA?autoplay=1&mute=1&controls=0", "enabled": true},
+        {"name": "Abbey Road London", "url": "https://www.youtube.com/embed/dqBs2x_qb5M?autoplay=1&mute=1&controls=0", "enabled": true},
+        {"name": "International Space Station", "url": "https://www.youtube.com/embed/P9C25Un7xaM?autoplay=1&mute=1&controls=0", "enabled": true}
       ]
     }
   },
