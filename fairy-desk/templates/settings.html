@@ -455,11 +455,12 @@
               </div>
               <div class="camera-edit-row">
                 <input type="text" id="new-cam-name" class="form-input" style="width: 140px;" placeholder="摄像头名称">
-                <input type="url" id="new-cam-url" class="form-input" style="flex: 1;" placeholder="YouTube 嵌入链接或其他视频流 URL">
+                <input type="text" id="new-cam-url" class="form-input" style="flex: 1;" placeholder="任意可嵌入的视频流 URL">
                 <button class="btn btn-secondary" onclick="addCamera()">添加</button>
               </div>
-              <div style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">
-                提示：YouTube 链接格式 https://www.youtube.com/embed/VIDEO_ID?autoplay=1&mute=1&controls=0
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 8px; line-height: 1.6;">
+                支持格式：iframe 嵌入页（YouTube/网站）、MJPEG 串流（.mjpg）、HLS 串流（.m3u8）、图片快照（.jpg）<br>
+                YouTube 会自动转换 watch 链接为 embed 格式 ｜ MJPEG/图片会以 &lt;img&gt; 方式嵌入
               </div>
             </div>
           </div>
