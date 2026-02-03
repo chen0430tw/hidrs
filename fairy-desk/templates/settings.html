@@ -722,10 +722,17 @@
               <div class="label-desc">全局背景图片 URL</div>
             </div>
             <div class="settings-control">
-              <input type="url" id="background-image" class="form-input" placeholder="https://example.com/wallpaper.jpg">
-              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
-                留空则不显示背景图片，支持任何可访问的图片 URL
+              <div style="display: flex; gap: 8px; align-items: flex-start;">
+                <input type="url" id="background-image" class="form-input" placeholder="https://example.com/wallpaper.jpg" style="flex: 1;">
+                <input type="file" id="bg-file-input" accept="image/*" style="display: none;" onchange="uploadBackgroundImage(this)">
+                <button class="btn btn-secondary" onclick="document.getElementById('bg-file-input').click()" style="white-space: nowrap;">
+                  📁 浏览文件
+                </button>
               </div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                留空则不显示背景图片，支持任何可访问的图片 URL 或本地上传
+              </div>
+              <div id="bg-upload-status" style="font-size: 11px; margin-top: 4px; display: none;"></div>
             </div>
           </div>
 
@@ -1004,6 +1011,63 @@
         cameras.splice(index, 1);
         populateCameras();
         showNotification('摄像头已删除（保存后生效）', 'success');
+      }
+    }
+
+    // ===== 背景图片上传 =====
+    async function uploadBackgroundImage(input) {
+      const file = input.files[0];
+      if (!file) return;
+
+      // 检查文件类型
+      if (!file.type.startsWith('image/')) {
+        showNotification('请选择图片文件', 'error');
+        input.value = '';
+        return;
+      }
+
+      // 检查文件大小（限制 10MB）
+      if (file.size > 10 * 1024 * 1024) {
+        showNotification('文件大小不能超过 10MB', 'error');
+        input.value = '';
+        return;
+      }
+
+      const statusEl = document.getElementById('bg-upload-status');
+      statusEl.style.display = 'block';
+      statusEl.style.color = 'var(--neon-cyan)';
+      statusEl.textContent = '⏳ 上传中...';
+
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const apiBase = localStorage.getItem('API_BASE_URL') || '';
+        const response = await fetch(apiBase + '/api/upload/background', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) {
+          throw new Error('上传失败: HTTP ' + response.status);
+        }
+
+        const result = await response.json();
+        if (result.success && result.url) {
+          // 更新输入框
+          document.getElementById('background-image').value = result.url;
+          statusEl.style.color = 'var(--status-success)';
+          statusEl.textContent = '✅ 上传成功: ' + file.name;
+          showNotification('背景图片上传成功', 'success');
+        } else {
+          throw new Error(result.error || '上传失败');
+        }
+      } catch (error) {
+        statusEl.style.color = 'var(--status-danger)';
+        statusEl.textContent = '❌ 上传失败: ' + error.message;
+        showNotification('上传失败: ' + error.message, 'error');
+      } finally {
+        input.value = '';
       }
     }
 

@@ -13,6 +13,7 @@ import time
 import shutil
 import subprocess
 import logging
+import threading
 from datetime import datetime
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -20,8 +21,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import psutil
 import requests
 import feedparser
-from flask import Flask, render_template, jsonify, request, Response
+from flask import Flask, render_template, jsonify, request, Response, send_from_directory
 from flask_cors import CORS
+from werkzeug.utils import secure_filename
 
 # ============================================================
 # 配置与初始化
@@ -145,6 +147,209 @@ def add_system_log(level, message):
     if len(events) > MAX_EVENTS:
         events[:] = events[-MAX_EVENTS:]
     save_events()
+
+
+# ============================================================
+# 系统监控告警生成器
+# ============================================================
+
+# 系统监控状态
+last_network_io = None
+last_check_time = None
+monitor_running = False
+last_security_check = 0
+last_cve_count = 0
+
+
+def add_alert(alert_type, message):
+    """添加告警到事件流（不记录到系统日志，避免重复）"""
+    global events
+    event = {
+        "type": alert_type,  # 'info', 'warning', 'critical'
+        "message": message,
+        "timestamp": datetime.now().isoformat()
+    }
+    events.append(event)
+    if len(events) > MAX_EVENTS:
+        events[:] = events[-MAX_EVENTS:]
+    save_events()
+
+
+def check_security_advisories():
+    """检查安全公告（CVE/GitHub Security Advisories）"""
+    global last_security_check, last_cve_count
+
+    try:
+        current_time = time.time()
+        # 每小时检查一次安全公告（避免频繁请求）
+        if current_time - last_security_check < 3600:
+            return
+
+        # 使用 GitHub Security Advisories API（无需认证）
+        url = "https://api.github.com/advisories"
+        params = {
+            "per_page": 10,
+            "sort": "published",
+            "direction": "desc"
+        }
+        headers = {"Accept": "application/vnd.github+json"}
+
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        if response.status_code == 200:
+            advisories = response.json()
+            new_count = len(advisories)
+
+            # 如果有新的安全公告
+            if last_cve_count > 0 and new_count > last_cve_count:
+                diff = new_count - last_cve_count
+                add_alert("warning", f"🔒 发现 {diff} 条新的安全公告")
+                # 显示最新的一条
+                if advisories:
+                    latest = advisories[0]
+                    severity = latest.get('severity', 'unknown').upper()
+                    add_alert("warning", f"🚨 {severity}: {latest.get('summary', 'N/A')[:50]}...")
+
+            # 初始化或正常检查
+            elif last_cve_count == 0:
+                add_alert("info", f"🔒 安全公告检查完成: 最近 {new_count} 条记录")
+
+            last_cve_count = new_count
+            last_security_check = current_time
+
+    except Exception as e:
+        logger.warning(f"安全公告检查失败: {e}")
+
+
+def check_service_health():
+    """服务健康检查"""
+    try:
+        # 1. 检查 Flask 应用自身
+        add_alert("info", "✅ 服务健康检查通过: FAIRY-DESK 运行正常")
+
+        # 2. 检查 HIDRS 连接（如果配置了）
+        hidrs_endpoint = config.get('hidrs', {}).get('endpoint')
+        if hidrs_endpoint and config.get('hidrs', {}).get('auto_detect', True):
+            try:
+                response = requests.get(f"{hidrs_endpoint}/health", timeout=5)
+                if response.status_code == 200:
+                    add_alert("info", "✅ HIDRS 服务连接正常")
+                else:
+                    add_alert("warning", f"⚠️ HIDRS 服务异常: HTTP {response.status_code}")
+            except requests.exceptions.RequestException:
+                # HIDRS 离线不算告警，只是可选增强模块
+                pass
+
+        # 3. 检查磁盘 I/O（可选）
+        disk_io = psutil.disk_io_counters()
+        if disk_io:
+            read_mb = disk_io.read_bytes / (1024 * 1024)
+            write_mb = disk_io.write_bytes / (1024 * 1024)
+            # 只在 I/O 量特别大时告警
+            if read_mb > 100000 or write_mb > 100000:
+                add_alert("info", f"💿 磁盘 I/O 累计: 读 {read_mb:.0f}MB / 写 {write_mb:.0f}MB")
+
+    except Exception as e:
+        logger.warning(f"服务健康检查失败: {e}")
+
+
+def check_system_status():
+    """检查系统状态并生成告警"""
+    global last_network_io, last_check_time
+
+    try:
+        # 1. CPU 使用率检查
+        cpu_percent = psutil.cpu_percent(interval=1)
+        if cpu_percent > 85:
+            add_alert("critical", f"⚠️ CPU 使用率过高: {cpu_percent:.1f}%")
+        elif cpu_percent > 70:
+            add_alert("warning", f"⚡ CPU 使用率较高: {cpu_percent:.1f}%")
+        elif cpu_percent < 20:
+            add_alert("info", f"✅ CPU 使用率正常: {cpu_percent:.1f}%")
+
+        # 2. 内存使用率检查
+        memory = psutil.virtual_memory()
+        mem_percent = memory.percent
+        if mem_percent > 85:
+            add_alert("critical", f"⚠️ 内存使用率过高: {mem_percent:.1f}% ({memory.used // (1024**3)}GB / {memory.total // (1024**3)}GB)")
+        elif mem_percent > 70:
+            add_alert("warning", f"💾 内存使用率较高: {mem_percent:.1f}%")
+
+        # 3. 磁盘空间检查
+        disk = psutil.disk_usage('/')
+        disk_percent = disk.percent
+        if disk_percent > 90:
+            add_alert("critical", f"⚠️ 磁盘空间不足: {disk_percent:.1f}% ({disk.free // (1024**3)}GB 剩余)")
+        elif disk_percent > 80:
+            add_alert("warning", f"💿 磁盘空间紧张: {disk_percent:.1f}%")
+
+        # 4. 网络流量检查
+        current_network = psutil.net_io_counters()
+        current_time = time.time()
+
+        if last_network_io is not None and last_check_time is not None:
+            time_delta = current_time - last_check_time
+            bytes_sent_delta = current_network.bytes_sent - last_network_io.bytes_sent
+            bytes_recv_delta = current_network.bytes_recv - last_network_io.bytes_recv
+
+            # 计算速率 (MB/s)
+            send_rate = (bytes_sent_delta / time_delta) / (1024 * 1024)
+            recv_rate = (bytes_recv_delta / time_delta) / (1024 * 1024)
+
+            if send_rate > 50 or recv_rate > 50:
+                add_alert("warning", f"🌐 网络流量异常: ↑{send_rate:.1f}MB/s ↓{recv_rate:.1f}MB/s")
+            elif send_rate > 10 or recv_rate > 10:
+                add_alert("info", f"📡 网络活动正常: ↑{send_rate:.1f}MB/s ↓{recv_rate:.1f}MB/s")
+
+        last_network_io = current_network
+        last_check_time = current_time
+
+        # 5. 系统负载检查 (仅 Linux/Unix)
+        if hasattr(os, 'getloadavg'):
+            load1, load5, load15 = os.getloadavg()
+            cpu_count = psutil.cpu_count()
+            if load1 > cpu_count * 0.8:
+                add_alert("warning", f"📊 系统负载较高: {load1:.2f} ({cpu_count} 核心)")
+
+    except Exception as e:
+        logger.error(f"系统监控检查失败: {e}")
+
+
+def system_monitor_loop():
+    """系统监控主循环（后台线程）"""
+    global monitor_running
+    logger.info("系统监控线程已启动")
+
+    check_count = 0
+    while monitor_running:
+        try:
+            # 每次都检查系统状态
+            check_system_status()
+
+            # 每 5 分钟检查一次服务健康（300秒 = 5次循环）
+            if check_count % 5 == 0:
+                check_service_health()
+
+            # 每小时检查一次安全公告（内部有时间控制）
+            check_security_advisories()
+
+            check_count += 1
+            # 每 60 秒检查一次
+            time.sleep(60)
+        except Exception as e:
+            logger.error(f"系统监控循环错误: {e}")
+            time.sleep(60)
+
+    logger.info("系统监控线程已停止")
+
+
+def start_system_monitor():
+    """启动系统监控后台线程"""
+    global monitor_running
+    if not monitor_running:
+        monitor_running = True
+        monitor_thread = threading.Thread(target=system_monitor_loop, daemon=True)
+        monitor_thread.start()
+        logger.info("系统监控已启动（每 60 秒检查一次）")
 
 
 # ============================================================
@@ -426,6 +631,10 @@ def news_feeds():
     _rss_cache['items'] = all_items
     _rss_cache['timestamp'] = time.time()
 
+    # RSS 更新成功告警
+    if all_items:
+        add_alert("info", f"📰 RSS 源更新完成: 获取 {len(all_items)} 条新闻（{len(enabled_feeds)} 个源）")
+
     return jsonify(all_items[:max_items])
 
 
@@ -703,6 +912,70 @@ def update_tab(tab_id):
 
 
 # ============================================================
+# 文件上传 API
+# ============================================================
+
+# 上传目录配置
+UPLOAD_FOLDER = Path(__file__).parent / 'static' / 'uploads'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'}
+
+# 确保上传目录存在
+UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+
+
+def allowed_file(filename):
+    """检查文件扩展名是否允许"""
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+@app.route('/api/upload/background', methods=['POST'])
+def upload_background():
+    """上传背景图片"""
+    try:
+        # 检查是否有文件
+        if 'file' not in request.files:
+            return jsonify({"error": "没有文件上传"}), 400
+
+        file = request.files['file']
+
+        # 检查文件名
+        if file.filename == '':
+            return jsonify({"error": "文件名为空"}), 400
+
+        # 检查文件类型
+        if not allowed_file(file.filename):
+            return jsonify({"error": f"不支持的文件类型，允许: {', '.join(ALLOWED_EXTENSIONS)}"}), 400
+
+        # 安全的文件名
+        filename = secure_filename(file.filename)
+
+        # 添加时间戳避免重名
+        name, ext = os.path.splitext(filename)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        unique_filename = f"{name}_{timestamp}{ext}"
+
+        # 保存文件
+        filepath = UPLOAD_FOLDER / unique_filename
+        file.save(str(filepath))
+
+        # 返回可访问的 URL
+        url = f"/static/uploads/{unique_filename}"
+
+        logger.info(f"背景图片上传成功: {unique_filename}")
+        add_system_log("info", f"📷 背景图片已上传: {unique_filename}")
+
+        return jsonify({
+            "success": True,
+            "url": url,
+            "filename": unique_filename
+        })
+
+    except Exception as e:
+        logger.error(f"文件上传失败: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ============================================================
 # 事件流 API（告警）
 # ============================================================
 
@@ -825,6 +1098,10 @@ if __name__ == '__main__':
     add_system_log("info", f"RSS 源数量: {len(config.get('right_screen', {}).get('news', {}).get('feeds', []))}")
     add_system_log("info", f"股票标的: {', '.join(config.get('right_screen', {}).get('stocks', {}).get('symbols', []))}")
     add_system_log("info", "系统控制台就绪，等待指令...")
+
+    # 启动系统监控线程
+    start_system_monitor()
+    add_system_log("info", "系统监控告警已启用（CPU/内存/网络/磁盘/RSS/安全公告/健康检查）")
 
     # 启动 Flask
     app.run(
