@@ -618,6 +618,41 @@
         </div>
       </div>
 
+      <!-- 天气设置 -->
+      <div class="settings-section" id="weather-settings">
+        <div class="settings-section-header">
+          <span class="icon">🌤️</span>
+          <span class="title">天气设置</span>
+        </div>
+        <div class="settings-section-body">
+          <div class="settings-row">
+            <div class="settings-label">
+              <div class="label-title">城市</div>
+              <div class="label-desc">显示在时钟旁的天气来源地</div>
+            </div>
+            <div class="settings-control">
+              <input type="text" id="weather-city" class="form-input" style="width: 200px;" placeholder="Taipei">
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                使用英文城市名，例如 Taipei、Tokyo、New+York、London
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-row">
+            <div class="settings-label">
+              <div class="label-title">启用天气</div>
+              <div class="label-desc">在时钟旁显示天气 emoji 与温度</div>
+            </div>
+            <div class="settings-control">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="weather-enabled" style="width: 16px; height: 16px;">
+                <span>启用</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- HIDRS 设置 -->
       <div class="settings-section" id="hidrs-settings">
         <div class="settings-section-header">
@@ -677,6 +712,33 @@
                   <div class="preview-box" style="background: linear-gradient(135deg, #1a1a2e, #2e2e4a); border: 1px solid #6366f1;"></div>
                   <div class="theme-name">午夜蓝</div>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-row">
+            <div class="settings-label">
+              <div class="label-title">背景图片</div>
+              <div class="label-desc">全局背景图片 URL</div>
+            </div>
+            <div class="settings-control">
+              <input type="url" id="background-image" class="form-input" placeholder="https://example.com/wallpaper.jpg">
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                留空则不显示背景图片，支持任何可访问的图片 URL
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-row">
+            <div class="settings-label">
+              <div class="label-title">背景透明度</div>
+              <div class="label-desc">背景图片的不透明度</div>
+            </div>
+            <div class="settings-control">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <input type="range" id="background-opacity" min="0" max="1" step="0.05" value="0.15"
+                       style="width: 200px; accent-color: var(--neon-cyan);">
+                <span id="opacity-value" style="font-family: monospace; color: var(--text-secondary); min-width: 40px;">0.15</span>
               </div>
             </div>
           </div>
@@ -769,6 +831,10 @@
       document.getElementById('hidrs-endpoint').value = config.hidrs?.endpoint || 'http://localhost:5000';
       document.getElementById('hidrs-auto-detect').checked = config.hidrs?.auto_detect !== false;
 
+      // 天气
+      document.getElementById('weather-city').value = config.weather?.city || 'Taipei';
+      document.getElementById('weather-enabled').checked = config.weather?.enabled !== false;
+
       // 主题
       document.querySelectorAll('.theme-option').forEach(opt => {
         opt.classList.toggle('active', opt.dataset.theme === (config.theme?.name || 'cyberpunk'));
@@ -779,6 +845,12 @@
           applyTheme(opt.dataset.theme);
         };
       });
+
+      // 背景图片
+      document.getElementById('background-image').value = config.theme?.background_image || '';
+      var bgOpacity = config.theme?.background_opacity ?? 0.15;
+      document.getElementById('background-opacity').value = bgOpacity;
+      document.getElementById('opacity-value').textContent = bgOpacity.toFixed(2);
     }
 
     // 终端背景色快捷设置
@@ -795,6 +867,11 @@
       if (/^#[0-9a-fA-F]{6}$/.test(this.value)) {
         document.getElementById('terminal-bg-color').value = this.value;
       }
+    });
+
+    // 背景透明度滑块同步数字显示
+    document.getElementById('background-opacity').addEventListener('input', function() {
+      document.getElementById('opacity-value').textContent = parseFloat(this.value).toFixed(2);
     });
 
     // ===== CCTV 摄像头管理 =====
@@ -961,8 +1038,16 @@
       config.hidrs.endpoint = document.getElementById('hidrs-endpoint').value;
       config.hidrs.auto_detect = document.getElementById('hidrs-auto-detect').checked;
 
+      // 天气
+      if (!config.weather) config.weather = {};
+      config.weather.city = document.getElementById('weather-city').value.trim() || 'Taipei';
+      config.weather.enabled = document.getElementById('weather-enabled').checked;
+
+      // 主题 + 背景图片
       config.theme.name = document.querySelector('.theme-option.active')?.dataset.theme || 'cyberpunk';
       config.theme.terminal_bg_color = document.getElementById('terminal-bg-color').value || '#0d1117';
+      config.theme.background_image = document.getElementById('background-image').value.trim();
+      config.theme.background_opacity = parseFloat(document.getElementById('background-opacity').value) || 0.15;
 
       // CCTV 摄像头
       var activeGrid = document.querySelector('.grid-size-option.active');

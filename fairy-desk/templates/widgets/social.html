@@ -519,16 +519,16 @@
 
       if (fromIdx === toIdx) return;
 
+      // 保存当前激活平台 ID（必须在 splice 之前）
+      var activePlatformId = platformDefs[currentIndex] ? platformDefs[currentIndex].id : platformDefs[0].id;
+
       // 重新排列 platformDefs
       var moved = platformDefs.splice(fromIdx, 1)[0];
       platformDefs.splice(toIdx, 0, moved);
 
-      // 更新 currentIndex（当前激活的平台）
-      var activePlatform = getPlatforms()[currentIndex] || platformDefs[0].id;
       // 找到激活平台在新顺序中的位置
-      var newIdx = platformDefs.findIndex(function(p) { return p.id === activePlatform; });
-      // 如果找不到就回到拖动目标
-      currentIndex = newIdx >= 0 ? newIdx : toIdx;
+      var newIdx = platformDefs.findIndex(function(p) { return p.id === activePlatformId; });
+      currentIndex = newIdx >= 0 ? newIdx : 0;
 
       renderTabs();
     }

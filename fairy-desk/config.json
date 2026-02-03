@@ -146,6 +146,10 @@
       "sound_enabled": false
     }
   },
+  "weather": {
+    "city": "Taipei",
+    "enabled": true
+  },
   "theme": {
     "name": "cyberpunk",
     "primary_color": "#00f0ff",
@@ -154,6 +158,8 @@
     "panel_color": "#111827",
     "text_color": "#e5e7eb",
     "terminal_color": "#4ade80",
-    "terminal_bg_color": "#0d1117"
+    "terminal_bg_color": "#0d1117",
+    "background_image": "",
+    "background_opacity": 0.15
   }
 }

@@ -13,7 +13,8 @@ const FairyDesk = {
   activeTab: null,
   tabIframes: {},  // Tab iframe 缓存
   eventSource: null,
-  clockInterval: null
+  clockInterval: null,
+  weatherText: ''   // 天气显示文字
 };
 
 // API 基础路径
@@ -27,8 +28,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 加载配置
   await loadConfig();
 
-  // 启动时钟
+  // 启动时钟 + 天气
   startClock();
+
+  // 应用背景图片
+  applyBackgroundImage();
 
   // 检测 HIDRS
   checkHIDRSStatus();
@@ -103,11 +107,18 @@ function startClock() {
       month: '2-digit',
       day: '2-digit'
     });
-    clockEl.textContent = `${dateStr} ${timeStr}`;
+    const weather = FairyDesk.weatherText ? FairyDesk.weatherText + '  ' : '';
+    clockEl.textContent = `${weather}${dateStr} ${timeStr}`;
   }
 
   updateClock();
   FairyDesk.clockInterval = setInterval(updateClock, 1000);
+
+  // 天气：立即获取 + 每 30 分钟更新
+  if (FairyDesk.config?.weather?.enabled !== false) {
+    fetchWeather();
+    setInterval(fetchWeather, 1800000);
+  }
 }
 
 // ============================================================
@@ -148,6 +159,65 @@ async function checkHIDRSStatus() {
       statusEl.innerHTML = '🔴 HIDRS';
     }
   }
+}
+
+// ============================================================
+// 天气
+// ============================================================
+
+async function fetchWeather() {
+  try {
+    const resp = await fetch(`${API_BASE}/api/weather`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data.error) return;
+    FairyDesk.weatherText = `${getWeatherEmoji(data.condition)} ${data.temp_c}°C`;
+  } catch {
+    // 天气获取失败不影响时钟
+  }
+}
+
+function getWeatherEmoji(condition) {
+  if (!condition) return '\u{1F324}';
+  const c = condition.toLowerCase();
+  if (c.includes('sunny') || c.includes('clear')) return '\u{2600}\u{FE0F}';
+  if (c.includes('partly cloudy') || c.includes('partly')) return '\u{26C5}';
+  if (c.includes('cloudy') || c.includes('overcast')) return '\u{2601}\u{FE0F}';
+  if (c.includes('thunder')) return '\u{26C8}\u{FE0F}';
+  if (c.includes('rain') || c.includes('drizzle') || c.includes('shower')) return '\u{1F327}\u{FE0F}';
+  if (c.includes('snow') || c.includes('sleet') || c.includes('blizzard')) return '\u{2744}\u{FE0F}';
+  if (c.includes('fog') || c.includes('mist') || c.includes('haze')) return '\u{1F32B}\u{FE0F}';
+  return '\u{1F324}';
+}
+
+// ============================================================
+// 背景图片
+// ============================================================
+
+function applyBackgroundImage() {
+  const bgImage = FairyDesk.config?.theme?.background_image;
+  const bgOpacity = FairyDesk.config?.theme?.background_opacity ?? 0.15;
+
+  if (!bgImage) return;
+
+  let overlay = document.getElementById('fairy-bg-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'fairy-bg-overlay';
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      z-index: -1;
+      pointer-events: none;
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+    `;
+    document.body.prepend(overlay);
+  }
+
+  overlay.style.backgroundImage = `url(${bgImage})`;
+  overlay.style.opacity = bgOpacity;
 }
 
 // ============================================================
@@ -600,9 +670,9 @@ function appendLog(log, container) {
 // ============================================================
 
 function initRightScreen() {
-  // 新闻 RSS
+  // 新闻 RSS（5 分钟刷新，与服务端缓存 TTL 对齐）
   loadNewsFeeds();
-  setInterval(loadNewsFeeds, 60000);
+  setInterval(loadNewsFeeds, 300000);
 
   // 告警流
   initAlertStream();
@@ -615,8 +685,11 @@ async function loadNewsFeeds() {
   const container = document.getElementById('news-feed');
   if (!container) return;
 
-  // 显示加载状态
-  container.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span>加载中...</span></div>';
+  // 只在首次加载时显示 loading（有内容时静默刷新）
+  const isFirstLoad = !container.querySelector('.feed-item');
+  if (isFirstLoad) {
+    container.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span>加载中...</span></div>';
+  }
 
   try {
     const resp = await fetch(`${API_BASE}/api/feeds/news?limit=20`);
