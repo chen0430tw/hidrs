@@ -1,0 +1,55 @@
+socialdb_vue_flask-master/
+├── .gitattributes
+├── .gitignore
+├── LICENSE
+├── README.md
+├── backend/
+│   ├── README.md
+│   ├── api_main.py
+│   ├── import.py
+│   ├── requirements.txt
+│   ├── conf/
+│   │   └── config.py
+│   └── test/
+│       ├── gen_test.py
+│       ├── test.csv
+│       ├── test.json
+│       ├── test.txt
+│       └── test_flask_society.py
+├── frontend/
+│   ├── .babelrc
+│   ├── .editorconfig
+│   ├── .gitignore
+│   ├── .postcssrc.js
+│   ├── README.md
+│   ├── favicon.ico
+│   ├── index.html
+│   ├── package.json
+│   ├── build/
+│   │   ├── build.js
+│   │   ├── check-versions.js
+│   │   ├── dev-client.js
+│   │   ├── dev-server.js
+│   │   ├── utils.js
+│   │   ├── vue-loader.conf.js
+│   │   ├── webpack.base.conf.js
+│   │   ├── webpack.dev.conf.js
+│   │   └── webpack.prod.conf.js
+│   ├── config/
+│   │   ├── dev.env.js
+│   │   ├── index.js
+│   │   └── prod.env.js
+│   ├── src/
+│   │   ├── App.vue
+│   │   ├── main.js
+│   │   ├── assets/
+│   │   │   └── logo.png
+│   │   └── components/
+│   │       ├── Analysis.vue
+│   │       └── search.vue
+│   └── static/
+│       ├── .gitkeep
+│       └── logo.png
+└── preview/
+    ├── preview.png
+    └── preview1.png
