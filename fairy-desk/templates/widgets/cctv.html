@@ -9,6 +9,12 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; background: #0a0e17; overflow: hidden; font-family: 'Consolas', 'Monaco', monospace; }
 
+    .cctv-wrapper {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+
     .cctv-header {
       height: 28px;
       background: rgba(0,0,0,0.6);
@@ -19,6 +25,7 @@
       border-bottom: 1px solid rgba(0,240,255,0.2);
       z-index: 10;
       position: relative;
+      flex-shrink: 0;
     }
 
     .cctv-header .title {
@@ -55,12 +62,148 @@
     .grid-controls button:hover { color: #00f0ff; border-color: #00f0ff; }
     .grid-controls button.active { color: #00f0ff; border-color: #00f0ff; background: rgba(0,240,255,0.1); }
 
+    /* ===== Spotlight 预览区 ===== */
+    .spotlight-zone {
+      display: none;
+      flex-direction: column;
+      flex: 0 0 58%;
+      background: #000;
+      border-bottom: 2px solid rgba(0,240,255,0.4);
+      position: relative;
+    }
+
+    .spotlight-zone.active {
+      display: flex;
+    }
+
+    .spotlight-video {
+      flex: 1;
+      overflow: hidden;
+      background: #000;
+      position: relative;
+    }
+
+    .spotlight-video iframe,
+    .spotlight-video video,
+    .spotlight-video img {
+      width: 100%;
+      height: 100%;
+      border: none;
+      object-fit: contain;
+      background: #000;
+    }
+
+    .spotlight-controls {
+      height: 32px;
+      background: rgba(0,0,0,0.85);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      border-top: 1px solid rgba(0,240,255,0.2);
+      flex-shrink: 0;
+    }
+
+    .spotlight-cam-name {
+      color: #fff;
+      font-size: 11px;
+      letter-spacing: 1px;
+    }
+
+    .spotlight-cam-id {
+      color: rgba(0,240,255,0.6);
+      font-size: 10px;
+      margin-left: 8px;
+    }
+
+    .spotlight-actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    .spotlight-btn {
+      background: transparent;
+      border: 1px solid rgba(0,240,255,0.3);
+      color: #00f0ff;
+      font-size: 11px;
+      padding: 3px 10px;
+      cursor: pointer;
+      border-radius: 3px;
+      font-family: inherit;
+      transition: all 0.15s;
+      user-select: none;
+    }
+
+    .spotlight-btn:hover {
+      background: rgba(0,240,255,0.15);
+      border-color: #00f0ff;
+    }
+
+    .spotlight-btn.pin-btn {
+      cursor: grab;
+    }
+
+    .spotlight-btn.pin-btn:active {
+      cursor: grabbing;
+    }
+
+    .spotlight-rec {
+      position: absolute;
+      top: 8px;
+      left: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      pointer-events: none;
+    }
+
+    .spotlight-rec .rec-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ff3333;
+      animation: blink 1.5s infinite;
+    }
+
+    .spotlight-rec .rec-text {
+      color: rgba(255,255,255,0.8);
+      font-size: 10px;
+    }
+
+    /* ===== 拖放提示条 ===== */
+    .spotlight-drop-hint {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      height: 48px;
+      background: rgba(0,240,255,0.05);
+      border: 2px dashed rgba(0,240,255,0.4);
+      border-radius: 4px;
+      margin: 4px;
+      color: rgba(0,240,255,0.6);
+      font-size: 11px;
+      flex-shrink: 0;
+      transition: all 0.2s;
+    }
+
+    .spotlight-drop-hint.visible {
+      display: flex;
+    }
+
+    .spotlight-drop-hint.hover {
+      background: rgba(0,240,255,0.15);
+      border-color: #00f0ff;
+      color: #00f0ff;
+    }
+
+    /* ===== CCTV 网格 ===== */
     .cctv-grid {
       display: grid;
       width: 100%;
-      height: calc(100% - 28px);
+      flex: 1;
       gap: 2px;
       background: #000;
+      min-height: 0;
     }
 
     .cctv-grid.grid-2x2 { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); }
@@ -71,6 +214,21 @@
       position: relative;
       background: #0a0e17;
       overflow: hidden;
+      cursor: pointer;
+      transition: outline 0.15s;
+    }
+
+    .camera-cell:hover {
+      outline: 1px solid rgba(0,240,255,0.4);
+    }
+
+    .camera-cell.spotlight-active {
+      outline: 2px solid #00f0ff;
+      box-shadow: inset 0 0 20px rgba(0,240,255,0.15);
+    }
+
+    .camera-cell.dragging {
+      opacity: 0.4;
     }
 
     .camera-cell iframe,
@@ -80,6 +238,7 @@
       height: 100%;
       border: none;
       object-fit: cover;
+      pointer-events: none;
     }
 
     .camera-cell video {
@@ -173,20 +332,54 @@
     }
 
     .camera-cell.fullscreen .cam-name { font-size: 14px; }
+
+    .camera-cell.fullscreen iframe,
+    .camera-cell.fullscreen video,
+    .camera-cell.fullscreen img.cam-stream {
+      pointer-events: auto;
+    }
   </style>
 </head>
 <body>
-  <div class="cctv-header">
-    <div class="title">📹 CCTV 多路监控</div>
-    <div class="grid-controls">
-      <button onclick="setGrid('2x2')" id="btn-2x2">2×2</button>
-      <button onclick="setGrid('3x3')" id="btn-3x3" class="active">3×3</button>
-      <button onclick="setGrid('4x4')" id="btn-4x4">4×4</button>
+  <div class="cctv-wrapper">
+    <div class="cctv-header">
+      <div class="title">📹 CCTV 多路监控</div>
+      <div class="grid-controls">
+        <button onclick="setGrid('2x2')" id="btn-2x2">2×2</button>
+        <button onclick="setGrid('3x3')" id="btn-3x3" class="active">3×3</button>
+        <button onclick="setGrid('4x4')" id="btn-4x4">4×4</button>
+      </div>
+      <div class="rec">● REC</div>
     </div>
-    <div class="rec">● REC</div>
-  </div>
-  <div class="cctv-grid grid-3x3" id="cctv-grid">
-    <!-- 由 JS 动态填充 -->
+
+    <!-- Spotlight 预览区（隐藏，点击/拖放摄像头后显示） -->
+    <div class="spotlight-zone" id="spotlight-zone">
+      <div class="spotlight-video" id="spotlight-video">
+        <div class="spotlight-rec">
+          <div class="rec-dot"></div>
+          <span class="rec-text spotlight-time"></span>
+        </div>
+      </div>
+      <div class="spotlight-controls">
+        <div>
+          <span class="spotlight-cam-name" id="spotlight-cam-name"></span>
+          <span class="spotlight-cam-id" id="spotlight-cam-id"></span>
+        </div>
+        <div class="spotlight-actions">
+          <button class="spotlight-btn pin-btn" id="spotlight-pin-btn" title="添加为左屏分页（可拖动到分页栏）">📌 添加为分页</button>
+          <button class="spotlight-btn" onclick="closeSpotlight()" title="关闭预览（ESC）">✕ 关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 拖放到此处放大预览（拖动时出现） -->
+    <div class="spotlight-drop-hint" id="spotlight-drop-hint">
+      ⬆ 拖放到此处放大预览
+    </div>
+
+    <div class="cctv-grid grid-3x3" id="cctv-grid">
+      <!-- 由 JS 动态填充 -->
+    </div>
   </div>
 
   <!-- HLS.js for .m3u8 streams (OBS/RTMP output) -->
@@ -195,16 +388,13 @@
   <script>
     var cameras = [];
     var currentGrid = '3x3';
-    var hlsInstances = [];  // 追踪 HLS 实例以便清理
+    var hlsInstances = [];
+    var spotlightCamera = null;
+    var spotlightCamIndex = -1;
+    var spotlightHls = null;
 
-    /**
-     * 根据 URL 判断媒体类型
-     * - hls: .m3u8 (OBS/RTMP → HLS, IP cameras)
-     * - mjpeg: .mjpg, .mjpeg, /mjpg/, /video (MJPEG streams from IP cameras)
-     * - image: .jpg, .jpeg, .png, .gif (静态快照，定时刷新)
-     * - video: .mp4, .webm, .ogg (direct video)
-     * - iframe: everything else (YouTube, web embeds, etc.)
-     */
+    // ===== 串流类型检测 =====
+
     function detectStreamType(url) {
       var lower = url.toLowerCase();
       if (lower.includes('.m3u8')) return 'hls';
@@ -214,12 +404,72 @@
       return 'iframe';
     }
 
+    /**
+     * 创建对应类型的媒体元素
+     * @returns {{ element: HTMLElement, hls?: Hls }}
+     */
+    function createMediaElement(cam) {
+      var streamType = detectStreamType(cam.url);
+
+      if (streamType === 'hls') {
+        var video = document.createElement('video');
+        video.autoplay = true;
+        video.muted = true;
+        video.loop = true;
+        video.playsInline = true;
+        video.setAttribute('playsinline', '');
+        var result = { element: video };
+        if (window.Hls && Hls.isSupported()) {
+          var hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+          hls.loadSource(cam.url);
+          hls.attachMedia(video);
+          result.hls = hls;
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          video.src = cam.url;
+        }
+        return result;
+
+      } else if (streamType === 'mjpeg') {
+        var img = document.createElement('img');
+        img.className = 'cam-stream';
+        img.src = cam.url;
+        img.alt = cam.name;
+        return { element: img };
+
+      } else if (streamType === 'image') {
+        var img = document.createElement('img');
+        img.className = 'cam-stream';
+        img.src = cam.url + (cam.url.includes('?') ? '&' : '?') + '_t=' + Date.now();
+        img.alt = cam.name;
+        img.dataset.baseUrl = cam.url;
+        return { element: img };
+
+      } else if (streamType === 'video') {
+        var video = document.createElement('video');
+        video.src = cam.url;
+        video.autoplay = true;
+        video.muted = true;
+        video.loop = true;
+        video.playsInline = true;
+        return { element: video };
+
+      } else {
+        var iframe = document.createElement('iframe');
+        iframe.src = cam.url;
+        iframe.allow = 'autoplay; encrypted-media';
+        iframe.allowFullscreen = true;
+        iframe.loading = 'lazy';
+        return { element: iframe };
+      }
+    }
+
+    // ===== 网格控制 =====
+
     function setGrid(size) {
       currentGrid = size;
       var grid = document.getElementById('cctv-grid');
       grid.className = 'cctv-grid grid-' + size;
 
-      // 更新按钮状态
       document.querySelectorAll('.grid-controls button').forEach(function(btn) {
         btn.classList.toggle('active', btn.id === 'btn-' + size);
       });
@@ -239,6 +489,8 @@
       hlsInstances = [];
     }
 
+    // ===== 摄像头网格渲染 =====
+
     function renderCameras() {
       destroyHlsInstances();
       var grid = document.getElementById('cctv-grid');
@@ -252,63 +504,11 @@
 
         if (i < enabled.length) {
           var cam = enabled[i];
-          var streamType = detectStreamType(cam.url);
 
-          if (streamType === 'hls') {
-            // HLS 串流 (.m3u8) — OBS/RTMP 输出
-            var video = document.createElement('video');
-            video.autoplay = true;
-            video.muted = true;
-            video.loop = true;
-            video.playsInline = true;
-            video.setAttribute('playsinline', '');
-            if (window.Hls && Hls.isSupported()) {
-              var hls = new Hls({ enableWorker: true, lowLatencyMode: true });
-              hls.loadSource(cam.url);
-              hls.attachMedia(video);
-              hlsInstances.push(hls);
-            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-              // Safari 原生 HLS
-              video.src = cam.url;
-            }
-            cell.appendChild(video);
-
-          } else if (streamType === 'mjpeg') {
-            // MJPEG 串流 — IP 摄像头常见格式
-            var img = document.createElement('img');
-            img.className = 'cam-stream';
-            img.src = cam.url;
-            img.alt = cam.name;
-            cell.appendChild(img);
-
-          } else if (streamType === 'image') {
-            // 静态图片快照 — 每 5 秒刷新
-            var img = document.createElement('img');
-            img.className = 'cam-stream';
-            img.src = cam.url + (cam.url.includes('?') ? '&' : '?') + '_t=' + Date.now();
-            img.alt = cam.name;
-            img.dataset.baseUrl = cam.url;
-            cell.appendChild(img);
-
-          } else if (streamType === 'video') {
-            // 直接视频文件
-            var video = document.createElement('video');
-            video.src = cam.url;
-            video.autoplay = true;
-            video.muted = true;
-            video.loop = true;
-            video.playsInline = true;
-            cell.appendChild(video);
-
-          } else {
-            // iframe（YouTube, 网页嵌入等）
-            var iframe = document.createElement('iframe');
-            iframe.src = cam.url;
-            iframe.allow = 'autoplay; encrypted-media';
-            iframe.allowFullscreen = true;
-            iframe.loading = 'lazy';
-            cell.appendChild(iframe);
-          }
+          // 创建媒体元素
+          var result = createMediaElement(cam);
+          cell.appendChild(result.element);
+          if (result.hls) hlsInstances.push(result.hls);
 
           // REC 点 + 时间
           var overlay = document.createElement('div');
@@ -335,10 +535,41 @@
           label.appendChild(idEl);
           cell.appendChild(label);
 
-          // 双击全屏
-          cell.addEventListener('dblclick', function() {
-            this.classList.toggle('fullscreen');
+          // === 交互：点击 → 放大预览 ===
+          cell.dataset.camIndex = i;
+          cell.addEventListener('click', function() {
+            openSpotlight(parseInt(this.dataset.camIndex));
           });
+
+          // === 交互：双击 → 全屏 ===
+          cell.addEventListener('dblclick', function(e) {
+            e.stopPropagation();
+            this.classList.toggle('fullscreen');
+            // 全屏时恢复 iframe/video pointer-events
+          });
+
+          // === 拖动：拖到 Spotlight 放大区 ===
+          cell.draggable = true;
+          cell.addEventListener('dragstart', function(e) {
+            this.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', this.dataset.camIndex);
+            e.dataTransfer.setData('application/x-fairy-camera', JSON.stringify(cam));
+
+            // 显示拖放提示条
+            document.getElementById('spotlight-drop-hint').classList.add('visible');
+          });
+          cell.addEventListener('dragend', function() {
+            this.classList.remove('dragging');
+            var hint = document.getElementById('spotlight-drop-hint');
+            hint.classList.remove('visible', 'hover');
+          });
+
+          // 高亮当前 spotlight 摄像头
+          if (spotlightCamera && cam.url === spotlightCamera.url) {
+            cell.classList.add('spotlight-active');
+          }
+
         } else {
           // 无信号
           var offline = document.createElement('div');
@@ -362,21 +593,193 @@
       }
     }
 
-    // 更新时钟
+    // ===== Spotlight 预览 =====
+
+    function openSpotlight(camIndex) {
+      var enabled = cameras.filter(function(c) { return c.enabled !== false; });
+      var cam = enabled[camIndex];
+      if (!cam) return;
+
+      // 如果已经在显示同一个摄像头，关闭
+      if (spotlightCamera && spotlightCamera.url === cam.url) {
+        closeSpotlight();
+        return;
+      }
+
+      spotlightCamera = cam;
+      spotlightCamIndex = camIndex;
+
+      var zone = document.getElementById('spotlight-zone');
+      var videoContainer = document.getElementById('spotlight-video');
+      var nameEl = document.getElementById('spotlight-cam-name');
+      var idEl = document.getElementById('spotlight-cam-id');
+
+      // 清理之前的 spotlight 媒体
+      var existingMedia = videoContainer.querySelectorAll('iframe, video, img');
+      existingMedia.forEach(function(el) { el.remove(); });
+      if (spotlightHls) {
+        try { spotlightHls.destroy(); } catch(e) {}
+        spotlightHls = null;
+      }
+
+      // 创建新的媒体元素
+      var result = createMediaElement(cam);
+      videoContainer.appendChild(result.element);
+      if (result.hls) spotlightHls = result.hls;
+
+      nameEl.textContent = cam.name;
+      idEl.textContent = 'CAM-' + String(camIndex + 1).padStart(2, '0');
+      zone.classList.add('active');
+
+      // 高亮网格中的对应摄像头
+      document.querySelectorAll('.camera-cell').forEach(function(cell, i) {
+        cell.classList.toggle('spotlight-active', i === camIndex);
+      });
+    }
+
+    function closeSpotlight() {
+      if (spotlightHls) {
+        try { spotlightHls.destroy(); } catch(e) {}
+        spotlightHls = null;
+      }
+      spotlightCamera = null;
+      spotlightCamIndex = -1;
+
+      var zone = document.getElementById('spotlight-zone');
+      zone.classList.remove('active');
+
+      // 清理媒体元素
+      var videoContainer = document.getElementById('spotlight-video');
+      var existingMedia = videoContainer.querySelectorAll('iframe, video, img');
+      existingMedia.forEach(function(el) { el.remove(); });
+
+      // 取消高亮
+      document.querySelectorAll('.camera-cell').forEach(function(cell) {
+        cell.classList.remove('spotlight-active');
+      });
+    }
+
+    // ===== 添加为分页（postMessage 到父窗口） =====
+
+    function pinSpotlightToTab() {
+      if (!spotlightCamera) return;
+
+      if (window.parent !== window) {
+        window.parent.postMessage({
+          type: 'add-camera-tab',
+          camera: {
+            name: spotlightCamera.name,
+            url: spotlightCamera.url
+          }
+        }, '*');
+      }
+    }
+
+    // 📌 按钮：点击 = 添加分页，拖动 = 拖到分页栏
+    (function() {
+      var pinBtn = document.getElementById('spotlight-pin-btn');
+      var startX, startY, isDrag;
+
+      pinBtn.addEventListener('mousedown', function(e) {
+        if (!spotlightCamera) return;
+        startX = e.clientX;
+        startY = e.clientY;
+        isDrag = false;
+
+        function onMove(ev) {
+          var dx = ev.clientX - startX;
+          var dy = ev.clientY - startY;
+          if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+            if (!isDrag) {
+              isDrag = true;
+              // 通知父窗口开始拖动
+              if (window.parent !== window) {
+                window.parent.postMessage({
+                  type: 'camera-drag-start',
+                  camera: { name: spotlightCamera.name, url: spotlightCamera.url }
+                }, '*');
+              }
+            }
+          }
+        }
+
+        function onUp() {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+
+          if (isDrag) {
+            // 拖动结束（鼠标在 iframe 内释放）
+            if (window.parent !== window) {
+              window.parent.postMessage({ type: 'camera-drag-end' }, '*');
+            }
+          } else {
+            // 单击 → 直接添加分页
+            pinSpotlightToTab();
+          }
+        }
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    })();
+
+    // ===== 拖放提示条事件 =====
+
+    (function() {
+      var hint = document.getElementById('spotlight-drop-hint');
+
+      hint.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        this.classList.add('hover');
+      });
+
+      hint.addEventListener('dragleave', function() {
+        this.classList.remove('hover');
+      });
+
+      hint.addEventListener('drop', function(e) {
+        e.preventDefault();
+        this.classList.remove('visible', 'hover');
+        var camIndex = parseInt(e.dataTransfer.getData('text/plain'));
+        if (!isNaN(camIndex)) {
+          openSpotlight(camIndex);
+        }
+      });
+    })();
+
+    // ===== 键盘快捷键 =====
+
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        // 先关全屏，再关 spotlight
+        var fullscreen = document.querySelector('.camera-cell.fullscreen');
+        if (fullscreen) {
+          fullscreen.classList.remove('fullscreen');
+        } else if (document.getElementById('spotlight-zone').classList.contains('active')) {
+          closeSpotlight();
+        }
+      }
+    });
+
+    // ===== 时钟更新 =====
+
     setInterval(function() {
-      var timeEls = document.querySelectorAll('.cam-time');
       var now = new Date().toLocaleTimeString('zh-CN', {hour12: false});
-      timeEls.forEach(function(el) { el.textContent = now; });
+      document.querySelectorAll('.cam-time').forEach(function(el) { el.textContent = now; });
+      document.querySelectorAll('.spotlight-time').forEach(function(el) { el.textContent = now; });
     }, 1000);
 
-    // 图片快照定时刷新（每 5 秒）
+    // ===== 图片快照定时刷新 =====
+
     setInterval(function() {
       document.querySelectorAll('img.cam-stream[data-base-url]').forEach(function(img) {
         img.src = img.dataset.baseUrl + (img.dataset.baseUrl.includes('?') ? '&' : '?') + '_t=' + Date.now();
       });
     }, 5000);
 
-    // 从 API 加载配置
+    // ===== 从 API 加载配置 =====
+
     fetch('/api/config')
       .then(function(r) { return r.json(); })
       .then(function(cfg) {
@@ -386,7 +789,6 @@
           currentGrid = cctvCfg.grid || '3x3';
           setGrid(currentGrid);
         } else {
-          // 默认：无摄像头配置
           cameras = [];
           renderCameras();
         }
