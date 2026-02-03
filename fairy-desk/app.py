@@ -329,13 +329,26 @@ def hidrs_proxy(path):
 # 新闻 RSS API
 # ============================================================
 
+# RSS 缓存（避免每次请求都重新抓取）
+_rss_cache = {
+    'items': [],
+    'timestamp': 0,
+    'ttl': 120  # 缓存 2 分钟
+}
+
+
 @app.route('/api/feeds/news')
 def news_feeds():
-    """获取 RSS 新闻聚合（并发抓取所有源）"""
-    load_config()  # 确保读取最新配置
-    feeds_config = config.get('right_screen', {}).get('news', {}).get('feeds', [])
+    """获取 RSS 新闻聚合（带缓存 + 并发抓取）"""
+    load_config()
     max_items = request.args.get('limit', 20, type=int)
+    force = request.args.get('force', '0') == '1'
 
+    # 缓存未过期且非强制刷新，直接返回
+    if not force and _rss_cache['items'] and (time.time() - _rss_cache['timestamp']) < _rss_cache['ttl']:
+        return jsonify(_rss_cache['items'][:max_items])
+
+    feeds_config = config.get('right_screen', {}).get('news', {}).get('feeds', [])
     enabled_feeds = [f for f in feeds_config if f.get('enabled', True)]
 
     def fetch_one(feed_cfg):
@@ -343,7 +356,7 @@ def news_feeds():
         items = []
         try:
             feed = feedparser.parse(feed_cfg['url'])
-            for entry in feed.entries[:10]:  # 每个源最多10条
+            for entry in feed.entries[:10]:
                 items.append({
                     "source": feed_cfg['name'],
                     "title": entry.get('title', ''),
@@ -362,8 +375,11 @@ def news_feeds():
         for future in as_completed(futures):
             all_items.extend(future.result())
 
-    # 按时间排序（简单处理）
     all_items.sort(key=lambda x: x.get('published', ''), reverse=True)
+
+    # 更新缓存
+    _rss_cache['items'] = all_items
+    _rss_cache['timestamp'] = time.time()
 
     return jsonify(all_items[:max_items])
 
