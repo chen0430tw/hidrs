@@ -28,6 +28,20 @@
 - 支持圈选、框选区域批量查询
 - 实时显示统计数据
 
+### 5️⃣ IoT设备地理定位 🆕
+- 识别数据中的IoT设备（摄像头、路由器、智能家居、工控设备等）
+- 通过设备IP进行精确地理定位
+- 设备类型分类显示（海康威视摄像头、小米路由器、智能音箱等）
+- 提取设备MAC地址、序列号进行关联分析
+- 显示设备密集区域（如某小区、工业园区）
+
+### 6️⃣ 机构所在地定位 🆕
+- 从source字段提取泄露事件关联的机构名称
+- 通过企业工商信息获取机构注册地址
+- 显示机构总部、分支机构的地理分布
+- 关联分析：同一机构的多次泄露事件
+- 行业聚类：金融、医疗、教育等行业的地理分布
+
 ---
 
 ## 🏗️ 系统架构
@@ -42,6 +56,8 @@
 │  │  │  - 热力图层（数据泄露密度）                     │  │  │
 │  │  │  - 标记图层（重大泄露事件）                     │  │  │
 │  │  │  - 聚类图层（邮箱域名分布）                     │  │  │
+│  │  │  - IoT设备图层（蓝色标记）🆕                   │  │  │
+│  │  │  - 机构图层（红色标记）🆕                       │  │  │
 │  │  └────────────────────────────────────────────────┘  │  │
 │  │  ┌────────┬────────┬────────┬────────┐              │  │
 │  │  │时间轴  │统计面板│过滤器  │图例    │              │  │
@@ -56,6 +72,8 @@
 │  /api/sed/geo/timeline       - 获取时间轴数据              │
 │  /api/sed/geo/region/<name>  - 查询指定地区的数据          │
 │  /api/sed/geo/heatmap        - 获取热力图数据              │
+│  /api/sed/geo/iot_devices    - 获取IoT设备地理分布 🆕     │
+│  /api/sed/geo/organizations  - 获取机构地理分布 🆕         │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -64,6 +82,9 @@
 │  - DNS 解析器 (dnspython)                                   │
 │  - 域名 WHOIS 查询 (python-whois)                           │
 │  - 地理编码缓存 (Redis/内存)                                │
+│  - IoT设备识别器 (设备指纹、User-Agent分析) 🆕             │
+│  - 机构信息查询 (企查查/天眼查API) 🆕                       │
+│  - MAC地址厂商识别 (OUI数据库) 🆕                           │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -75,6 +96,9 @@
 │    - xtime (泄露时间)                                       │
 │    - [新增] geo_location { lat, lon, country, city }       │
 │    - [新增] domain_ip                                       │
+│    - [新增] device_type (IoT设备类型) 🆕                    │
+│    - [新增] device_ip, device_mac 🆕                        │
+│    - [新增] organization_name, organization_location 🆕     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -108,24 +132,54 @@
       "country_code": "CN",
       "city": "Beijing",
       "region": "Beijing",
-      "source_type": "domain"  // domain/source/manual
+      "source_type": "iot_device"  // iot_device/organization/domain/source/manual
     },
 
     // 新增域名IP字段
     "domain_ip": "93.184.216.34",
     "domain_asn": "AS15133",
-    "domain_org": "Edgecast Inc."
+    "domain_org": "Edgecast Inc.",
+
+    // 🆕 新增IoT设备字段
+    "device_type": "ip_camera",  // ip_camera/router/smart_home/industrial/other
+    "device_brand": "Hikvision",
+    "device_model": "DS-2CD2032-I",
+    "device_ip": "120.220.10.50",
+    "device_mac": "00:11:22:33:44:55",
+    "device_manufacturer": "Hangzhou Hikvision Digital Technology Co., Ltd.",
+    "device_location": {
+      "lat": 30.2741,
+      "lon": 120.1551,
+      "precision": "city",  // street/city/province/country
+      "confidence": 0.85
+    },
+
+    // 🆕 新增机构字段
+    "organization_name": "某某科技有限公司",
+    "organization_type": "company",  // company/government/education/hospital/ngo
+    "organization_industry": "互联网",  // 互联网/金融/医疗/教育/制造业等
+    "organization_location": {
+      "lat": 39.9042,
+      "lon": 116.4074,
+      "address": "北京市朝阳区xxx大厦",
+      "city": "Beijing",
+      "country": "China"
+    },
+    "organization_unified_credit_code": "91110108XXXXXXXXXX",  // 统一社会信用代码
+    "organization_size": "large"  // small/medium/large
   }
 }
 ```
 
-### 地理位置来源类型
+### 地理位置来源类型（按优先级排序）
 
-| source_type | 说明 | 优先级 |
-|-------------|------|--------|
-| `manual` | 手动标注的泄露事件地理位置 | 🥇 高 |
-| `source` | 从source字段提取的地理信息 | 🥈 中 |
-| `domain` | 从邮箱域名解析的地理位置 | 🥉 低 |
+| source_type | 说明 | 精度 | 优先级 |
+|-------------|------|------|--------|
+| `manual` | 手动标注的泄露事件地理位置 | ⭐⭐⭐⭐⭐ | 🥇 最高 |
+| `iot_device` | 🆕 IoT设备IP精确定位（设备实际位置） | ⭐⭐⭐⭐⭐ | 🥇 最高 |
+| `organization` | 🆕 机构工商注册地址（总部/分支机构） | ⭐⭐⭐⭐ | 🥈 高 |
+| `source` | 从source字段提取的地理信息 | ⭐⭐⭐ | 🥉 中 |
+| `domain` | 从邮箱域名DNS解析的服务器位置 | ⭐⭐ | 🏅 低 |
 
 ---
 
@@ -328,6 +382,152 @@ POST /api/sed/geo/query/bounds
 
 ---
 
+### 6. 获取IoT设备地理分布 🆕
+
+```
+GET /api/sed/geo/iot_devices
+```
+
+**查询参数**:
+- `device_type`: 设备类型过滤（ip_camera/router/smart_home/industrial）
+- `brand`: 品牌过滤（Hikvision/TP-Link/Xiaomi等）
+- `top_n`: 返回前N个设备密集区域（默认50）
+- `min_count`: 最小设备数量阈值
+
+**响应示例**:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "location": {
+        "lat": 30.2741,
+        "lon": 120.1551,
+        "city": "Hangzhou",
+        "precision": "city"
+      },
+      "device_type": "ip_camera",
+      "device_brand": "Hikvision",
+      "count": 125000,
+      "devices_sample": [
+        {
+          "device_model": "DS-2CD2032-I",
+          "device_ip": "120.220.10.50",
+          "user": "admin",
+          "last_seen": "202301"
+        }
+      ]
+    },
+    {
+      "location": {
+        "lat": 31.2304,
+        "lon": 121.4737,
+        "city": "Shanghai",
+        "precision": "district"
+      },
+      "device_type": "router",
+      "device_brand": "TP-Link",
+      "count": 98000,
+      "devices_sample": []
+    }
+  ],
+  "summary": {
+    "total_devices": 5280000,
+    "device_types": {
+      "ip_camera": 2100000,
+      "router": 1800000,
+      "smart_home": 1200000,
+      "industrial": 180000
+    },
+    "top_brands": ["Hikvision", "TP-Link", "Xiaomi", "Dahua", "D-Link"]
+  }
+}
+```
+
+---
+
+### 7. 获取机构地理分布 🆕
+
+```
+GET /api/sed/geo/organizations
+```
+
+**查询参数**:
+- `industry`: 行业过滤（互联网/金融/医疗/教育/制造业）
+- `org_type`: 机构类型（company/government/education/hospital）
+- `org_size`: 机构规模（small/medium/large）
+- `top_n`: 返回前N个机构（默认100）
+
+**响应示例**:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "organization_name": "某某科技有限公司",
+      "organization_industry": "互联网",
+      "organization_type": "company",
+      "organization_size": "large",
+      "location": {
+        "lat": 39.9042,
+        "lon": 116.4074,
+        "address": "北京市朝阳区xxx大厦",
+        "city": "Beijing",
+        "country": "China"
+      },
+      "breach_count": 3,
+      "total_records": 12500000,
+      "breaches": [
+        {
+          "source": "某某科技用户数据泄露2023",
+          "time": "202301",
+          "count": 8000000
+        },
+        {
+          "source": "某某科技内部系统泄露2022",
+          "time": "202209",
+          "count": 4500000
+        }
+      ]
+    },
+    {
+      "organization_name": "某医院",
+      "organization_industry": "医疗",
+      "organization_type": "hospital",
+      "organization_size": "medium",
+      "location": {
+        "lat": 31.2304,
+        "lon": 121.4737,
+        "address": "上海市黄浦区xxx路",
+        "city": "Shanghai",
+        "country": "China"
+      },
+      "breach_count": 1,
+      "total_records": 520000,
+      "breaches": []
+    }
+  ],
+  "summary": {
+    "total_organizations": 1250,
+    "total_records": 85000000,
+    "by_industry": {
+      "互联网": 450,
+      "金融": 280,
+      "医疗": 180,
+      "教育": 220,
+      "其他": 120
+    },
+    "by_size": {
+      "large": 85,
+      "medium": 320,
+      "small": 845
+    }
+  }
+}
+```
+
+---
+
 ## 🎨 前端组件设计
 
 ### 组件文件: `fairy-desk/templates/widgets/sed_geo_map.html`
@@ -353,7 +553,9 @@ const layers = {
   heatmap: L.heatLayer([], { radius: 25, blur: 35, maxZoom: 10 }),
   markers: L.markerClusterGroup(),
   sources: L.layerGroup(),
-  timeline: L.layerGroup()
+  timeline: L.layerGroup(),
+  iot_devices: L.markerClusterGroup(),  // 🆕 IoT设备图层
+  organizations: L.layerGroup()         // 🆕 机构图层
 };
 ```
 
@@ -509,7 +711,199 @@ class TimelineController {
 const timeline = new TimelineController();
 ```
 
-#### 5. 交互式区域查询
+#### 5. IoT设备图层渲染 🆕
+
+```javascript
+async function renderIoTDevices() {
+  const response = await fetch('/api/sed/geo/iot_devices?top_n=100');
+  const data = await response.json();
+
+  layers.iot_devices.clearLayers();
+
+  data.data.forEach(item => {
+    const deviceIcon = createIoTDeviceIcon(item.device_type, item.count);
+
+    const marker = L.marker([item.location.lat, item.location.lon], {
+      icon: deviceIcon
+    });
+
+    marker.bindPopup(`
+      <div class="device-popup">
+        <h3>📱 ${item.device_brand || '未知品牌'} ${item.device_type}</h3>
+        <p>📍 位置: ${item.location.city}</p>
+        <p>📊 设备数量: ${formatNumber(item.count)}</p>
+        <p>🏷️ 类型: ${getDeviceTypeLabel(item.device_type)}</p>
+        ${item.devices_sample && item.devices_sample.length > 0 ? `
+          <hr>
+          <p><b>样本设备:</b></p>
+          <ul>
+            ${item.devices_sample.slice(0, 3).map(d => `
+              <li>${d.device_model} (${d.device_ip})</li>
+            `).join('')}
+          </ul>
+        ` : ''}
+        <button onclick="queryDeviceDetails('${item.device_type}', '${item.location.city}')">
+          查看详情
+        </button>
+      </div>
+    `);
+
+    layers.iot_devices.addLayer(marker);
+  });
+
+  map.addLayer(layers.iot_devices);
+}
+
+function createIoTDeviceIcon(device_type, count) {
+  const icons = {
+    'ip_camera': '📷',
+    'router': '📡',
+    'smart_home': '🏠',
+    'industrial': '🏭',
+    'other': '📱'
+  };
+
+  const size = Math.min(40, 20 + Math.log10(count) * 4);
+
+  return L.divIcon({
+    className: 'iot-device-marker',
+    html: `
+      <div style="
+        width: ${size}px;
+        height: ${size}px;
+        background: linear-gradient(135deg, #3b82f6, #2563eb);
+        border: 2px solid white;
+        border-radius: 50%;
+        box-shadow: 0 0 10px rgba(59, 130, 246, 0.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: ${size * 0.5}px;
+      ">
+        ${icons[device_type] || icons['other']}
+      </div>
+    `,
+    iconSize: [size, size],
+    iconAnchor: [size/2, size/2]
+  });
+}
+
+function getDeviceTypeLabel(type) {
+  const labels = {
+    'ip_camera': 'IP摄像头',
+    'router': '路由器',
+    'smart_home': '智能家居',
+    'industrial': '工控设备',
+    'other': '其他设备'
+  };
+  return labels[type] || type;
+}
+```
+
+#### 6. 机构图层渲染 🆕
+
+```javascript
+async function renderOrganizations() {
+  const response = await fetch('/api/sed/geo/organizations?top_n=100');
+  const data = await response.json();
+
+  layers.organizations.clearLayers();
+
+  data.data.forEach(org => {
+    const orgIcon = createOrganizationIcon(org.organization_industry, org.total_records);
+
+    const marker = L.marker([org.location.lat, org.location.lon], {
+      icon: orgIcon
+    });
+
+    marker.bindPopup(`
+      <div class="org-popup">
+        <h3>🏢 ${org.organization_name}</h3>
+        <p>📍 地址: ${org.location.address || org.location.city}</p>
+        <p>🏭 行业: ${org.organization_industry}</p>
+        <p>📊 泄露事件: ${org.breach_count}次</p>
+        <p>📦 泄露数据: ${formatNumber(org.total_records)}条</p>
+        <p>🏷️ 规模: ${getOrgSizeLabel(org.organization_size)}</p>
+        ${org.breaches && org.breaches.length > 0 ? `
+          <hr>
+          <p><b>泄露记录:</b></p>
+          <ul>
+            ${org.breaches.slice(0, 3).map(b => `
+              <li>${b.source} (${formatTime(b.time)}) - ${formatNumber(b.count)}条</li>
+            `).join('')}
+          </ul>
+        ` : ''}
+        <button onclick="queryOrgDetails('${org.organization_name}')">
+          查看详情
+        </button>
+      </div>
+    `);
+
+    layers.organizations.addLayer(marker);
+  });
+
+  map.addLayer(layers.organizations);
+}
+
+function createOrganizationIcon(industry, total_records) {
+  const industryIcons = {
+    '互联网': '💻',
+    '金融': '💰',
+    '医疗': '🏥',
+    '教育': '🎓',
+    '制造业': '🏭',
+    '政府': '🏛️'
+  };
+
+  const size = Math.min(45, 25 + Math.log10(total_records) * 4);
+  const color = getIndustryColor(industry);
+
+  return L.divIcon({
+    className: 'org-marker',
+    html: `
+      <div style="
+        width: ${size}px;
+        height: ${size}px;
+        background: ${color};
+        border: 3px solid white;
+        border-radius: 8px;
+        box-shadow: 0 0 12px ${color}80;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: ${size * 0.5}px;
+      ">
+        ${industryIcons[industry] || '🏢'}
+      </div>
+    `,
+    iconSize: [size, size],
+    iconAnchor: [size/2, size/2]
+  });
+}
+
+function getIndustryColor(industry) {
+  const colors = {
+    '互联网': '#ef4444',
+    '金融': '#f59e0b',
+    '医疗': '#10b981',
+    '教育': '#3b82f6',
+    '制造业': '#8b5cf6',
+    '政府': '#ec4899'
+  };
+  return colors[industry] || '#6b7280';
+}
+
+function getOrgSizeLabel(size) {
+  const labels = {
+    'large': '大型企业',
+    'medium': '中型企业',
+    'small': '小型企业'
+  };
+  return labels[size] || size;
+}
+```
+
+#### 7. 交互式区域查询
 
 ```javascript
 // 框选工具
@@ -578,6 +972,8 @@ async function finishBoxSelection(e) {
     <label><input type="checkbox" id="layer-heatmap" checked> 热力图</label>
     <label><input type="checkbox" id="layer-markers" checked> 泄露事件</label>
     <label><input type="checkbox" id="layer-domains"> 邮箱域名</label>
+    <label><input type="checkbox" id="layer-iot-devices"> 🆕 IoT设备</label>
+    <label><input type="checkbox" id="layer-organizations"> 🆕 机构分布</label>
   </div>
 
   <!-- 时间轴控制 -->
@@ -611,6 +1007,14 @@ async function finishBoxSelection(e) {
     <div class="stat-item">
       <div class="stat-label">覆盖国家</div>
       <div class="stat-value" id="stat-countries">0</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-label">🆕 IoT设备</div>
+      <div class="stat-value" id="stat-iot-devices">0</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-label">🆕 泄露机构</div>
+      <div class="stat-value" id="stat-organizations">0</div>
     </div>
   </div>
 </div>
