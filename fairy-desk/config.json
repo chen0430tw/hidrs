@@ -84,7 +84,8 @@
       "api_key": "",
       "use_embed": false,
       "twitter_accounts": ["elonmusk", "POTUS", "BBCBreaking", "Reuters"],
-      "bluesky_account": "bsky.app"
+      "bluesky_account": "bsky.app",
+      "facebook_page": "https://www.facebook.com/CNN"
     },
     "news": {
       "refresh_interval": 60,

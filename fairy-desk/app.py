@@ -48,6 +48,30 @@ config = {}
 # 系统日志缓存（用于 SSE）
 system_logs = []
 MAX_LOG_ENTRIES = 100
+LOGS_PATH = Path(__file__).parent / 'system_logs.json'
+
+
+def load_system_logs():
+    """从文件加载历史系统日志"""
+    global system_logs
+    try:
+        if LOGS_PATH.exists():
+            with open(LOGS_PATH, 'r', encoding='utf-8') as f:
+                system_logs = json.load(f)
+            # 只保留最近的条目
+            if len(system_logs) > MAX_LOG_ENTRIES:
+                system_logs = system_logs[-MAX_LOG_ENTRIES:]
+    except Exception:
+        system_logs = []
+
+
+def save_system_logs():
+    """保存系统日志到文件"""
+    try:
+        with open(LOGS_PATH, 'w', encoding='utf-8') as f:
+            json.dump(system_logs[-MAX_LOG_ENTRIES:], f, ensure_ascii=False)
+    except Exception:
+        pass
 
 
 def load_config():
@@ -97,7 +121,7 @@ def get_default_config():
 
 
 def add_system_log(level, message):
-    """添加系统日志"""
+    """添加系统日志（同时持久化到文件）"""
     global system_logs
     entry = {
         "time": datetime.now().isoformat(),
@@ -107,6 +131,7 @@ def add_system_log(level, message):
     system_logs.append(entry)
     if len(system_logs) > MAX_LOG_ENTRIES:
         system_logs = system_logs[-MAX_LOG_ENTRIES:]
+    save_system_logs()
     logger.log(getattr(logging, level.upper(), logging.INFO), message)
 
 
@@ -388,27 +413,33 @@ def news_feeds():
 # Twitter 代理 API（绕过 X-Frame-Options 限制）
 # ============================================================
 
+# Twitter syndication 缓存（每个帐号缓存 5 分钟，防止限流）
+_twitter_cache = {}
+_TWITTER_CACHE_TTL = 300  # 5 分钟
+
+
 @app.route('/api/twitter/timeline/<username>')
 def twitter_timeline_proxy(username):
-    """代理 Twitter syndication timeline，绕过 iframe 嵌入限制"""
+    """代理 Twitter syndication timeline，绕过 iframe 嵌入限制（带缓存）"""
+    now = time.time()
+
+    # 检查缓存
+    cached = _twitter_cache.get(username)
+    if cached and (now - cached['ts']) < _TWITTER_CACHE_TTL:
+        return Response(cached['html'], mimetype='text/html')
+
     try:
-        # Twitter 官方 syndication endpoint（无需认证）
         url = f'https://syndication.twitter.com/srv/timeline-profile/screen-name/{username}'
         resp = requests.get(url, timeout=10, headers={
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         })
 
         if resp.status_code != 200:
-            # 如果 syndication 失败，返回一个简单的 fallback 页面
-            return Response(
-                _twitter_fallback_html(username),
-                mimetype='text/html'
-            )
+            html = _twitter_fallback_html(username)
+            return Response(html, mimetype='text/html')
 
-        # 获取原始 HTML，注入深色主题样式
         html = resp.text
 
-        # 注入自定义 CSS 使其匹配深色主题
         dark_css = """
         <style>
           body { background: #0a0e17 !important; color: #e5e7eb !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
@@ -421,7 +452,6 @@ def twitter_timeline_proxy(username):
           .TweetAuthor-name { color: #e5e7eb !important; }
           .TweetAuthor-screenName { color: #6b7280 !important; }
           .timeline-Footer { background: transparent !important; border-top: 1px solid rgba(0,240,255,0.2) !important; }
-          /* 覆盖所有白色背景 */
           [style*="background-color: white"], [style*="background: white"],
           [style*="background-color: rgb(255, 255, 255)"] {
             background-color: #0a0e17 !important;
@@ -429,16 +459,21 @@ def twitter_timeline_proxy(username):
         </style>
         """
 
-        # 在 </head> 前注入样式
         if '</head>' in html:
             html = html.replace('</head>', dark_css + '</head>')
         else:
             html = dark_css + html
 
+        # 写入缓存
+        _twitter_cache[username] = {'html': html, 'ts': now}
+
         return Response(html, mimetype='text/html')
 
     except requests.exceptions.RequestException as e:
         logger.warning(f"Twitter syndication 代理失败: {e}")
+        # 如果有过期缓存，仍然返回旧的（比空白好）
+        if cached:
+            return Response(cached['html'], mimetype='text/html')
         return Response(
             _twitter_fallback_html(username),
             mimetype='text/html'
@@ -597,9 +632,32 @@ def update_tab(tab_id):
 # 事件流 API（告警）
 # ============================================================
 
-# 事件缓存
+# 事件缓存 + 文件持久化
 events = []
 MAX_EVENTS = 100
+EVENTS_PATH = Path(__file__).parent / 'events.json'
+
+
+def load_events():
+    """从文件加载历史事件"""
+    global events
+    try:
+        if EVENTS_PATH.exists():
+            with open(EVENTS_PATH, 'r', encoding='utf-8') as f:
+                events = json.load(f)
+            logger.info(f"加载 {len(events)} 条历史告警")
+    except Exception as e:
+        logger.warning(f"告警文件加载失败: {e}")
+        events = []
+
+
+def save_events():
+    """保存事件到文件"""
+    try:
+        with open(EVENTS_PATH, 'w', encoding='utf-8') as f:
+            json.dump(events, f, ensure_ascii=False)
+    except Exception as e:
+        logger.warning(f"告警文件保存失败: {e}")
 
 
 @app.route('/api/events', methods=['POST'])
@@ -612,6 +670,7 @@ def add_event():
         events.append(event)
         if len(events) > MAX_EVENTS:
             events = events[-MAX_EVENTS:]
+        save_events()
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
@@ -658,8 +717,10 @@ def health_check():
 # ============================================================
 
 if __name__ == '__main__':
-    # 加载配置
+    # 加载配置与历史数据
     load_config()
+    load_events()
+    load_system_logs()
 
     # 自动启动 ttyd（如果已安装）
     ttyd_path = shutil.which('ttyd')
