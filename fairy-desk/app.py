@@ -21,8 +21,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import psutil
 import requests
 import feedparser
-from flask import Flask, render_template, jsonify, request, Response
+from flask import Flask, render_template, jsonify, request, Response, send_from_directory
 from flask_cors import CORS
+from werkzeug.utils import secure_filename
 
 # ============================================================
 # 配置与初始化
@@ -908,6 +909,70 @@ def update_tab(tab_id):
             return jsonify({"success": True, "tab": tab})
 
     return jsonify({"error": "Tab 不存在"}), 404
+
+
+# ============================================================
+# 文件上传 API
+# ============================================================
+
+# 上传目录配置
+UPLOAD_FOLDER = Path(__file__).parent / 'static' / 'uploads'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'}
+
+# 确保上传目录存在
+UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+
+
+def allowed_file(filename):
+    """检查文件扩展名是否允许"""
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+@app.route('/api/upload/background', methods=['POST'])
+def upload_background():
+    """上传背景图片"""
+    try:
+        # 检查是否有文件
+        if 'file' not in request.files:
+            return jsonify({"error": "没有文件上传"}), 400
+
+        file = request.files['file']
+
+        # 检查文件名
+        if file.filename == '':
+            return jsonify({"error": "文件名为空"}), 400
+
+        # 检查文件类型
+        if not allowed_file(file.filename):
+            return jsonify({"error": f"不支持的文件类型，允许: {', '.join(ALLOWED_EXTENSIONS)}"}), 400
+
+        # 安全的文件名
+        filename = secure_filename(file.filename)
+
+        # 添加时间戳避免重名
+        name, ext = os.path.splitext(filename)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        unique_filename = f"{name}_{timestamp}{ext}"
+
+        # 保存文件
+        filepath = UPLOAD_FOLDER / unique_filename
+        file.save(str(filepath))
+
+        # 返回可访问的 URL
+        url = f"/static/uploads/{unique_filename}"
+
+        logger.info(f"背景图片上传成功: {unique_filename}")
+        add_system_log("info", f"📷 背景图片已上传: {unique_filename}")
+
+        return jsonify({
+            "success": True,
+            "url": url,
+            "filename": unique_filename
+        })
+
+    except Exception as e:
+        logger.error(f"文件上传失败: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 # ============================================================
