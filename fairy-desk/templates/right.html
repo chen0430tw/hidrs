@@ -374,41 +374,20 @@
       }
     }
 
-    // 清空告警
+    // 清空告警（同步清除服务端持久化）
     function clearAlerts() {
       if (confirm('确定清空所有告警？')) {
         document.getElementById('alert-feed').innerHTML = '';
+        const apiBase = localStorage.getItem('API_BASE_URL') || '';
+        fetch(apiBase + '/api/events/clear', { method: 'POST' }).catch(function() {});
         showNotification('告警已清空', 'success');
       }
-    }
-
-    // 添加模拟告警（演示用）
-    function addDemoAlert() {
-      const types = ['critical', 'warning', 'info'];
-      const messages = [
-        '检测到网络流量异常',
-        '系统内存使用率超过 80%',
-        'RSS 源更新完成',
-        '新的安全公告发布',
-        '服务健康检查通过'
-      ];
-
-      const event = {
-        type: types[Math.floor(Math.random() * types.length)],
-        message: messages[Math.floor(Math.random() * messages.length)],
-        timestamp: new Date().toISOString()
-      };
-
-      appendAlert(event, document.getElementById('alert-feed'), true);
     }
 
     // 页面加载后初始化
     document.addEventListener('DOMContentLoaded', () => {
       // 延迟加载股票图表（等待配置加载完成）
       setTimeout(initStockCharts, 1000);
-
-      // 演示：定期添加模拟告警
-      setInterval(addDemoAlert, 30000);
     });
   </script>
 </body>

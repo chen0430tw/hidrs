@@ -121,7 +121,7 @@ def get_default_config():
 
 
 def add_system_log(level, message):
-    """添加系统日志（同时持久化到文件）"""
+    """添加系统日志（同时持久化到文件 + 同步到告警事件流）"""
     global system_logs
     entry = {
         "time": datetime.now().isoformat(),
@@ -133,6 +133,18 @@ def add_system_log(level, message):
         system_logs = system_logs[-MAX_LOG_ENTRIES:]
     save_system_logs()
     logger.log(getattr(logging, level.upper(), logging.INFO), message)
+
+    # 同步到告警事件流（让右屏告警面板也能显示 + 持久化）
+    level_to_type = {'info': 'info', 'warning': 'warning', 'error': 'critical', 'critical': 'critical'}
+    event = {
+        "type": level_to_type.get(level, 'info'),
+        "message": message,
+        "timestamp": entry["time"]
+    }
+    events.append(event)
+    if len(events) > MAX_EVENTS:
+        events[:] = events[-MAX_EVENTS:]
+    save_events()
 
 
 # ============================================================
@@ -740,9 +752,9 @@ def add_event():
 
 @app.route('/api/events/stream')
 def events_stream():
-    """事件流 SSE"""
+    """事件流 SSE（只推送新增事件，历史由 /history 端点提供）"""
     def generate():
-        last_index = 0
+        last_index = len(events)  # 从当前末尾开始，避免与 history API 重复
         while True:
             if len(events) > last_index:
                 for event in events[last_index:]:
@@ -758,6 +770,15 @@ def events_history():
     """获取历史事件"""
     limit = request.args.get('limit', 50, type=int)
     return jsonify(events[-limit:])
+
+
+@app.route('/api/events/clear', methods=['POST'])
+def clear_events():
+    """清空所有事件"""
+    global events
+    events = []
+    save_events()
+    return jsonify({"success": True})
 
 
 # ============================================================

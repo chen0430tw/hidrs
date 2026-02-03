@@ -440,7 +440,7 @@
 
     /**
      * 创建对应类型的媒体元素
-     * @returns {{ element: HTMLElement, hls?: Hls }}
+     * Returns: Object with element (HTMLElement) and optional hls (Hls)
      */
     function createMediaElement(cam) {
       var streamType = detectStreamType(cam.url);
