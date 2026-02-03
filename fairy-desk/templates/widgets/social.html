@@ -723,8 +723,8 @@
     }
 
     // Facebook Page Plugin 懒加载（等容器可见后再设置 src，避免 0 宽度）
-    // Page Plugin 内部布局：small_header=true 时 header ~70px, timeline 需要至少 200px
-    // 推荐最小高度：270px (70 + 200), 但实际建议使用更大值以显示更多内容
+    // 用户要求：header 120px + timeline 200px，但Facebook不允许直接控制内部元素高度
+    // 解决方案：传递足够大的总高度，让Facebook有空间正确分配内部布局
     function loadFacebookPlugin() {
       var fbIframe = document.getElementById('facebook-iframe');
       if (!fbIframe || facebookLoaded) return;
@@ -736,13 +736,10 @@
       if (fbWidth < 180) fbWidth = 340;
       if (fbWidth > 500) fbWidth = 500;
 
-      // height: Facebook Page Plugin 的高度建议
-      // - small_header=true: header 约 70px
-      // - timeline 区域：建议至少 200px 才能显示内容
-      // - 总计最小：270px，但实际建议 500px 以上以显示更多帖子
-      var fbHeight = fbContainer ? fbContainer.clientHeight : 600;
-      // 强制最小高度 500px（而不是 320px），确保有足够空间显示帖子
-      if (fbHeight < 500) fbHeight = 500;
+      // height: 使用容器的实际高度，但强制最小800px
+      // 这样可以给timeline足够的空间显示帖子，避免被压缩成130px
+      var fbHeight = fbContainer ? fbContainer.clientHeight : 800;
+      if (fbHeight < 800) fbHeight = 800;
 
       var fbPage = facebookPageUrl || 'https://www.facebook.com/CNN';
       fbIframe.src = 'https://www.facebook.com/plugins/page.php?href=' +
