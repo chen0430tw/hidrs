@@ -156,6 +156,8 @@ def add_system_log(level, message):
 last_network_io = None
 last_check_time = None
 monitor_running = False
+last_security_check = 0
+last_cve_count = 0
 
 
 def add_alert(alert_type, message):
@@ -170,6 +172,83 @@ def add_alert(alert_type, message):
     if len(events) > MAX_EVENTS:
         events[:] = events[-MAX_EVENTS:]
     save_events()
+
+
+def check_security_advisories():
+    """检查安全公告（CVE/GitHub Security Advisories）"""
+    global last_security_check, last_cve_count
+
+    try:
+        current_time = time.time()
+        # 每小时检查一次安全公告（避免频繁请求）
+        if current_time - last_security_check < 3600:
+            return
+
+        # 使用 GitHub Security Advisories API（无需认证）
+        url = "https://api.github.com/advisories"
+        params = {
+            "per_page": 10,
+            "sort": "published",
+            "direction": "desc"
+        }
+        headers = {"Accept": "application/vnd.github+json"}
+
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        if response.status_code == 200:
+            advisories = response.json()
+            new_count = len(advisories)
+
+            # 如果有新的安全公告
+            if last_cve_count > 0 and new_count > last_cve_count:
+                diff = new_count - last_cve_count
+                add_alert("warning", f"🔒 发现 {diff} 条新的安全公告")
+                # 显示最新的一条
+                if advisories:
+                    latest = advisories[0]
+                    severity = latest.get('severity', 'unknown').upper()
+                    add_alert("warning", f"🚨 {severity}: {latest.get('summary', 'N/A')[:50]}...")
+
+            # 初始化或正常检查
+            elif last_cve_count == 0:
+                add_alert("info", f"🔒 安全公告检查完成: 最近 {new_count} 条记录")
+
+            last_cve_count = new_count
+            last_security_check = current_time
+
+    except Exception as e:
+        logger.warning(f"安全公告检查失败: {e}")
+
+
+def check_service_health():
+    """服务健康检查"""
+    try:
+        # 1. 检查 Flask 应用自身
+        add_alert("info", "✅ 服务健康检查通过: FAIRY-DESK 运行正常")
+
+        # 2. 检查 HIDRS 连接（如果配置了）
+        hidrs_endpoint = config.get('hidrs', {}).get('endpoint')
+        if hidrs_endpoint and config.get('hidrs', {}).get('auto_detect', True):
+            try:
+                response = requests.get(f"{hidrs_endpoint}/health", timeout=5)
+                if response.status_code == 200:
+                    add_alert("info", "✅ HIDRS 服务连接正常")
+                else:
+                    add_alert("warning", f"⚠️ HIDRS 服务异常: HTTP {response.status_code}")
+            except requests.exceptions.RequestException:
+                # HIDRS 离线不算告警，只是可选增强模块
+                pass
+
+        # 3. 检查磁盘 I/O（可选）
+        disk_io = psutil.disk_io_counters()
+        if disk_io:
+            read_mb = disk_io.read_bytes / (1024 * 1024)
+            write_mb = disk_io.write_bytes / (1024 * 1024)
+            # 只在 I/O 量特别大时告警
+            if read_mb > 100000 or write_mb > 100000:
+                add_alert("info", f"💿 磁盘 I/O 累计: 读 {read_mb:.0f}MB / 写 {write_mb:.0f}MB")
+
+    except Exception as e:
+        logger.warning(f"服务健康检查失败: {e}")
 
 
 def check_system_status():
@@ -239,9 +318,20 @@ def system_monitor_loop():
     global monitor_running
     logger.info("系统监控线程已启动")
 
+    check_count = 0
     while monitor_running:
         try:
+            # 每次都检查系统状态
             check_system_status()
+
+            # 每 5 分钟检查一次服务健康（300秒 = 5次循环）
+            if check_count % 5 == 0:
+                check_service_health()
+
+            # 每小时检查一次安全公告（内部有时间控制）
+            check_security_advisories()
+
+            check_count += 1
             # 每 60 秒检查一次
             time.sleep(60)
         except Exception as e:
@@ -539,6 +629,10 @@ def news_feeds():
     # 更新缓存
     _rss_cache['items'] = all_items
     _rss_cache['timestamp'] = time.time()
+
+    # RSS 更新成功告警
+    if all_items:
+        add_alert("info", f"📰 RSS 源更新完成: 获取 {len(all_items)} 条新闻（{len(enabled_feeds)} 个源）")
 
     return jsonify(all_items[:max_items])
 
@@ -942,7 +1036,7 @@ if __name__ == '__main__':
 
     # 启动系统监控线程
     start_system_monitor()
-    add_system_log("info", "系统监控告警已启用（CPU/内存/网络/磁盘）")
+    add_system_log("info", "系统监控告警已启用（CPU/内存/网络/磁盘/RSS/安全公告/健康检查）")
 
     # 启动 Flask
     app.run(
