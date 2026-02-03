@@ -523,6 +523,31 @@
           <span class="title">右屏设置 - 情报视窗</span>
         </div>
         <div class="settings-section-body">
+          <!-- Twitter 关注帐号 -->
+          <div class="settings-row">
+            <div class="settings-label">
+              <div class="label-title">Twitter 关注帐号</div>
+              <div class="label-desc">显示在 X/Twitter 栏的帐号列表</div>
+            </div>
+            <div class="settings-control">
+              <input type="text" id="twitter-accounts" class="form-input" placeholder="elonmusk, POTUS, BBCBreaking">
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                用逗号分隔用户名（不含 @），可在社交栏切换查看
+              </div>
+            </div>
+          </div>
+
+          <!-- Bluesky 帐号 -->
+          <div class="settings-row">
+            <div class="settings-label">
+              <div class="label-title">Bluesky 帐号</div>
+              <div class="label-desc">Bluesky 嵌入显示的帐号</div>
+            </div>
+            <div class="settings-control">
+              <input type="text" id="bluesky-account" class="form-input" style="width: 300px;" placeholder="bsky.app">
+            </div>
+          </div>
+
           <!-- 社交媒体 -->
           <div class="settings-row">
             <div class="settings-label">
@@ -709,6 +734,8 @@
       document.getElementById('terminal-bg-color-hex').value = termBg;
 
       // 右屏
+      document.getElementById('twitter-accounts').value = (config.right_screen?.social?.twitter_accounts || []).join(', ');
+      document.getElementById('bluesky-account').value = config.right_screen?.social?.bluesky_account || 'bsky.app';
       document.getElementById('social-url').value = config.right_screen?.social?.url || 'https://x.com/home';
 
       const feeds = config.right_screen?.news?.feeds || [];
@@ -897,6 +924,9 @@
       config.center_screen.terminal_command = document.getElementById('terminal-command').value;
 
       config.right_screen.social.url = document.getElementById('social-url').value;
+      config.right_screen.social.twitter_accounts = document.getElementById('twitter-accounts').value
+        .split(',').map(function(s) { return s.trim().replace(/^@/, ''); }).filter(function(s) { return s; });
+      config.right_screen.social.bluesky_account = document.getElementById('bluesky-account').value.trim() || 'bsky.app';
 
       // RSS 启用状态
       document.querySelectorAll('#rss-list input[type="checkbox"]').forEach(cb => {
