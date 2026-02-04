@@ -58,8 +58,8 @@ export default {
         myChart.clear();
       }
       
-      // 修复: 使用完整的API路径
-      window.axios.get('/analysis/' + value, {
+      // 修复: 使用完整的API路径（添加/api/前缀）
+      window.axios.get('/api/analysis/' + value, {
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json'
