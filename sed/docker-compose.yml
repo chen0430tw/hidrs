@@ -1,9 +1,9 @@
 version: '3.7'
 
 services:
-  # Elasticsearch
+  # Elasticsearch（升级到8.x以支持HNSW向量搜索和N-gram优化）
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:7.15.0
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.2
     container_name: elasticsearch
     environment:
       - node.name=elasticsearch
@@ -11,6 +11,8 @@ services:
       - discovery.type=single-node
       - bootstrap.memory_lock=true
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - xpack.security.enabled=false  # 关闭安全认证（开发环境）
+      - xpack.security.enrollment.enabled=false
     ulimits:
       memlock:
         soft: -1
@@ -22,22 +24,24 @@ services:
     networks:
       - elk-net
 
-  # Kibana
+  # Kibana（同步升级到8.x）
   kibana:
-    image: docker.elastic.co/kibana/kibana:7.15.0
+    image: docker.elastic.co/kibana/kibana:8.12.2
     container_name: kibana
     ports:
       - 5601:5601
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=  # 留空，因为禁用了安全认证
     depends_on:
       - elasticsearch
     networks:
       - elk-net
 
-  # Logstash
+  # Logstash（同步升级到8.x）
   logstash:
-    image: docker.elastic.co/logstash/logstash:7.15.0
+    image: docker.elastic.co/logstash/logstash:8.12.2
     container_name: logstash
     volumes:
       - ./logstash/pipeline:/usr/share/logstash/pipeline

@@ -15,9 +15,9 @@ services:
     networks:
       - hidrs_network
 
-  # Kafka服务
+  # Kafka服务（升级到最新稳定版 7.6.0）
   kafka:
-    image: confluentinc/cp-kafka:7.3.0
+    image: confluentinc/cp-kafka:7.6.0
     container_name: kafka
     ports:
       - "9092:9092"
@@ -28,6 +28,7 @@ services:
       - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
       - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
       - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true  # 自动创建topic
     depends_on:
       - zookeeper
     volumes:
@@ -46,13 +47,15 @@ services:
     networks:
       - hidrs_network
 
-  # Elasticsearch服务
+  # Elasticsearch服务（升级到8.x以支持HNSW向量搜索）
   elasticsearch:
-    image: elasticsearch:7.17.9
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.2
     container_name: elasticsearch
     environment:
       - discovery.type=single-node
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - xpack.security.enabled=false  # 关闭安全认证（开发环境）
+      - xpack.security.enrollment.enabled=false
     ports:
       - "9200:9200"
     volumes:

@@ -1,0 +1,105 @@
+# HIDRS和SED兼容的依赖版本
+# 解决numpy与pytorch版本冲突问题
+#
+# 使用方法:
+# pip install -r requirements-compatible.txt
+
+# ============ 核心依赖（版本冲突解决）============
+
+# NumPy: PyTorch 2.x需要numpy<2.0,>=1.21
+# 同时满足大多数数据处理库的要求
+numpy>=1.21.0,<2.0.0
+
+# PyTorch: 推荐使用2.1.x稳定版
+torch>=2.0.0,<2.2.0
+torchvision>=0.15.0,<0.17.0
+
+# ============ 数据库和搜索 ============
+# Elasticsearch客户端（8.x，支持HNSW kNN）
+elasticsearch>=8.0.0,<9.0.0
+
+# MongoDB客户端
+pymongo>=4.0.0,<5.0.0
+
+# ============ 消息队列 ============
+# Kafka客户端
+kafka-python>=2.0.0
+
+# ============ Web框架 ============
+# Flask及扩展
+Flask>=2.3.0,<3.0.0
+Flask-CORS>=4.0.0
+
+# ============ 数据处理 ============
+# Pandas（与numpy版本兼容）
+pandas>=1.5.0,<2.2.0
+
+# Scikit-learn（机器学习库）
+scikit-learn>=1.2.0,<1.4.0
+
+# NetworkX（图分析）
+networkx>=3.0,<4.0
+
+# ============ 性能优化库 ============
+# 缓存工具（用于TTLCache）
+cachetools>=5.3.0
+
+# ============ NLP和向量化 ============
+# Transformers（预训练模型）
+transformers>=4.30.0,<5.0.0
+
+# Sentence Transformers（句子嵌入）
+sentence-transformers>=2.2.0
+
+# ============ 其他工具 ============
+# 环境变量管理
+python-dotenv>=1.0.0
+
+# HTTP请求
+requests>=2.31.0
+
+# BeautifulSoup（网页解析）
+beautifulsoup4>=4.12.0
+
+# lxml（XML/HTML解析）
+lxml>=4.9.0
+
+# ============ 开发工具（可选）============
+# Jupyter（数据分析）
+# jupyter>=1.0.0
+
+# IPython（交互式shell）
+# ipython>=8.12.0
+
+
+# ============ 版本说明 ============
+#
+# 关键版本约束原因:
+#
+# 1. numpy<2.0.0: PyTorch 2.x不支持numpy 2.0+
+# 2. torch 2.0-2.1: 稳定版本，支持最新特性
+# 3. elasticsearch>=8.0.0: 支持HNSW向量搜索和kNN查询
+# 4. pandas<2.2.0: 与numpy 1.x版本兼容
+# 5. scikit-learn<1.4.0: 避免与numpy的兼容性问题
+#
+# ============ 安装顺序建议 ============
+#
+# 1. 先安装numpy（核心依赖）
+#    pip install "numpy>=1.21.0,<2.0.0"
+#
+# 2. 然后安装PyTorch（根据CUDA版本选择）
+#    # CPU版本:
+#    pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#
+#    # CUDA 11.8:
+#    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+#
+#    # CUDA 12.1:
+#    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#
+# 3. 最后安装其他依赖
+#    pip install -r requirements-compatible.txt
+#
+# ============ 验证安装 ============
+#
+# python -c "import numpy; import torch; import elasticsearch; print('OK')"
