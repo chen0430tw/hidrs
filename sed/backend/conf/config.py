@@ -18,15 +18,88 @@ class ElasticConfig:
             "number_of_shards": 5,
             "number_of_replicas": 0,
             "index.codec": "best_compression",
-            "index.refresh_interval": "30s"
+            "index.refresh_interval": "30s",
+            # 添加N-gram分析器配置（性能优化：替代wildcard查询）
+            "analysis": {
+                "analyzer": {
+                    "ngram_analyzer": {
+                        "type": "custom",
+                        "tokenizer": "ngram_tokenizer",
+                        "filter": ["lowercase"]
+                    },
+                    "edge_ngram_analyzer": {
+                        "type": "custom",
+                        "tokenizer": "edge_ngram_tokenizer",
+                        "filter": ["lowercase"]
+                    }
+                },
+                "tokenizer": {
+                    "ngram_tokenizer": {
+                        "type": "ngram",
+                        "min_gram": 3,
+                        "max_gram": 15,
+                        "token_chars": ["letter", "digit", "punctuation", "symbol"]
+                    },
+                    "edge_ngram_tokenizer": {
+                        "type": "edge_ngram",
+                        "min_gram": 3,
+                        "max_gram": 15,
+                        "token_chars": ["letter", "digit", "punctuation", "symbol"]
+                    }
+                }
+            }
         },
         "mappings": {
             "properties": {
-                "user": {"type": "keyword", "doc_values": False},
-                "email": {"type": "keyword", "doc_values": False},
-                "password": {"type": "keyword", "doc_values": False, "index": True},
+                # user字段：keyword用于精确匹配，ngram用于模糊搜索
+                "user": {
+                    "type": "keyword",
+                    "doc_values": False,
+                    "fields": {
+                        "ngram": {
+                            "type": "text",
+                            "analyzer": "ngram_analyzer",
+                            "search_analyzer": "standard"
+                        }
+                    }
+                },
+                # email字段：keyword用于精确匹配，ngram用于模糊搜索
+                "email": {
+                    "type": "keyword",
+                    "doc_values": False,
+                    "fields": {
+                        "ngram": {
+                            "type": "text",
+                            "analyzer": "ngram_analyzer",
+                            "search_analyzer": "standard"
+                        }
+                    }
+                },
+                # password字段：keyword用于精确匹配，ngram用于模糊搜索
+                "password": {
+                    "type": "keyword",
+                    "doc_values": False,
+                    "index": True,
+                    "fields": {
+                        "ngram": {
+                            "type": "text",
+                            "analyzer": "ngram_analyzer",
+                            "search_analyzer": "standard"
+                        }
+                    }
+                },
                 "passwordHash": {"type": "keyword", "doc_values": False},
-                "source": {"type": "keyword"},
+                # source字段：添加ngram用于模糊搜索
+                "source": {
+                    "type": "keyword",
+                    "fields": {
+                        "ngram": {
+                            "type": "text",
+                            "analyzer": "ngram_analyzer",
+                            "search_analyzer": "standard"
+                        }
+                    }
+                },
                 "xtime": {"type": "keyword"},
                 "suffix_email": {"type": "keyword"},
                 "create_time": {"type": "date", "format": "yyyy/MM/dd HH:mm:ss||yyyy/MM/dd||epoch_millis"},
