@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>高级扫描 - HIDRS</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <link href="/static/css/theme-styles.css" rel="stylesheet">
+    <link href="/static/css/backgrounds.css" rel="stylesheet">
+    <style>
+        .advanced-scan-container {
+            max-width: 1400px;
+            margin: 60px auto 40px;
+            padding: 20px;
+        }
+
+        .compliance-banner {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
+        }
+
+        .compliance-banner h4 {
+            margin: 0 0 10px 0;
+        }
+
+        .tab-panel {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 25px;
+            margin-top: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .search-box {
+            background: var(--bg-color);
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .result-card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-left: 4px solid var(--primary-color);
+            transition: all 0.3s ease;
+        }
+
+        .result-card:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transform: translateX(5px);
+        }
+
+        .vulnerability-badge {
+            background: #dc3545;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            margin: 2px;
+            display: inline-block;
+        }
+
+        .location-info {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+
+        .source-badge {
+            background: var(--primary-color);
+            color: white;
+            padding: 3px 10px;
+            border-radius: 15px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .darkweb-result {
+            background: #2d2d2d;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            padding: 15px;
+            border-radius: 8px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .warning-box {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+
+        .tor-ip-display {
+            background: #212529;
+            color: #00ff00;
+            padding: 10px 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            text-align: center;
+            font-size: 1.1rem;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-diagram-3"></i> HIDRS
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">首页</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/search">搜索</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/network">网络拓扑</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/dashboard">仪表盘</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/feedback">决策反馈</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/plugins">插件管理</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/local-files">本地文件</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/advanced-scan">高级扫描</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主内容 -->
+    <div class="advanced-scan-container">
+        <!-- 合规性警告横幅 -->
+        <div class="compliance-banner">
+            <h4><i class="bi bi-exclamation-triangle-fill"></i> 合规性声明</h4>
+            <p class="mb-0">
+                <strong>本功能仅用于合法的安全研究、渗透测试和威胁情报收集。</strong>
+                使用前请确保您有合法授权，遵守当地法律法规，不进行未授权的扫描活动。
+                所有操作将被记录用于合规审计。使用本功能即表示您同意上述条款。
+            </p>
+        </div>
+
+        <h1 class="mb-4"><i class="bi bi-shield-shaded"></i> 高级扫描</h1>
+
+        <!-- 选项卡 -->
+        <ul class="nav nav-tabs" id="scanTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="device-tab" data-bs-toggle="tab" data-bs-target="#device" type="button">
+                    <i class="bi bi-router"></i> 设备扫描
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="darkweb-tab" data-bs-toggle="tab" data-bs-target="#darkweb" type="button">
+                    <i class="bi bi-incognito"></i> 暗网搜索
+                </button>
+            </li>
+        </ul>
+
+        <!-- 选项卡内容 -->
+        <div class="tab-content" id="scanTabContent">
+            <!-- 设备扫描 -->
+            <div class="tab-pane fade show active" id="device" role="tabpanel">
+                <div class="tab-panel">
+                    <div class="search-box">
+                        <h5><i class="bi bi-search"></i> 设备搜索</h5>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-3">
+                                <label class="form-label">数据源</label>
+                                <select class="form-select" id="device-source">
+                                    <option value="shodan">Shodan</option>
+                                    <option value="censys">Censys</option>
+                                    <option value="zoomeye">ZoomEye</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">搜索查询</label>
+                                <input type="text" class="form-control" id="device-query"
+                                       placeholder='例如: apache country:CN 或 port:22'>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">结果数量</label>
+                                <input type="number" class="form-control" id="device-limit" value="20">
+                            </div>
+                            <div class="col-md-1 d-flex align-items-end">
+                                <button class="btn btn-primary w-100" onclick="deviceScan()">
+                                    <i class="bi bi-search"></i> 扫描
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="alert alert-info mb-0">
+                            <strong>示例查询：</strong>
+                            <span class="badge bg-secondary ms-2">apache country:CN</span>
+                            <span class="badge bg-secondary ms-2">port:22</span>
+                            <span class="badge bg-secondary ms-2">org:"Amazon"</span>
+                            <span class="badge bg-secondary ms-2">product:nginx</span>
+                        </div>
+                    </div>
+
+                    <div id="device-results"></div>
+                </div>
+            </div>
+
+            <!-- 暗网搜索 -->
+            <div class="tab-pane fade" id="darkweb" role="tabpanel">
+                <div class="tab-panel">
+                    <div class="warning-box">
+                        <h6><i class="bi bi-exclamation-triangle"></i> 严格合规警告</h6>
+                        <p class="mb-0">
+                            暗网访问受到严格监管。本功能会自动检测可疑内容并记录所有访问日志。
+                            请勿访问非法内容（儿童色情、毒品交易、武器走私等）。
+                            发现非法内容时请主动报告相关部门。
+                        </p>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <div class="tor-ip-display">
+                                <strong>当前 Tor IP:</strong> <span id="current-tor-ip">未连接</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6 d-flex align-items-center">
+                            <button class="btn btn-warning me-2" onclick="getTorIP()">
+                                <i class="bi bi-arrow-clockwise"></i> 检查IP
+                            </button>
+                            <button class="btn btn-danger" onclick="renewTorIdentity()">
+                                <i class="bi bi-shield-slash"></i> 更换身份
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="search-box">
+                        <h5><i class="bi bi-globe2"></i> .onion 网站访问</h5>
+                        <div class="input-group mb-3">
+                            <input type="text" class="form-control" id="onion-url"
+                                   placeholder="输入 .onion 地址（例如: http://example.onion）">
+                            <div class="form-check form-switch ms-3 d-flex align-items-center">
+                                <input class="form-check-input" type="checkbox" id="renew-identity-toggle" checked>
+                                <label class="form-check-label ms-2" for="renew-identity-toggle">
+                                    访问后更换身份
+                                </label>
+                            </div>
+                            <button class="btn btn-danger" onclick="crawlOnionSite()">
+                                <i class="bi bi-globe"></i> 访问
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="darkweb-results"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading overlay -->
+    <div id="loadingOverlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 9999; display: flex; align-items: center; justify-content: center;">
+        <div class="text-center text-light">
+            <div class="spinner-border mb-3" role="status"></div>
+            <div id="loadingMessage">处理中...</div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="/static/js/theme-manager.js"></script>
+    <script src="/static/js/language-manager.js"></script>
+    <script>
+        // API辅助函数
+        async function apiCall(url, options = {}) {
+            const response = await fetch(url, options);
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+                throw new Error(errorData.error || `HTTP ${response.status}`);
+            }
+            return response.json();
+        }
+
+        // ========== 设备扫描功能 ==========
+        async function deviceScan() {
+            const query = document.getElementById('device-query').value;
+            const source = document.getElementById('device-source').value;
+            const limit = parseInt(document.getElementById('device-limit').value) || 20;
+
+            if (!query) {
+                Swal.fire('提示', '请输入搜索查询', 'info');
+                return;
+            }
+
+            showLoading('正在扫描...');
+            try {
+                const data = await apiCall('/api/device-scanner/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query, source, limit })
+                });
+
+                displayDeviceResults(data);
+            } catch (error) {
+                Swal.fire('扫描失败', error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function displayDeviceResults(data) {
+            const container = document.getElementById('device-results');
+
+            if (data.error) {
+                container.innerHTML = `
+                    <div class="alert alert-danger">
+                        <strong>错误:</strong> ${data.error}
+                        ${data.available_sources ? `<br><br><strong>可用数据源:</strong> ${data.available_sources.join(', ')}` : ''}
+                    </div>
+                `;
+                return;
+            }
+
+            if (!data.results || data.results.length === 0) {
+                container.innerHTML = '<div class="alert alert-info">未找到匹配的设备</div>';
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="alert alert-success mb-3">
+                    找到 ${data.count} 个设备（数据源: ${data.source}）
+                </div>
+                ${data.results.map(device => `
+                    <div class="result-card">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <h6 class="mb-0">
+                                <i class="bi bi-hdd-network"></i> ${device.ip}${device.port ? ':' + device.port : ''}
+                            </h6>
+                            <span class="source-badge">${device.source}</span>
+                        </div>
+
+                        ${device.organization ? `<p class="mb-1"><strong>组织:</strong> ${device.organization}</p>` : ''}
+                        ${device.os ? `<p class="mb-1"><strong>操作系统:</strong> ${device.os}</p>` : ''}
+                        ${device.service ? `<p class="mb-1"><strong>服务:</strong> ${device.service}</p>` : ''}
+                        ${device.isp ? `<p class="mb-1"><strong>ISP:</strong> ${device.isp}</p>` : ''}
+
+                        ${device.location && device.location.country ? `
+                            <p class="location-info mb-1">
+                                <i class="bi bi-geo-alt"></i>
+                                ${device.location.city || ''} ${device.location.country} ${device.location.country_code || ''}
+                            </p>
+                        ` : ''}
+
+                        ${device.hostnames && device.hostnames.length > 0 ? `
+                            <p class="mb-1"><strong>主机名:</strong> ${device.hostnames.join(', ')}</p>
+                        ` : ''}
+
+                        ${device.vulnerabilities && device.vulnerabilities.length > 0 ? `
+                            <div class="mt-2">
+                                <strong>漏洞:</strong><br>
+                                ${device.vulnerabilities.map(vuln => `<span class="vulnerability-badge">${vuln}</span>`).join(' ')}
+                            </div>
+                        ` : ''}
+                    </div>
+                `).join('')}
+            `;
+        }
+
+        // ========== 暗网爬虫功能 ==========
+        async function getTorIP() {
+            showLoading('获取 Tor IP...');
+            try {
+                const data = await apiCall('/api/darkweb/current-ip');
+                if (data.success) {
+                    document.getElementById('current-tor-ip').textContent = data.ip;
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Tor 连接正常',
+                        text: `当前 IP: ${data.ip}`,
+                        timer: 2000
+                    });
+                } else {
+                    document.getElementById('current-tor-ip').textContent = '未连接';
+                    Swal.fire('错误', data.error, 'error');
+                }
+            } catch (error) {
+                Swal.fire('获取失败', error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function renewTorIdentity() {
+            showLoading('更换 Tor 身份...');
+            try {
+                const data = await apiCall('/api/darkweb/renew-identity', { method: 'POST' });
+                if (data.success) {
+                    document.getElementById('current-tor-ip').textContent = data.new_ip || '已更换';
+                    Swal.fire({
+                        icon: 'success',
+                        title: '身份已更换',
+                        text: data.new_ip ? `新 IP: ${data.new_ip}` : '请稍后检查新IP',
+                        timer: 2000
+                    });
+                } else {
+                    Swal.fire('更换失败', data.error, 'error');
+                }
+            } catch (error) {
+                Swal.fire('更换失败', error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function crawlOnionSite() {
+            const url = document.getElementById('onion-url').value;
+            const renewIdentity = document.getElementById('renew-identity-toggle').checked;
+
+            if (!url) {
+                Swal.fire('提示', '请输入 .onion 地址', 'info');
+                return;
+            }
+
+            // 二次确认
+            const confirm = await Swal.fire({
+                title: '确认访问',
+                html: `
+                    <p>您即将访问暗网网站:</p>
+                    <p class="text-danger"><strong>${url}</strong></p>
+                    <p>请确保：</p>
+                    <ul class="text-start">
+                        <li>您有合法的研究目的</li>
+                        <li>您不会访问非法内容</li>
+                        <li>此操作将被记录</li>
+                    </ul>
+                `,
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: '我已了解，继续',
+                cancelButtonText: '取消',
+                confirmButtonColor: '#dc3545'
+            });
+
+            if (!confirm.isConfirmed) return;
+
+            showLoading('正在访问暗网网站...');
+            try {
+                const data = await apiCall('/api/darkweb/crawl', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url, renew_identity: renewIdentity })
+                });
+
+                displayDarkwebResults(data);
+            } catch (error) {
+                Swal.fire('访问失败', error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function displayDarkwebResults(data) {
+            const container = document.getElementById('darkweb-results');
+
+            if (data.error) {
+                container.innerHTML = `<div class="alert alert-danger"><strong>错误:</strong> ${data.error}</div>`;
+                return;
+            }
+
+            if (!data.success) {
+                container.innerHTML = `<div class="alert alert-warning"><strong>访问失败:</strong> ${data.error || '未知错误'}</div>`;
+                return;
+            }
+
+            // 检查安全警告
+            if (data.safety_warning) {
+                Swal.fire({
+                    icon: 'error',
+                    title: '检测到可疑内容',
+                    html: `
+                        <p class="text-danger"><strong>内容已被屏蔽</strong></p>
+                        <p>匹配的黑名单关键词: ${data.safety_warning.matched_keywords.join(', ')}</p>
+                        <p>此访问已被记录并可能被上报。</p>
+                    `,
+                    confirmButtonColor: '#dc3545'
+                });
+            }
+
+            container.innerHTML = `
+                <div class="alert alert-info mb-3">
+                    <strong>访问成功</strong>
+                    <br>状态码: ${data.status_code}
+                    <br>响应时间: ${data.elapsed_time ? data.elapsed_time.toFixed(2) + 's' : '未知'}
+                    <br>内容大小: ${data.content_length ? (data.content_length / 1024).toFixed(2) + ' KB' : '未知'}
+                </div>
+
+                <h6>响应内容:</h6>
+                <div class="darkweb-result">
+                    <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(data.content || '无内容')}</pre>
+                </div>
+
+                ${data.headers ? `
+                    <h6 class="mt-3">响应头:</h6>
+                    <pre class="bg-light p-2 rounded">${JSON.stringify(data.headers, null, 2)}</pre>
+                ` : ''}
+            `;
+        }
+
+        // 工具函数
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function showLoading(message = '处理中...') {
+            document.getElementById('loadingMessage').textContent = message;
+            document.getElementById('loadingOverlay').style.display = 'flex';
+        }
+
+        function hideLoading() {
+            document.getElementById('loadingOverlay').style.display = 'none';
+        }
+
+        // 页面加载时检查 Tor 状态
+        document.addEventListener('DOMContentLoaded', () => {
+            // 自动获取 Tor IP（如果在暗网选项卡）
+            document.getElementById('darkweb-tab').addEventListener('shown.bs.tab', () => {
+                getTorIP();
+            });
+        });
+    </script>
+</body>
+</html>

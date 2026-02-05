@@ -156,6 +156,10 @@ class ApiServer:
         def local_files_page():
             return render_template('local_files.html')
 
+        @self.app.route('/advanced-scan')
+        def advanced_scan_page():
+            return render_template('advanced_scan.html')
+
         # API路由
         @self.app.route('/api/search', methods=['GET'])
         def api_search():
@@ -514,6 +518,131 @@ class ApiServer:
 
                 result = plugin.get_disk_stats()
                 return jsonify(result)
+            except Exception as e:
+                logger.error(f"Get stats error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        # 设备扫描API
+        @self.app.route('/api/device-scanner/search', methods=['POST'])
+        def api_device_scanner_search():
+            """设备扫描搜索"""
+            try:
+                data = request.json
+                query = data.get('query', '')
+                source = data.get('source', 'shodan')
+                limit = data.get('limit', 100)
+
+                plugin = self.plugin_manager.get_plugin('DeviceScanner')
+                if not plugin:
+                    return jsonify({'error': 'Device scanner plugin not loaded'}), 400
+
+                result = plugin.search(query, source, limit)
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Device scanner search error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/device-scanner/host/<ip>', methods=['GET'])
+        def api_device_scanner_host(ip):
+            """查询主机详细信息"""
+            try:
+                source = request.args.get('source', 'shodan')
+
+                plugin = self.plugin_manager.get_plugin('DeviceScanner')
+                if not plugin:
+                    return jsonify({'error': 'Device scanner plugin not loaded'}), 400
+
+                result = plugin.host_lookup(ip, source)
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Device scanner host lookup error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/device-scanner/sources', methods=['GET'])
+        def api_device_scanner_sources():
+            """获取可用的数据源"""
+            try:
+                plugin = self.plugin_manager.get_plugin('DeviceScanner')
+                if not plugin:
+                    return jsonify({'error': 'Device scanner plugin not loaded'}), 400
+
+                sources = plugin.get_available_sources()
+                return jsonify({'sources': sources})
+            except Exception as e:
+                logger.error(f"Get sources error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/device-scanner/stats', methods=['GET'])
+        def api_device_scanner_stats():
+            """获取设备扫描统计信息"""
+            try:
+                plugin = self.plugin_manager.get_plugin('DeviceScanner')
+                if not plugin:
+                    return jsonify({'error': 'Device scanner plugin not loaded'}), 400
+
+                stats = plugin.get_stats()
+                return jsonify(stats)
+            except Exception as e:
+                logger.error(f"Get stats error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        # 暗网爬虫API
+        @self.app.route('/api/darkweb/crawl', methods=['POST'])
+        def api_darkweb_crawl():
+            """暗网爬取"""
+            try:
+                data = request.json
+                url = data.get('url', '')
+                renew_identity = data.get('renew_identity', True)
+
+                plugin = self.plugin_manager.get_plugin('DarkWebCrawler')
+                if not plugin:
+                    return jsonify({'error': 'DarkWeb crawler plugin not loaded'}), 400
+
+                result = plugin.crawl(url, renew_identity)
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"DarkWeb crawl error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/darkweb/renew-identity', methods=['POST'])
+        def api_darkweb_renew_identity():
+            """更换 Tor 身份"""
+            try:
+                plugin = self.plugin_manager.get_plugin('DarkWebCrawler')
+                if not plugin:
+                    return jsonify({'error': 'DarkWeb crawler plugin not loaded'}), 400
+
+                result = plugin.renew_tor_identity()
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Renew identity error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/darkweb/current-ip', methods=['GET'])
+        def api_darkweb_current_ip():
+            """获取当前 Tor IP"""
+            try:
+                plugin = self.plugin_manager.get_plugin('DarkWebCrawler')
+                if not plugin:
+                    return jsonify({'error': 'DarkWeb crawler plugin not loaded'}), 400
+
+                result = plugin.get_current_tor_ip()
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Get current IP error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/darkweb/stats', methods=['GET'])
+        def api_darkweb_stats():
+            """获取暗网爬虫统计信息"""
+            try:
+                plugin = self.plugin_manager.get_plugin('DarkWebCrawler')
+                if not plugin:
+                    return jsonify({'error': 'DarkWeb crawler plugin not loaded'}), 400
+
+                stats = plugin.get_stats()
+                return jsonify(stats)
             except Exception as e:
                 logger.error(f"Get stats error: {e}")
                 return jsonify({'error': str(e)}), 500
