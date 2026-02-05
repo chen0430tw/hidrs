@@ -647,6 +647,77 @@ class ApiServer:
                 logger.error(f"Get stats error: {e}")
                 return jsonify({'error': str(e)}), 500
 
+        # SED地理可视化API
+        @self.app.route('/api/sed-geo/sources', methods=['GET'])
+        def api_sed_geo_sources():
+            """获取数据源地理分布"""
+            try:
+                plugin = self.plugin_manager.get_plugin('SEDGeoVisualization')
+                if not plugin:
+                    return jsonify({'error': 'SED Geo Visualization plugin not loaded'}), 400
+
+                result = plugin.get_source_distribution()
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Get source distribution error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/sed-geo/heatmap', methods=['GET'])
+        def api_sed_geo_heatmap():
+            """获取热力图数据"""
+            try:
+                plugin = self.plugin_manager.get_plugin('SEDGeoVisualization')
+                if not plugin:
+                    return jsonify({'error': 'SED Geo Visualization plugin not loaded'}), 400
+
+                result = plugin.get_heatmap_data()
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Get heatmap data error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/sed-geo/timeline', methods=['GET'])
+        def api_sed_geo_timeline():
+            """获取时间轴数据"""
+            try:
+                plugin = self.plugin_manager.get_plugin('SEDGeoVisualization')
+                if not plugin:
+                    return jsonify({'error': 'SED Geo Visualization plugin not loaded'}), 400
+
+                result = plugin.get_timeline_data()
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Get timeline data error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/sed-geo/region/<region_name>', methods=['GET'])
+        def api_sed_geo_region(region_name):
+            """查询指定地区的数据"""
+            try:
+                plugin = self.plugin_manager.get_plugin('SEDGeoVisualization')
+                if not plugin:
+                    return jsonify({'error': 'SED Geo Visualization plugin not loaded'}), 400
+
+                result = plugin.get_region_data(region_name)
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Get region data error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/sed-geo/stats', methods=['GET'])
+        def api_sed_geo_stats():
+            """获取统计信息"""
+            try:
+                plugin = self.plugin_manager.get_plugin('SEDGeoVisualization')
+                if not plugin:
+                    return jsonify({'error': 'SED Geo Visualization plugin not loaded'}), 400
+
+                stats = plugin.get_stats()
+                return jsonify(stats)
+            except Exception as e:
+                logger.error(f"Get stats error: {e}")
+                return jsonify({'error': str(e)}), 500
+
     def start(self, host='0.0.0.0', port=5000, debug=False):
         """启动API服务器"""
         self.app.run(host=host, port=port, debug=debug)
