@@ -467,9 +467,453 @@ def manage_saved_queries():
 
 ---
 
-### 阶段四：XKeyscore风格界面（1-2天美化）
+### 阶段四：分析师工作台（3-5天开发）
 
-#### 4.1 绿色主题配色
+#### 4.1 查询构建器（Query Builder）
+
+灵感来自XKeyscore的Persona Session Collection查询构建器：
+
+```html
+<!-- 多条件查询构建器 -->
+<div class="query-builder card">
+  <div class="card-header">
+    <h5><i class="bi bi-funnel"></i> 查询构建器</h5>
+  </div>
+  <div class="card-body">
+    <!-- 条件组 -->
+    <div id="query-conditions">
+      <!-- 条件1 -->
+      <div class="condition-row" data-condition-id="1">
+        <div class="row mb-2">
+          <div class="col-md-3">
+            <select class="form-select" name="field">
+              <option value="title">标题</option>
+              <option value="url">URL</option>
+              <option value="content">内容</option>
+              <option value="author">作者</option>
+              <option value="domain">域名</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <select class="form-select" name="operator">
+              <option value="contains">包含</option>
+              <option value="equals">等于</option>
+              <option value="not_contains">不包含</option>
+              <option value="regex">正则表达式</option>
+            </select>
+          </div>
+          <div class="col-md-5">
+            <input type="text" class="form-control" name="value"
+                   placeholder="搜索值">
+          </div>
+          <div class="col-md-2">
+            <button class="btn btn-danger btn-sm" onclick="removeCondition(1)">
+              <i class="bi bi-trash"></i> 删除
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 添加条件按钮 -->
+    <div class="mt-3">
+      <button class="btn btn-success btn-sm" onclick="addCondition()">
+        <i class="bi bi-plus-circle"></i> 添加条件
+      </button>
+      <select class="form-select d-inline-block w-auto ms-2">
+        <option value="AND">AND (且)</option>
+        <option value="OR">OR (或)</option>
+      </select>
+    </div>
+
+    <!-- 执行查询 -->
+    <div class="mt-3">
+      <button class="btn btn-primary" onclick="executeQuery()">
+        <i class="bi bi-search"></i> 执行查询
+      </button>
+      <button class="btn btn-outline-secondary" onclick="clearQuery()">
+        <i class="bi bi-x-circle"></i> 清空
+      </button>
+    </div>
+  </div>
+</div>
+```
+
+**后端API**:
+```python
+@app.route('/api/search/query-builder', methods=['POST'])
+def query_builder_search():
+    """查询构建器API"""
+    query_data = request.json
+    conditions = query_data['conditions']  # 条件列表
+    logic = query_data.get('logic', 'AND')  # AND/OR
+
+    # 构建MongoDB查询
+    if logic == 'AND':
+        mongo_query = {'$and': []}
+        for cond in conditions:
+            mongo_query['$and'].append(
+                build_condition(cond['field'], cond['operator'], cond['value'])
+            )
+    else:  # OR
+        mongo_query = {'$or': []}
+        for cond in conditions:
+            mongo_query['$or'].append(
+                build_condition(cond['field'], cond['operator'], cond['value'])
+            )
+
+    # 执行查询
+    results = search_engine.query_builder_search(mongo_query)
+    return jsonify(results)
+```
+
+#### 4.2 分析师仪表板（Analyst Dashboard）
+
+```html
+<!-- 分析师工作台 -->
+<div class="analyst-dashboard">
+  <!-- 顶部统计栏 -->
+  <div class="row mb-4">
+    <div class="col-md-3">
+      <div class="stat-card bg-primary text-white">
+        <div class="stat-icon"><i class="bi bi-search"></i></div>
+        <div class="stat-number">127</div>
+        <div class="stat-label">今日查询次数</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="stat-card bg-success text-white">
+        <div class="stat-icon"><i class="bi bi-bookmark"></i></div>
+        <div class="stat-number">42</div>
+        <div class="stat-label">保存的查询</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="stat-card bg-warning text-white">
+        <div class="stat-icon"><i class="bi bi-graph-up"></i></div>
+        <div class="stat-number">8,324</div>
+        <div class="stat-label">索引文档总数</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="stat-card bg-info text-white">
+        <div class="stat-icon"><i class="bi bi-clock-history"></i></div>
+        <div class="stat-number">23ms</div>
+        <div class="stat-label">平均查询时间</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 快捷操作面板 -->
+  <div class="row mb-4">
+    <div class="col-md-12">
+      <div class="card">
+        <div class="card-header">
+          <h5><i class="bi bi-lightning"></i> 快捷操作</h5>
+        </div>
+        <div class="card-body">
+          <div class="btn-group" role="group">
+            <button class="btn btn-outline-primary">
+              <i class="bi bi-clock"></i> 最近1小时
+            </button>
+            <button class="btn btn-outline-primary">
+              <i class="bi bi-fire"></i> 高相关度 (&gt;0.8)
+            </button>
+            <button class="btn btn-outline-primary">
+              <i class="bi bi-globe"></i> Wikipedia
+            </button>
+            <button class="btn btn-outline-primary">
+              <i class="bi bi-github"></i> GitHub
+            </button>
+            <button class="btn btn-outline-primary">
+              <i class="bi bi-file-earmark-code"></i> 技术文档
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 查询历史 -->
+  <div class="row">
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header">
+          <h5><i class="bi bi-clock-history"></i> 最近查询</h5>
+        </div>
+        <div class="card-body">
+          <ul class="list-group">
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <div>
+                <strong>XKeyscore surveillance</strong>
+                <br>
+                <small class="text-muted">
+                  source=wikipedia, time&gt;24h
+                </small>
+              </div>
+              <span class="badge bg-primary">127 结果</span>
+            </li>
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <div>
+                <strong>NSA PRISM</strong>
+                <br>
+                <small class="text-muted">
+                  all fields, time&gt;7d
+                </small>
+              </div>
+              <span class="badge bg-primary">89 结果</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header">
+          <h5><i class="bi bi-bookmark-star"></i> 保存的查询</h5>
+        </div>
+        <div class="card-body">
+          <ul class="list-group">
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <div>
+                <strong>网络安全威胁监控</strong>
+                <br>
+                <small class="text-muted">
+                  keywords: APT, malware, 0day
+                </small>
+              </div>
+              <div>
+                <button class="btn btn-sm btn-primary">
+                  <i class="bi bi-play"></i> 运行
+                </button>
+                <button class="btn btn-sm btn-outline-secondary">
+                  <i class="bi bi-pencil"></i>
+                </button>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+```
+
+#### 4.3 用户活动分析（User Activity Analysis）
+
+灵感来自XKeyscore的User Activity Possible Queries：
+
+```html
+<!-- 用户活动分析面板 -->
+<div class="user-activity-panel">
+  <h4 class="text-center mb-4">
+    <i class="bi bi-person-circle"></i> 用户活动分析
+  </h4>
+
+  <!-- 活动类型选择 -->
+  <div class="row mb-3">
+    <label class="col-md-3 field-label">活动类型:</label>
+    <div class="col-md-9">
+      <select class="form-select">
+        <option>搜索活动 (Search Activity)</option>
+        <option>浏览历史 (Browse History)</option>
+        <option>文档访问 (Document Access)</option>
+        <option>社交互动 (Social Interaction)</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- 用户标识符 -->
+  <div class="row mb-3">
+    <label class="col-md-3 field-label">用户标识:</label>
+    <div class="col-md-9">
+      <div class="input-group">
+        <select class="form-select" style="max-width: 200px;">
+          <option>username</option>
+          <option>email</option>
+          <option>session_id</option>
+          <option>ip_address</option>
+        </select>
+        <input type="text" class="form-control" placeholder="输入标识符">
+      </div>
+    </div>
+  </div>
+
+  <!-- 时间线可视化 -->
+  <div class="row mt-4">
+    <div class="col-md-12">
+      <h6>活动时间线:</h6>
+      <canvas id="activity-timeline-chart"></canvas>
+    </div>
+  </div>
+
+  <!-- 活动详情表格 -->
+  <div class="row mt-4">
+    <div class="col-md-12">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>时间</th>
+            <th>活动类型</th>
+            <th>目标</th>
+            <th>来源IP</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="activity-details">
+          <!-- 动态加载 -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+```
+
+#### 4.4 聚类网络可视化（Cluster Network）
+
+```html
+<!-- 聚类关联分析 -->
+<div class="cluster-analysis">
+  <h5><i class="bi bi-diagram-3"></i> 聚类关联分析</h5>
+
+  <!-- 聚类选择 -->
+  <div class="mb-3">
+    <label>选择聚类:</label>
+    <select class="form-select" id="cluster-selector" multiple>
+      <option value="42">聚类 #42 (NSA监控) - 127个文档</option>
+      <option value="89">聚类 #89 (网络安全) - 89个文档</option>
+      <option value="15">聚类 #15 (隐私保护) - 156个文档</option>
+    </select>
+  </div>
+
+  <!-- 网络图 -->
+  <div id="cluster-network-graph" style="height: 500px; border: 1px solid #ddd;">
+    <!-- 使用D3.js或Cytoscape.js绘制网络图 -->
+  </div>
+
+  <!-- 聚类详情 -->
+  <div class="mt-3">
+    <h6>聚类 #42 详情:</h6>
+    <ul>
+      <li><strong>关键词:</strong> NSA, surveillance, XKeyscore, PRISM</li>
+      <li><strong>文档数:</strong> 127</li>
+      <li><strong>主要来源:</strong> Wikipedia (45%), 知乎 (30%), GitHub (25%)</li>
+      <li><strong>相关聚类:</strong> #89 (网络安全), #15 (隐私保护)</li>
+    </ul>
+  </div>
+</div>
+```
+
+#### 4.5 导出和报告生成
+
+```html
+<!-- 导出功能 -->
+<div class="export-panel">
+  <h5><i class="bi bi-file-earmark-arrow-down"></i> 导出和报告</h5>
+
+  <div class="row">
+    <div class="col-md-6">
+      <label>导出格式:</label>
+      <select class="form-select" id="export-format">
+        <option value="json">JSON</option>
+        <option value="csv">CSV</option>
+        <option value="excel">Excel (XLSX)</option>
+        <option value="pdf">PDF报告</option>
+        <option value="html">HTML报告</option>
+      </select>
+    </div>
+    <div class="col-md-6">
+      <label>包含内容:</label>
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="export-results" checked>
+        <label class="form-check-label">搜索结果</label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="export-stats">
+        <label class="form-check-label">统计图表</label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="export-timeline">
+        <label class="form-check-label">时间线分析</label>
+      </div>
+    </div>
+  </div>
+
+  <button class="btn btn-success mt-3" onclick="exportResults()">
+    <i class="bi bi-download"></i> 导出
+  </button>
+</div>
+```
+
+**后端API**:
+```python
+@app.route('/api/export', methods=['POST'])
+def export_results():
+    """导出搜索结果"""
+    data = request.json
+    format_type = data['format']
+    results = data['results']
+
+    if format_type == 'json':
+        return jsonify(results)
+    elif format_type == 'csv':
+        # 转换为CSV
+        csv_data = convert_to_csv(results)
+        return Response(csv_data, mimetype='text/csv',
+                       headers={'Content-Disposition': 'attachment;filename=results.csv'})
+    elif format_type == 'excel':
+        # 转换为Excel
+        excel_file = convert_to_excel(results)
+        return send_file(excel_file, as_attachment=True)
+    elif format_type == 'pdf':
+        # 生成PDF报告
+        pdf_file = generate_pdf_report(results)
+        return send_file(pdf_file, as_attachment=True)
+```
+
+#### 4.6 协作和批注功能
+
+```html
+<!-- 结果批注 -->
+<div class="result-annotation">
+  <h6>分析师批注:</h6>
+  <textarea class="form-control" rows="3"
+            placeholder="添加你的分析和备注..."></textarea>
+
+  <!-- 标签 -->
+  <div class="mt-2">
+    <label>标签:</label>
+    <div class="btn-group" role="group">
+      <button class="btn btn-sm btn-outline-primary">
+        <i class="bi bi-tag"></i> 重要
+      </button>
+      <button class="btn btn-sm btn-outline-warning">
+        <i class="bi bi-exclamation-triangle"></i> 需核实
+      </button>
+      <button class="btn btn-sm btn-outline-success">
+        <i class="bi bi-check-circle"></i> 已确认
+      </button>
+      <button class="btn btn-sm btn-outline-danger">
+        <i class="bi bi-x-circle"></i> 误报
+      </button>
+    </div>
+  </div>
+
+  <!-- 分享给团队 -->
+  <div class="mt-2">
+    <button class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-share"></i> 分享给团队
+    </button>
+  </div>
+</div>
+```
+
+---
+
+### 阶段五：XKeyscore风格界面（1-2天美化）
+
+#### 5.1 绿色主题配色
 
 ```css
 /* XKeyscore风格配色 */
@@ -502,7 +946,7 @@ def manage_saved_queries():
 }
 ```
 
-#### 4.2 专业UI布局
+#### 5.2 专业UI布局
 
 ```html
 <!-- XKeyscore风格的高级搜索面板 -->
@@ -725,7 +1169,45 @@ def manage_saved_queries():
   - [ ] 后端：新增/api/saved-queries端点
   - [ ] 实现查询CRUD操作
 
-### Phase 4: XKeyscore风格界面（优先级：低）
+### Phase 4: 分析师工作台（优先级：高）⭐
+
+- [ ] **查询构建器 (Query Builder)**
+  - [ ] 前端：多条件动态添加/删除界面
+  - [ ] 支持AND/OR逻辑组合
+  - [ ] 后端：/api/search/query-builder端点
+  - [ ] MongoDB复合查询构建
+
+- [ ] **分析师仪表板**
+  - [ ] 统计卡片（今日查询/保存查询/文档总数/平均时间）
+  - [ ] 快捷操作面板（常用筛选器）
+  - [ ] 查询历史列表（显示参数和结果数）
+  - [ ] 保存的查询管理
+
+- [ ] **用户活动分析**
+  - [ ] 活动类型选择（搜索/浏览/文档访问/社交）
+  - [ ] 用户标识符查询（username/email/session_id/IP）
+  - [ ] 活动时间线可视化（Chart.js）
+  - [ ] 活动详情表格
+
+- [ ] **聚类网络可视化**
+  - [ ] 聚类选择器（多选）
+  - [ ] 网络图绘制（D3.js或Cytoscape.js）
+  - [ ] 聚类详情展示（关键词/文档数/来源分布）
+  - [ ] 关联聚类推荐
+
+- [ ] **导出和报告生成**
+  - [ ] 多格式支持（JSON/CSV/Excel/PDF/HTML）
+  - [ ] 自定义导出内容（结果/图表/时间线）
+  - [ ] PDF报告模板设计
+  - [ ] Excel自动格式化
+
+- [ ] **协作和批注**
+  - [ ] 结果批注功能
+  - [ ] 标签系统（重要/需核实/已确认/误报）
+  - [ ] 团队分享功能
+  - [ ] 批注历史记录
+
+### Phase 5: XKeyscore风格界面（优先级：低）
 
 - [ ] **绿色主题**
   - [ ] 设计XKeyscore风格的CSS
