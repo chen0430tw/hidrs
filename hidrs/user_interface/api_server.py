@@ -160,6 +160,10 @@ class ApiServer:
         def advanced_scan_page():
             return render_template('advanced_scan.html')
 
+        @self.app.route('/sed-geo')
+        def sed_geo_page():
+            return render_template('sed_geo.html')
+
         # API路由
         @self.app.route('/api/search', methods=['GET'])
         def api_search():
