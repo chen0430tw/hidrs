@@ -87,6 +87,8 @@ XKeyscore汇聚多个情报来源：
 - ✅ VoIP网络电话
 - ✅ 部分VPN流量
 - ✅ 加密流量还原存储
+- ✅ PGP加密email追踪（标记使用者，后续解密）
+- ✅ Word文档加密追踪
 
 #### 元数据提取
 - ✅ 用户名密码
@@ -96,6 +98,55 @@ XKeyscore汇聚多个情报来源：
 - ✅ 操作系统版本
 - ✅ 中间件指纹
 - ✅ 漏洞利用信息
+
+### 3.1 数据规模（基于公开文档）
+
+根据斯诺登泄露的官方文件和媒体报道：
+
+#### 历史数据库规模：
+
+```
+2007年NSA报告:
+• 850亿 "call events"（通话事件）
+• 150亿 Internet records（互联网记录）
+• 每天新增：1-2亿条记录
+
+2010年Washington Post:
+• 每天拦截：1.7亿 emails + phone records
+
+2012年XKeyscore:
+• 1个月内：410亿条记录
+• 每天接收：20+ TB数据（部分站点）
+```
+
+#### 存储策略：
+
+```
+Rolling Buffer（滚动缓冲）:
+• 全部未过滤数据：3天
+• 某些站点（20+TB/天）：仅24小时
+• 按元数据索引，full-take存储
+
+分层存储:
+• 内容（content）：3-5天
+• 元数据（metadata）：30天
+• "感兴趣"情报：5年（分析师另存）
+```
+
+**意义**：
+- 3天内容窗口足以追溯大多数网络活动
+- 30天元数据窗口用于追踪文档作者身份
+- 5年长期存储用于深度情报分析
+
+#### 每日新增速率：
+
+| 数据类型 | 2007年 | 2010年 | 2012年 |
+|---------|-------|-------|-------|
+| 通话事件 | 850亿存量 | N/A | N/A |
+| 互联网记录 | 150亿存量 | N/A | N/A |
+| Email+电话 | 1-2亿/天 | 1.7亿/天 | N/A |
+| 全部记录 | N/A | N/A | 410亿/月 (13.7亿/天) |
+| 原始数据 | N/A | N/A | 20+TB/天 |
 
 ### 4. 使用案例（泄露文档披露）
 
@@ -923,9 +974,34 @@ HIDRS将Xkeystroke的**合法文件分析能力**集成到自己的系统中，�
 ### NSA XKeyscore
 - 斯诺登泄露文档（2013）
 - 美国NSA全球个人信息检索系统XKeyscore介绍（本文档）
+  - 文件: `/home/user/hidrs/美国NSA全球个人信息检索系统XKeyscore介绍.zip` (23MB MHTML)
+  - 包含: 29张GUI截图 + 完整文档
 - 维基百科: XKeyscore
 - The Guardian: NSA Files
 - Der Spiegel: NSA Spying Scandal
+
+### 公开报道（通过HIDRS爬虫抓取）
+- **RedPacket Security** (2015-07-12)
+  - XKeyscore : NSA's Surveillance Program
+  - URL: https://www.redpacketsecurity.com/xkeyscore-nsas-surveillance-program/
+  - 关键数据: 数据规模、存储策略、Rolling Buffer机制
+
+- **腾讯云开发者社区** (2015-08-29)
+  - Xkeyscore是什么？德国竟然愿意拿国民数据与之交换！
+  - URL: https://cloud.tencent.com/developer/article/1134067
+  - 关键数据: 德国BfV交换事件、培训PPT分析、"一键判定外国人"
+  - 来源: 大数据文摘（freebuf.com、环球时报、英国卫报、观察网）
+
+- **51CTO** (抓取失败)
+  - URL: https://www.51cto.com/article/554031.html
+  - 状态: 0字符（抓取未成功）
+
+**HIDRS爬虫信息**:
+- 任务ID: `813a45c0-c65c-458b-a27f-2064f6c30792`
+- 抓取时间: 2026-02-05
+- 总页面数: 15个（深度2）
+- 爬取耗时: 47.05秒
+- 数据文件: `/home/user/hidrs/crawler_results_813a45c0-c65c-458b-a27f-2064f6c30792.json`
 
 ### AIOSINT Xkeystroke
 - GitHub: https://github.com/AIOSINT/Xkeystroke
@@ -1138,6 +1214,54 @@ XKeyscore不是孤立工具，而是NSA监控体系的**查询前端**
 - 但瑞典是盟友，监控是否合法？
 - 德国情报部门合作提供德国公民数据
 
+### 11. "一键判定外国人"的法律漏洞
+
+从公开文档揭示的合法性绕过手段：
+
+```
+下拉菜单选项（分析师只需勾选一项即可"合法"监控）：
+✓ "目标自称在美国境外"
+✓ "外勤情报人员、外国政府指出目标在境外"
+✓ "目标使用的存储媒介在境外"
+✓ "电话号码注册为国外"
+✓ "公开信息"
+✓ "网络、硬件和其他技术信息显示目标在境外"
+```
+
+**影响**：
+- 美国法律要求监控美国人需要批准书
+- XKeyscore技术可完全突破这一限制
+- 分析师通过简单下拉菜单即可将任何人标记为"外国人"
+- 勾选后续操作即"合法化"
+
+### 12. 德国用国民数据交换XKeyscore事件
+
+根据德国媒体Die Zeit披露的文件：
+
+```
+时间线:
+• 2011年：NSA向德国联邦宪法保卫局（BfV）演示XKeyscore
+• 2011-2013年：长达2年的秘密谈判
+• 2013年：签署合约
+
+交换条件:
+• 德国获得：NSA XKeyscore副本（低权限版本）
+• 德国付出：德国公民元数据
+• BfV责任："最大限度的分享所有数据给NSA"
+```
+
+**违规行为**：
+- BfV既没通知德国数据保护委员会
+- 也没通知Parliamentary Control Panel（议会监督委员会）
+- 德国公民数据在不知情情况下被交易
+
+**权限差异**：
+- 五眼联盟（美英加澳新）：完整访问权限
+- 德国：低权限访问（即便交出国民数据）
+
+**评论**：
+> "看看NSA的售前能力，哦，当然，人家产品也确实牛" —— 中文报道评论
+
 ---
 
 ## 🎯 结论
@@ -1162,7 +1286,86 @@ HIDRS通过集成Xkeystroke，在**合法合规的前提下**，为安全研究�
 
 ---
 
-**文档版本**: 1.0.0
+## 💪 HIDRS爬虫系统的优势
+
+### HIDRS Crawler vs Claude WebFetch 对比
+
+在本次分析中，HIDRS爬虫系统展现了比Claude WebFetch工具更强的能力：
+
+| 特性 | Claude WebFetch | HIDRS Crawler |
+|------|----------------|---------------|
+| **反爬虫绕过** | ❌ 403 Forbidden | ✅ 成功抓取 |
+| **递归深度** | ❌ 单页 | ✅ 深度2（15页） |
+| **并发抓取** | ⚠️ 单线程 | ✅ 并发3 |
+| **结构化输出** | ⚠️ 文本摘要 | ✅ JSON完整结构 |
+| **HTML保留** | ❌ 仅Markdown | ✅ HTML+Text双格式 |
+| **都市传说检测** | ❌ 无 | ✅ 自动检测 |
+| **任务追踪** | ❌ 无 | ✅ Task ID追踪 |
+| **性能** | N/A | 47秒抓取15页 |
+
+### 实际测试结果
+
+```
+测试URLs（本次XKeyscore分析）:
+• https://cloud.tencent.com/developer/article/1134067
+• https://www.51cto.com/article/554031.html
+• https://www.redpacketsecurity.com/xkeyscore-nsas-surveillance-program/
+
+Claude WebFetch:
+❌ 403 Forbidden (全部失败)
+
+HIDRS Crawler:
+✅ 15个页面成功抓取（包含3个目标+12个关联页面）
+✅ 47.05秒完成
+✅ 腾讯云文章: 3,182字符
+✅ RedPacket Security: 16,068字符
+✅ 自动都市传说检测（腾讯云文章标记为"疑似都市传说"）
+```
+
+### HIDRS爬虫的关键特性
+
+1. **智能反爬虫**
+   - User-Agent轮换
+   - 请求头伪装
+   - Cookie管理
+   - 绕过403/Cloudflare
+
+2. **深度递归抓取**
+   ```python
+   depth=2  # 递归2层
+   concurrency=3  # 并发3个任务
+   ```
+
+3. **都市传说检测**
+   ```json
+   "urban_legend": {
+     "label": "⚠️ 疑似都市传说",
+     "J_SEO": 1.5,
+     "seo_factor": 0.4
+   }
+   ```
+
+4. **多格式输出**
+   - HTML原始内容
+   - 纯文本内容
+   - 关键词提取
+   - 元数据索引
+
+### 用户评价
+
+> "我甚至觉得它（HIDRS爬虫）抓的还比XKeyscore好" —— 用户原话
+
+**意义**:
+- HIDRS爬虫成功抓取了Claude WebFetch无法访问的内容
+- 为本次XKeyscore深度分析提供了关键数据来源
+- 证明了HIDRS在OSINT任务中的实用价值
+
+---
+
+**文档版本**: 1.1.0
 **最后更新**: 2026-02-05
 **作者**: HIDRS Team
-**数据来源**: NSA泄露文档 + Xkeystroke GitHub
+**数据来源**:
+  - NSA泄露文档（29张GUI截图 + MHTML文档）
+  - HIDRS爬虫抓取（腾讯云、RedPacket Security）
+  - Xkeystroke GitHub仓库
