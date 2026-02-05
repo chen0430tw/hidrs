@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实时Tracker追踪系统 - HIDRS</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <style>
+        /* 军事风格全局样式 */
+        body {
+            background-color: #0a0a0a;
+            color: #00ff00;
+            font-family: 'Courier New', Courier, monospace;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        .tracker-container {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* 顶部状态栏 */
+        .status-bar {
+            background: linear-gradient(180deg, #001a00 0%, #000 100%);
+            border-bottom: 2px solid #00ff00;
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0, 255, 0, 0.3);
+        }
+
+        .status-bar h1 {
+            margin: 0;
+            font-size: 1.5rem;
+            color: #00ff00;
+            text-shadow: 0 0 10px #00ff00, 0 0 20px #00ff00;
+            letter-spacing: 3px;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ff0000;
+            box-shadow: 0 0 10px #ff0000;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.connected {
+            background: #00ff00;
+            box-shadow: 0 0 10px #00ff00;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* 主容器 */
+        .main-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* 地图容器 */
+        #map {
+            flex: 1;
+            height: 100%;
+            position: relative;
+        }
+
+        /* 侧边栏 */
+        .sidebar {
+            width: 350px;
+            background: rgba(0, 26, 0, 0.95);
+            border-left: 2px solid #00ff00;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .sidebar h3 {
+            color: #00ff00;
+            text-shadow: 0 0 5px #00ff00;
+            border-bottom: 1px solid #00ff00;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+
+        /* 目标卡片 */
+        .target-card {
+            background: rgba(0, 40, 0, 0.8);
+            border: 1px solid #00ff00;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            box-shadow: 0 0 5px rgba(0, 255, 0, 0.3);
+            transition: all 0.3s;
+        }
+
+        .target-card:hover {
+            background: rgba(0, 60, 0, 0.9);
+            box-shadow: 0 0 15px rgba(0, 255, 0, 0.5);
+        }
+
+        .target-card .target-name {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #00ff00;
+            margin-bottom: 10px;
+        }
+
+        .target-card .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 5px 0;
+            font-size: 0.9rem;
+        }
+
+        .target-card .label {
+            color: #00cc00;
+        }
+
+        .target-card .value {
+            color: #00ff00;
+            font-weight: bold;
+        }
+
+        /* 自定义标记样式 */
+        .marker-dot {
+            width: 16px;
+            height: 16px;
+            background: #ff0000;
+            border: 3px solid #fff;
+            border-radius: 50%;
+            animation: ping 2s infinite;
+            box-shadow: 0 0 10px #ff0000;
+        }
+
+        @keyframes ping {
+            0% {
+                box-shadow: 0 0 0 0 rgba(255, 0, 0, 0.8);
+            }
+            100% {
+                box-shadow: 0 0 0 20px rgba(255, 0, 0, 0);
+            }
+        }
+
+        /* 控制按钮 */
+        .control-buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .btn-military {
+            background: rgba(0, 60, 0, 0.8);
+            border: 1px solid #00ff00;
+            color: #00ff00;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-family: 'Courier New', monospace;
+        }
+
+        .btn-military:hover {
+            background: rgba(0, 100, 0, 0.9);
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
+        }
+
+        .btn-military:active {
+            transform: scale(0.95);
+        }
+
+        /* 滚动条样式 */
+        .sidebar::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .sidebar::-webkit-scrollbar-track {
+            background: #001a00;
+        }
+
+        .sidebar::-webkit-scrollbar-thumb {
+            background: #00ff00;
+            border-radius: 4px;
+        }
+
+        .sidebar::-webkit-scrollbar-thumb:hover {
+            background: #00cc00;
+        }
+
+        /* 统计信息 */
+        .stats-panel {
+            background: rgba(0, 40, 0, 0.8);
+            border: 1px solid #00ff00;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stats-panel .stat-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 8px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="tracker-container">
+        <!-- 顶部状态栏 -->
+        <div class="status-bar">
+            <h1>🛰️ REALTIME TRACKER SYSTEM</h1>
+            <div class="connection-status">
+                <div class="status-indicator" id="statusIndicator"></div>
+                <span id="statusText">DISCONNECTED</span>
+            </div>
+        </div>
+
+        <!-- 主容器 -->
+        <div class="main-container">
+            <!-- 地图 -->
+            <div id="map"></div>
+
+            <!-- 侧边栏 -->
+            <div class="sidebar">
+                <h3><i class="bi bi-bar-chart-line"></i> SYSTEM STATUS</h3>
+
+                <!-- 统计信息 -->
+                <div class="stats-panel">
+                    <div class="stat-item">
+                        <span>ACTIVE TARGETS:</span>
+                        <span id="activeTargets">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span>TOTAL UPDATES:</span>
+                        <span id="totalUpdates">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span>UPDATE RATE:</span>
+                        <span id="updateRate">0/s</span>
+                    </div>
+                </div>
+
+                <!-- 控制按钮 -->
+                <div class="control-buttons">
+                    <button class="btn-military" id="clearTrails">
+                        <i class="bi bi-eraser"></i> CLEAR TRAILS
+                    </button>
+                    <button class="btn-military" id="autoFitView">
+                        <i class="bi bi-arrows-fullscreen"></i> AUTO FIT
+                    </button>
+                </div>
+
+                <h3><i class="bi bi-crosshair"></i> TARGETS</h3>
+
+                <!-- 目标列表 -->
+                <div id="targetList">
+                    <div style="color: #00cc00; text-align: center; padding: 20px;">
+                        No active targets
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+
+    <script>
+        // 全局变量
+        let map;
+        let socket;
+        let targets = {};
+        let totalUpdates = 0;
+        let updateCounter = 0;
+        let lastUpdateTime = Date.now();
+
+        // 初始化地图
+        function initMap() {
+            map = L.map('map', {
+                zoomControl: true,
+                attributionControl: false
+            }).setView([39.9042, 116.4074], 5);
+
+            // 使用暗色地图
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '© OpenStreetMap, © CartoDB',
+                maxZoom: 18
+            }).addTo(map);
+
+            console.log('✅ 地图初始化完成');
+        }
+
+        // 初始化WebSocket连接
+        function initWebSocket() {
+            // 连接到追踪服务器（端口5002）
+            socket = io('http://localhost:5002');
+
+            socket.on('connect', () => {
+                console.log('✅ WebSocket已连接');
+                updateConnectionStatus(true);
+            });
+
+            socket.on('disconnect', () => {
+                console.warn('❌ WebSocket断开连接');
+                updateConnectionStatus(false);
+            });
+
+            socket.on('connected', (data) => {
+                console.log('📡 服务器响应:', data);
+            });
+
+            socket.on('target_update', (data) => {
+                handleTargetUpdate(data);
+            });
+
+            socket.on('target_lost', (data) => {
+                handleTargetLost(data);
+            });
+
+            socket.on('error', (data) => {
+                console.error('⚠️ 服务器错误:', data);
+            });
+        }
+
+        // 更新连接状态
+        function updateConnectionStatus(connected) {
+            const indicator = document.getElementById('statusIndicator');
+            const text = document.getElementById('statusText');
+
+            if (connected) {
+                indicator.classList.add('connected');
+                text.textContent = 'CONNECTED';
+            } else {
+                indicator.classList.remove('connected');
+                text.textContent = 'DISCONNECTED';
+            }
+        }
+
+        // 处理目标更新
+        function handleTargetUpdate(data) {
+            const targetId = data.target_id;
+
+            if (!targets[targetId]) {
+                // 新目标
+                createTarget(data);
+            } else {
+                // 更新现有目标
+                updateTarget(data);
+            }
+
+            // 更新统计
+            totalUpdates++;
+            updateCounter++;
+            updateStats();
+
+            // 更新侧边栏
+            updateTargetCard(data);
+        }
+
+        // 创建新目标
+        function createTarget(data) {
+            const targetId = data.target_id;
+
+            // 创建自定义标记
+            const markerIcon = L.divIcon({
+                className: 'custom-marker',
+                html: '<div class="marker-dot"></div>',
+                iconSize: [16, 16],
+                iconAnchor: [8, 8]
+            });
+
+            const marker = L.marker([data.lat, data.lon], { icon: markerIcon })
+                .addTo(map)
+                .bindPopup(`
+                    <div style="color: #000; font-family: 'Courier New';">
+                        <strong>${data.name}</strong><br>
+                        ID: ${targetId}<br>
+                        速度: ${data.speed} km/h<br>
+                        方向: ${data.heading}°
+                    </div>
+                `);
+
+            // 创建轨迹线
+            const trail = L.polyline([[data.lat, data.lon]], {
+                color: getRandomColor(),
+                weight: 2,
+                opacity: 0.6,
+                dashArray: '5, 5'
+            }).addTo(map);
+
+            targets[targetId] = {
+                data: data,
+                marker: marker,
+                trail: trail,
+                trailPoints: [[data.lat, data.lon]],
+                lastPosition: [data.lat, data.lon]
+            };
+
+            console.log(`✅ 新目标创建: ${targetId}`);
+        }
+
+        // 更新目标
+        function updateTarget(data) {
+            const targetId = data.target_id;
+            const target = targets[targetId];
+
+            const newPosition = [data.lat, data.lon];
+
+            // 平滑移动动画
+            animateMarkerMove(target.marker, target.lastPosition, newPosition);
+
+            // 更新轨迹
+            target.trailPoints.push(newPosition);
+            if (target.trailPoints.length > 200) {
+                target.trailPoints.shift();  // 保留最近200个点
+            }
+            target.trail.setLatLngs(target.trailPoints);
+
+            // 更新数据
+            target.data = data;
+            target.lastPosition = newPosition;
+
+            // 更新弹出窗口
+            target.marker.setPopupContent(`
+                <div style="color: #000; font-family: 'Courier New';">
+                    <strong>${data.name}</strong><br>
+                    ID: ${targetId}<br>
+                    速度: ${data.speed} km/h<br>
+                    方向: ${data.heading}°<br>
+                    海拔: ${data.altitude}m
+                </div>
+            `);
+        }
+
+        // 平滑移动动画（30帧插值）
+        function animateMarkerMove(marker, from, to) {
+            const steps = 30;
+            const duration = 1000;  // 1秒
+            const latStep = (to[0] - from[0]) / steps;
+            const lngStep = (to[1] - from[1]) / steps;
+
+            let step = 0;
+            const interval = setInterval(() => {
+                step++;
+                if (step >= steps) {
+                    clearInterval(interval);
+                    marker.setLatLng(to);
+                    return;
+                }
+
+                const newLat = from[0] + latStep * step;
+                const newLng = from[1] + lngStep * step;
+                marker.setLatLng([newLat, newLng]);
+            }, duration / steps);
+        }
+
+        // 处理目标丢失
+        function handleTargetLost(data) {
+            const targetId = data.target_id;
+            if (targets[targetId]) {
+                map.removeLayer(targets[targetId].marker);
+                map.removeLayer(targets[targetId].trail);
+                delete targets[targetId];
+                updateStats();
+                updateTargetList();
+                console.log(`🔴 目标丢失: ${targetId} (${data.reason})`);
+            }
+        }
+
+        // 更新统计信息
+        function updateStats() {
+            document.getElementById('activeTargets').textContent = Object.keys(targets).length;
+            document.getElementById('totalUpdates').textContent = totalUpdates;
+
+            // 计算更新速率
+            const now = Date.now();
+            const elapsed = (now - lastUpdateTime) / 1000;
+            if (elapsed >= 1) {
+                const rate = updateCounter / elapsed;
+                document.getElementById('updateRate').textContent = rate.toFixed(1) + '/s';
+                updateCounter = 0;
+                lastUpdateTime = now;
+            }
+        }
+
+        // 更新目标卡片
+        function updateTargetCard(data) {
+            const targetId = data.target_id;
+            let card = document.getElementById(`card-${targetId}`);
+
+            if (!card) {
+                // 创建新卡片
+                const targetList = document.getElementById('targetList');
+                card = document.createElement('div');
+                card.id = `card-${targetId}`;
+                card.className = 'target-card';
+                targetList.appendChild(card);
+
+                // 如果是第一个目标，清除"No active targets"提示
+                if (Object.keys(targets).length === 1) {
+                    targetList.innerHTML = '';
+                    targetList.appendChild(card);
+                }
+            }
+
+            // 更新卡片内容
+            card.innerHTML = `
+                <div class="target-name">${data.name}</div>
+                <div class="info-row">
+                    <span class="label">ID:</span>
+                    <span class="value">${targetId}</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">POSITION:</span>
+                    <span class="value">${data.lat.toFixed(5)}, ${data.lon.toFixed(5)}</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">SPEED:</span>
+                    <span class="value">${data.speed} km/h</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">HEADING:</span>
+                    <span class="value">${data.heading}° (${getDirection(data.heading)})</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">ALTITUDE:</span>
+                    <span class="value">${data.altitude}m</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">TRAIL POINTS:</span>
+                    <span class="value">${targets[targetId] ? targets[targetId].trailPoints.length : 1}</span>
+                </div>
+            `;
+
+            // 点击卡片聚焦到目标
+            card.onclick = () => {
+                if (targets[targetId]) {
+                    map.setView(targets[targetId].lastPosition, 12);
+                    targets[targetId].marker.openPopup();
+                }
+            };
+        }
+
+        // 更新目标列表
+        function updateTargetList() {
+            const targetList = document.getElementById('targetList');
+            if (Object.keys(targets).length === 0) {
+                targetList.innerHTML = '<div style="color: #00cc00; text-align: center; padding: 20px;">No active targets</div>';
+            }
+        }
+
+        // 获取方向文字
+        function getDirection(heading) {
+            const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+            const index = Math.round(heading / 45) % 8;
+            return directions[index];
+        }
+
+        // 获取随机颜色
+        function getRandomColor() {
+            const colors = ['#ff0000', '#ff6600', '#ffcc00', '#00ff00', '#0099ff', '#cc00ff'];
+            return colors[Math.floor(Math.random() * colors.length)];
+        }
+
+        // 清除所有轨迹
+        document.getElementById('clearTrails').addEventListener('click', () => {
+            for (const targetId in targets) {
+                targets[targetId].trailPoints = [targets[targetId].lastPosition];
+                targets[targetId].trail.setLatLngs(targets[targetId].trailPoints);
+            }
+            console.log('🧹 已清除所有轨迹');
+        });
+
+        // 自动适应视图
+        document.getElementById('autoFitView').addEventListener('click', () => {
+            if (Object.keys(targets).length > 0) {
+                const bounds = L.latLngBounds(
+                    Object.values(targets).map(t => t.lastPosition)
+                );
+                map.fitBounds(bounds, { padding: [50, 50] });
+            }
+        });
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            initMap();
+            initWebSocket();
+            console.log('🚀 实时追踪系统已启动');
+        });
+    </script>
+</body>
+</html>

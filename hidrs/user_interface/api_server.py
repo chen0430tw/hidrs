@@ -164,6 +164,10 @@ class ApiServer:
         def sed_geo_page():
             return render_template('sed_geo.html')
 
+        @self.app.route('/realtime-tracker')
+        def realtime_tracker_page():
+            return render_template('realtime_tracker.html')
+
         # API路由
         @self.app.route('/api/search', methods=['GET'])
         def api_search():
