@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HIDRS 全球广播播放器</title>
+
+    <!-- Video.js CSS -->
+    <link href="https://vjs.zencdn.net/8.6.1/video-js.css" rel="stylesheet">
+
+    <!-- Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            font-family: Arial, sans-serif;
+        }
+
+        .player-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        #broadcast-player {
+            width: 100%;
+            height: 100%;
+        }
+
+        .video-js {
+            width: 100vw !important;
+            height: 100vh !important;
+        }
+
+        /* 一图流模式 */
+        .oneimage-mode {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: #000;
+            z-index: 9999;
+            overflow: hidden;
+        }
+
+        .oneimage-mode.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .oneimage-mode img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        /* 强制全屏覆盖 */
+        .fullscreen-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 10000;
+            color: white;
+            padding: 20px;
+        }
+
+        .fullscreen-overlay.active {
+            display: block;
+        }
+
+        .broadcast-message {
+            text-align: center;
+            padding: 40px;
+        }
+
+        .broadcast-message h1 {
+            font-size: 48px;
+            margin-bottom: 30px;
+            color: #ff0000;
+            text-shadow: 0 0 20px rgba(255, 0, 0, 0.5);
+        }
+
+        .broadcast-message p {
+            font-size: 24px;
+            line-height: 1.6;
+        }
+
+        .level-badge {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-weight: bold;
+            font-size: 18px;
+        }
+
+        .level-0 { background: #28a745; }
+        .level-1 { background: #ffc107; }
+        .level-2 { background: #fd7e14; }
+        .level-3 { background: #dc3545; animation: pulse 1s infinite; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .close-button {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            padding: 10px 20px;
+            background: #fff;
+            color: #000;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            display: none;
+        }
+
+        .close-button.can-close {
+            display: block;
+        }
+
+        .close-button:hover {
+            background: #ddd;
+        }
+
+        /* 重连提示 */
+        .reconnecting-indicator {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 193, 7, 0.9);
+            color: #000;
+            padding: 10px 20px;
+            border-radius: 5px;
+            display: none;
+            z-index: 10001;
+        }
+
+        .reconnecting-indicator.active {
+            display: block;
+        }
+
+        /* 禁用右键菜单和选择（Level 3） */
+        .no-interaction {
+            user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            pointer-events: none;
+        }
+
+        .no-interaction .close-button {
+            pointer-events: auto;
+        }
+    </style>
+</head>
+<body>
+    <!-- 视频播放器 -->
+    <div class="player-container">
+        <video id="broadcast-player" class="video-js vjs-default-skin vjs-big-play-centered" controls preload="auto">
+            <p class="vjs-no-js">
+                To view this video please enable JavaScript, and consider upgrading to a web browser that
+                <a href="https://videojs.com/html5-video-support/" target="_blank">supports HTML5 video</a>
+            </p>
+        </video>
+    </div>
+
+    <!-- 一图流模式 -->
+    <div id="oneimage-mode" class="oneimage-mode">
+        <img id="oneimage-content" src="" alt="广播图片">
+    </div>
+
+    <!-- 全屏消息覆盖 -->
+    <div id="fullscreen-overlay" class="fullscreen-overlay">
+        <button id="close-button" class="close-button">
+            <i class="bi bi-x-circle"></i> 关闭广播
+        </button>
+        <div id="level-badge" class="level-badge"></div>
+        <div class="broadcast-message">
+            <h1 id="broadcast-title"></h1>
+            <p id="broadcast-content"></p>
+        </div>
+    </div>
+
+    <!-- 重连提示 -->
+    <div id="reconnecting-indicator" class="reconnecting-indicator">
+        <i class="bi bi-arrow-repeat"></i> 正在重连...
+    </div>
+
+    <!-- Video.js -->
+    <script src="https://vjs.zencdn.net/8.6.1/video.min.js"></script>
+
+    <!-- Socket.IO -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+
+    <script>
+        // 初始化播放器
+        const player = videojs('broadcast-player', {
+            fluid: true,
+            autoplay: true,
+            controls: true,
+            preload: 'auto',
+            liveui: true,
+            html5: {
+                vhs: {
+                    overrideNative: true
+                },
+                nativeVideoTracks: false,
+                nativeAudioTracks: false,
+                nativeTextTracks: false
+            }
+        });
+
+        // WebSocket连接
+        const socket = io('http://localhost:5000');
+        let currentBroadcast = null;
+        let canClose = true;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 10;
+
+        socket.on('connect', () => {
+            console.log('✅ 已连接到广播服务器');
+            document.getElementById('reconnecting-indicator').classList.remove('active');
+            reconnectAttempts = 0;
+        });
+
+        socket.on('disconnect', () => {
+            console.log('❌ 与广播服务器断开连接');
+            document.getElementById('reconnecting-indicator').classList.add('active');
+            attemptReconnect();
+        });
+
+        function attemptReconnect() {
+            if (reconnectAttempts < maxReconnectAttempts) {
+                reconnectAttempts++;
+                setTimeout(() => {
+                    socket.connect();
+                }, 3000);
+            }
+        }
+
+        // 接收广播通知
+        socket.on('broadcast_start', (data) => {
+            console.log('📡 收到广播通知:', data);
+            currentBroadcast = data;
+            handleBroadcast(data);
+        });
+
+        // 一图流广播
+        socket.on('oneimage_broadcast', (data) => {
+            console.log('🖼️ 收到一图流广播:', data);
+            currentBroadcast = data;
+            handleOneImageBroadcast(data);
+        });
+
+        // 设备劫持指令
+        socket.on('hijack_device', (data) => {
+            console.log('⚠️ 收到设备劫持指令:', data);
+            handleDeviceHijack(data);
+        });
+
+        // 广播停止
+        socket.on('broadcast_stop', (data) => {
+            console.log('🛑 广播已停止');
+            stopBroadcast();
+        });
+
+        function handleBroadcast(data) {
+            const { broadcast_id, title, level, hls_url, permissions } = data;
+
+            // 更新权限
+            canClose = permissions?.can_close !== false;
+            updateCloseButton();
+
+            // 设置等级徽章
+            const levelBadge = document.getElementById('level-badge');
+            levelBadge.textContent = `Level ${level}`;
+            levelBadge.className = `level-badge level-${level}`;
+
+            // 如果有HLS流，加载播放
+            if (hls_url) {
+                player.src({
+                    src: hls_url,
+                    type: 'application/x-mpegURL'
+                });
+                player.play();
+
+                // Level 2+ 自动全屏
+                if (level >= 2) {
+                    enterFullscreen();
+                }
+
+                // Level 3 禁用交互
+                if (level >= 3) {
+                    document.body.classList.add('no-interaction');
+                    disableKeyboardShortcuts();
+                }
+            }
+
+            // 显示广播标题
+            document.getElementById('broadcast-title').textContent = title;
+            if (data.content) {
+                document.getElementById('broadcast-content').textContent = data.content;
+                document.getElementById('fullscreen-overlay').classList.add('active');
+            }
+        }
+
+        function handleOneImageBroadcast(data) {
+            const { image_url, title, level, duration, permissions } = data;
+
+            // 更新权限
+            canClose = permissions?.can_close !== false;
+            updateCloseButton();
+
+            // 显示一图流
+            document.getElementById('oneimage-content').src = image_url;
+            document.getElementById('oneimage-mode').classList.add('active');
+
+            // Level 3 禁用所有交互
+            if (level >= 3) {
+                document.body.classList.add('no-interaction');
+                disableKeyboardShortcuts();
+                disableRightClick();
+            }
+
+            // 如果设置了持续时间，自动关闭
+            if (duration > 0) {
+                setTimeout(() => {
+                    if (canClose) {
+                        stopBroadcast();
+                    }
+                }, duration * 1000);
+            }
+        }
+
+        function handleDeviceHijack(data) {
+            const { hijack_type } = data;
+
+            switch (hijack_type) {
+                case 'oneimage':
+                    // 已通过oneimage_broadcast处理
+                    break;
+                case 'kiosk':
+                    enterKioskMode();
+                    break;
+                case 'dns':
+                    // DNS劫持由网络层处理，客户端无需操作
+                    console.log('🌐 DNS劫持已激活');
+                    break;
+            }
+        }
+
+        function enterFullscreen() {
+            const elem = document.documentElement;
+            if (elem.requestFullscreen) {
+                elem.requestFullscreen();
+            } else if (elem.webkitRequestFullscreen) {
+                elem.webkitRequestFullscreen();
+            } else if (elem.msRequestFullscreen) {
+                elem.msRequestFullscreen();
+            }
+        }
+
+        function enterKioskMode() {
+            // 进入Kiosk模式（浏览器全屏锁定）
+            enterFullscreen();
+            disableKeyboardShortcuts();
+            disableRightClick();
+            document.body.classList.add('no-interaction');
+
+            // 尝试锁定方向（移动设备）
+            if (screen.orientation && screen.orientation.lock) {
+                screen.orientation.lock('landscape').catch(e => {
+                    console.log('无法锁定屏幕方向:', e);
+                });
+            }
+        }
+
+        function disableKeyboardShortcuts() {
+            // 禁用常见的退出快捷键
+            document.addEventListener('keydown', (e) => {
+                if (!canClose) {
+                    // 禁用 ESC, F11, Alt+F4, Ctrl+W, Ctrl+Q
+                    if (e.key === 'Escape' || e.key === 'F11' ||
+                        (e.altKey && e.key === 'F4') ||
+                        (e.ctrlKey && (e.key === 'w' || e.key === 'q'))) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return false;
+                    }
+                }
+            }, true);
+        }
+
+        function disableRightClick() {
+            document.addEventListener('contextmenu', (e) => {
+                if (!canClose) {
+                    e.preventDefault();
+                    return false;
+                }
+            });
+        }
+
+        function updateCloseButton() {
+            const closeButton = document.getElementById('close-button');
+            if (canClose) {
+                closeButton.classList.add('can-close');
+            } else {
+                closeButton.classList.remove('can-close');
+            }
+        }
+
+        function stopBroadcast() {
+            // 停止播放
+            player.pause();
+            player.src('');
+
+            // 隐藏覆盖层
+            document.getElementById('fullscreen-overlay').classList.remove('active');
+            document.getElementById('oneimage-mode').classList.remove('active');
+
+            // 恢复交互
+            document.body.classList.remove('no-interaction');
+
+            // 退出全屏
+            if (document.exitFullscreen) {
+                document.exitFullscreen();
+            } else if (document.webkitExitFullscreen) {
+                document.webkitExitFullscreen();
+            } else if (document.msExitFullscreen) {
+                document.msExitFullscreen();
+            }
+
+            currentBroadcast = null;
+            canClose = true;
+        }
+
+        // 关闭按钮点击
+        document.getElementById('close-button').addEventListener('click', () => {
+            if (canClose) {
+                stopBroadcast();
+            }
+        });
+
+        // 页面卸载时断开连接
+        window.addEventListener('beforeunload', () => {
+            socket.disconnect();
+        });
+
+        // 监听全屏变化
+        document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement && currentBroadcast && currentBroadcast.level >= 2) {
+                // Level 2+ 自动重新进入全屏
+                setTimeout(enterFullscreen, 1000);
+            }
+        });
+
+        console.log('📻 HIDRS 全球广播播放器已就绪');
+    </script>
+</body>
+</html>

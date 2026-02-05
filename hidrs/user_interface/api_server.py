@@ -176,6 +176,10 @@ class ApiServer:
         def global_broadcast_page():
             return render_template('global_broadcast.html')
 
+        @self.app.route('/broadcast-player')
+        def broadcast_player_page():
+            return render_template('broadcast_player.html')
+
         # API路由
         @self.app.route('/api/search', methods=['GET'])
         def api_search():
@@ -923,6 +927,133 @@ class ApiServer:
                 return jsonify(stats)
             except Exception as e:
                 logger.error(f"Get stats error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        # ===== RTMP推流管理 API =====
+        @self.app.route('/api/broadcast/rtmp/auth', methods=['POST'])
+        def api_rtmp_auth():
+            """RTMP推流认证（nginx-rtmp回调）"""
+            try:
+                plugin = self.plugin_manager.get_plugin('GlobalBroadcast')
+                if not plugin:
+                    return '', 403
+
+                # nginx-rtmp会通过POST发送认证请求
+                stream_name = request.form.get('name', '')
+                stream_key = request.args.get('key', '')
+                remote_addr = request.remote_addr
+
+                if plugin.rtmp_auth(stream_name, stream_key, remote_addr):
+                    return '', 200  # 认证成功
+                else:
+                    return '', 403  # 认证失败
+            except Exception as e:
+                logger.error(f"RTMP auth error: {e}")
+                return '', 500
+
+        @self.app.route('/api/broadcast/rtmp/start', methods=['POST'])
+        def api_rtmp_publish_start():
+            """RTMP推流开始回调（nginx-rtmp回调）"""
+            try:
+                plugin = self.plugin_manager.get_plugin('GlobalBroadcast')
+                if not plugin:
+                    return '', 200
+
+                stream_name = request.form.get('name', '')
+                remote_addr = request.remote_addr
+
+                plugin.rtmp_publish_start(stream_name, remote_addr)
+                return '', 200
+            except Exception as e:
+                logger.error(f"RTMP publish start error: {e}")
+                return '', 500
+
+        @self.app.route('/api/broadcast/rtmp/stop', methods=['POST'])
+        def api_rtmp_publish_done():
+            """RTMP推流结束回调（nginx-rtmp回调）"""
+            try:
+                plugin = self.plugin_manager.get_plugin('GlobalBroadcast')
+                if not plugin:
+                    return '', 200
+
+                stream_name = request.form.get('name', '')
+                remote_addr = request.remote_addr
+
+                plugin.rtmp_publish_done(stream_name, remote_addr)
+                return '', 200
+            except Exception as e:
+                logger.error(f"RTMP publish done error: {e}")
+                return '', 500
+
+        @self.app.route('/api/broadcast/hls/urls', methods=['GET'])
+        def api_get_hls_urls():
+            """获取HLS播放地址"""
+            try:
+                plugin = self.plugin_manager.get_plugin('GlobalBroadcast')
+                if not plugin:
+                    return jsonify({'error': 'Global Broadcast plugin not loaded'}), 400
+
+                broadcast_id = request.args.get('broadcast_id')
+                result = plugin.get_hls_urls(broadcast_id)
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Get HLS URLs error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/broadcast/stream-key/generate', methods=['POST'])
+        def api_generate_stream_key():
+            """生成新的推流密钥"""
+            try:
+                plugin = self.plugin_manager.get_plugin('GlobalBroadcast')
+                if not plugin:
+                    return jsonify({'error': 'Global Broadcast plugin not loaded'}), 400
+
+                stream_key = plugin.generate_stream_key()
+                return jsonify({
+                    'success': True,
+                    'stream_key': stream_key,
+                    'rtmp_url': f'rtmp://localhost:1935/live/emergency?key={stream_key}'
+                })
+            except Exception as e:
+                logger.error(f"Generate stream key error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        # ===== 一图流广播 API =====
+        @self.app.route('/api/broadcast/oneimage/set', methods=['POST'])
+        def api_set_oneimage_broadcast():
+            """设置一图流广播"""
+            try:
+                plugin = self.plugin_manager.get_plugin('GlobalBroadcast')
+                if not plugin:
+                    return jsonify({'error': 'Global Broadcast plugin not loaded'}), 400
+
+                data = request.get_json()
+                result = plugin.set_oneimage_broadcast(
+                    image_url=data.get('image_url', ''),
+                    title=data.get('title', '一图流广播'),
+                    duration=int(data.get('duration', 0))
+                )
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Set oneimage broadcast error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/broadcast/hijack/activate', methods=['POST'])
+        def api_activate_hijack_mode():
+            """激活设备劫持模式"""
+            try:
+                plugin = self.plugin_manager.get_plugin('GlobalBroadcast')
+                if not plugin:
+                    return jsonify({'error': 'Global Broadcast plugin not loaded'}), 400
+
+                data = request.get_json()
+                result = plugin.activate_hijack_mode(
+                    target_clients=data.get('target_clients'),
+                    hijack_type=data.get('hijack_type', 'oneimage')
+                )
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Activate hijack mode error: {e}")
                 return jsonify({'error': str(e)}), 500
 
     def start(self, host='0.0.0.0', port=5000, debug=False):

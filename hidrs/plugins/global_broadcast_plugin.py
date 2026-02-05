@@ -509,3 +509,274 @@ class GlobalBroadcastPlugin(PluginBase):
         if 'broadcast_id' in message:
             client.current_broadcast = message['broadcast_id']
             client.status = 'playing'
+
+    # ===== RTMP推流管理 =====
+
+    def rtmp_auth(self, stream_name: str, stream_key: str, remote_addr: str) -> bool:
+        """RTMP推流认证"""
+        try:
+            # 验证stream_key（应该从配置或数据库读取）
+            valid_keys = self.get_config().get('stream_keys', ['emergency_key_2026'])
+
+            if stream_key not in valid_keys:
+                logger.warning(f"[{self.name}] ❌ RTMP认证失败: 无效的stream_key from {remote_addr}")
+                return False
+
+            logger.info(f"[{self.name}] ✅ RTMP认证成功: {stream_name} from {remote_addr}")
+            return True
+        except Exception as e:
+            logger.error(f"[{self.name}] RTMP认证异常: {e}")
+            return False
+
+    def rtmp_publish_start(self, stream_name: str, remote_addr: str) -> Dict:
+        """RTMP推流开始回调"""
+        try:
+            broadcast_id = f"rtmp_{stream_name}_{int(time.time())}"
+
+            # 创建广播会话
+            session = BroadcastSession(
+                broadcast_id=broadcast_id,
+                title=f"直播流: {stream_name}",
+                level=2,  # 默认紧急级别
+                mode='live' if not self.simulation_mode else 'simulation'
+            )
+            session.metadata = {
+                'type': 'rtmp_stream',
+                'stream_name': stream_name,
+                'rtmp_url': f"rtmp://localhost:1935/live/{stream_name}",
+                'hls_url': f"http://localhost:8080/hls/{stream_name}.m3u8",
+                'remote_addr': remote_addr
+            }
+
+            self.active_broadcasts[broadcast_id] = session
+
+            logger.info(f"[{self.name}] 📡 RTMP推流已开始: {stream_name} (broadcast_id: {broadcast_id})")
+
+            if self.simulation_mode:
+                self.simulation_log.append({
+                    'action': 'rtmp_publish_start',
+                    'stream_name': stream_name,
+                    'broadcast_id': broadcast_id,
+                    'timestamp': datetime.now().isoformat()
+                })
+
+            return {
+                'success': True,
+                'broadcast_id': broadcast_id,
+                'hls_url': session.metadata['hls_url']
+            }
+        except Exception as e:
+            logger.error(f"[{self.name}] RTMP推流开始失败: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def rtmp_publish_done(self, stream_name: str, remote_addr: str) -> Dict:
+        """RTMP推流结束回调"""
+        try:
+            # 查找对应的广播会话
+            for broadcast_id, session in self.active_broadcasts.items():
+                if session.metadata.get('stream_name') == stream_name:
+                    session.end_time = time.time()
+                    session.status = 'ended'
+                    self.broadcast_history.append(session.to_dict())
+                    del self.active_broadcasts[broadcast_id]
+
+                    logger.info(f"[{self.name}] 📡 RTMP推流已结束: {stream_name}")
+
+                    if self.simulation_mode:
+                        self.simulation_log.append({
+                            'action': 'rtmp_publish_done',
+                            'stream_name': stream_name,
+                            'broadcast_id': broadcast_id,
+                            'timestamp': datetime.now().isoformat()
+                        })
+
+                    return {'success': True, 'broadcast_id': broadcast_id}
+
+            logger.warning(f"[{self.name}] 未找到对应的广播会话: {stream_name}")
+            return {'success': False, 'error': '未找到对应的广播会话'}
+        except Exception as e:
+            logger.error(f"[{self.name}] RTMP推流结束失败: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def get_hls_urls(self, broadcast_id: str = None) -> Dict:
+        """获取HLS播放地址"""
+        if broadcast_id and broadcast_id in self.active_broadcasts:
+            session = self.active_broadcasts[broadcast_id]
+            return {
+                'success': True,
+                'broadcast_id': broadcast_id,
+                'hls_url': session.metadata.get('hls_url'),
+                'rtmp_url': session.metadata.get('rtmp_url')
+            }
+
+        # 返回所有活跃流
+        urls = {}
+        for bid, session in self.active_broadcasts.items():
+            if session.metadata.get('type') == 'rtmp_stream':
+                urls[bid] = {
+                    'stream_name': session.metadata.get('stream_name'),
+                    'hls_url': session.metadata.get('hls_url'),
+                    'rtmp_url': session.metadata.get('rtmp_url')
+                }
+
+        return {'success': True, 'streams': urls}
+
+    # ===== 一图流强制广播 =====
+
+    def set_oneimage_broadcast(self, image_url: str, title: str = "一图流广播", duration: int = 0) -> Dict:
+        """设置一图流强制广播
+
+        Args:
+            image_url: 图片URL或本地路径
+            title: 广播标题
+            duration: 持续时间（秒），0表示持续到手动停止
+        """
+        try:
+            broadcast_id = f"oneimage_{int(time.time())}"
+
+            # 创建一图流广播会话
+            session = BroadcastSession(
+                broadcast_id=broadcast_id,
+                title=title,
+                level=3,  # 最高级别
+                mode='live' if not self.simulation_mode else 'simulation'
+            )
+            session.metadata = {
+                'type': 'oneimage',
+                'image_url': image_url,
+                'duration': duration
+            }
+
+            self.active_broadcasts[broadcast_id] = session
+
+            # 准备广播消息
+            broadcast_message = {
+                'action': 'oneimage_broadcast',
+                'broadcast_id': broadcast_id,
+                'title': title,
+                'level': 3,
+                'image_url': image_url,
+                'duration': duration,
+                'timestamp': datetime.now().isoformat(),
+                'permissions': {
+                    'can_close': False,
+                    'can_mute': False,
+                    'can_minimize': False
+                }
+            }
+
+            if self.simulation_mode:
+                # 模拟模式：不实际发送，只记录日志
+                self.simulation_log.append({
+                    'action': 'set_oneimage_broadcast',
+                    'broadcast': broadcast_message,
+                    'simulated_clients': len(self.connected_clients),
+                    'timestamp': datetime.now().isoformat()
+                })
+                logger.warning(f"[{self.name}] 🎭 模拟模式：一图流广播未实际发送")
+                return {
+                    'success': True,
+                    'mode': 'simulation',
+                    'broadcast_id': broadcast_id,
+                    'message': '模拟模式：一图流广播已记录到日志'
+                }
+
+            # 测试模式：只发送给白名单IP
+            if self.test_mode:
+                eligible_clients = self._get_eligible_test_clients()
+                logger.info(f"[{self.name}] 🧪 测试模式：一图流广播发送给 {len(eligible_clients)} 个客户端")
+
+                for client_id in eligible_clients:
+                    self._send_to_client(client_id, broadcast_message)
+                    session.connected_clients.add(client_id)
+
+                return {
+                    'success': True,
+                    'mode': 'test',
+                    'broadcast_id': broadcast_id,
+                    'clients_notified': len(eligible_clients)
+                }
+
+            # 正式模式：发送给所有客户端
+            for client_id in self.connected_clients.keys():
+                self._send_to_client(client_id, broadcast_message)
+                session.connected_clients.add(client_id)
+
+            logger.info(f"[{self.name}] 🖼️ 一图流广播已激活: {title} -> {len(session.connected_clients)} 客户端")
+
+            return {
+                'success': True,
+                'mode': 'live',
+                'broadcast_id': broadcast_id,
+                'clients_notified': len(session.connected_clients)
+            }
+
+        except Exception as e:
+            logger.error(f"[{self.name}] 设置一图流广播失败: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def activate_hijack_mode(self, target_clients: List[str] = None, hijack_type: str = 'oneimage') -> Dict:
+        """激活设备劫持模式
+
+        Args:
+            target_clients: 目标客户端列表，None表示全部
+            hijack_type: 劫持类型 ('oneimage', 'kiosk', 'dns')
+        """
+        try:
+            if self.simulation_mode:
+                self.simulation_log.append({
+                    'action': 'activate_hijack_mode',
+                    'hijack_type': hijack_type,
+                    'target_clients': len(target_clients) if target_clients else len(self.connected_clients),
+                    'timestamp': datetime.now().isoformat()
+                })
+                logger.warning(f"[{self.name}] 🎭 模拟模式：设备劫持未实际执行")
+                return {
+                    'success': True,
+                    'mode': 'simulation',
+                    'message': '模拟模式：设备劫持已记录到日志'
+                }
+
+            # 准备劫持指令
+            hijack_command = {
+                'action': 'hijack_device',
+                'hijack_type': hijack_type,
+                'timestamp': datetime.now().isoformat()
+            }
+
+            clients_to_hijack = target_clients if target_clients else list(self.connected_clients.keys())
+
+            # 测试模式过滤
+            if self.test_mode:
+                eligible_clients = self._get_eligible_test_clients()
+                clients_to_hijack = [c for c in clients_to_hijack if c in eligible_clients]
+                logger.info(f"[{self.name}] 🧪 测试模式：设备劫持仅应用于 {len(clients_to_hijack)} 个白名单客户端")
+
+            # 发送劫持指令
+            for client_id in clients_to_hijack:
+                self._send_to_client(client_id, hijack_command)
+
+            logger.warning(f"[{self.name}] ⚠️ 设备劫持模式已激活: {hijack_type} -> {len(clients_to_hijack)} 客户端")
+
+            return {
+                'success': True,
+                'hijack_type': hijack_type,
+                'clients_hijacked': len(clients_to_hijack)
+            }
+
+        except Exception as e:
+            logger.error(f"[{self.name}] 激活设备劫持失败: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def generate_stream_key(self) -> str:
+        """生成推流密钥"""
+        import hashlib
+        import secrets
+
+        # 生成随机密钥
+        random_bytes = secrets.token_bytes(32)
+        timestamp = str(int(time.time()))
+        data = random_bytes + timestamp.encode()
+
+        stream_key = hashlib.sha256(data).hexdigest()[:32]
+        return stream_key
