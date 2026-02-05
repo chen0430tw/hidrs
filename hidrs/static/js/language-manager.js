@@ -69,6 +69,9 @@ const translations = {
         'plugins.empty.title': '暂无插件',
         'plugins.empty.message': '请在 plugins/ 目录下添加插件文件',
 
+        // 本地文件搜索
+        'nav.local-files': '本地文件',
+
         // 通用
         'common.loading': '加载中...',
         'common.error': '错误',
@@ -146,6 +149,9 @@ const translations = {
         'plugins.stats.available': 'Available',
         'plugins.empty.title': 'No Plugins',
         'plugins.empty.message': 'Please add plugin files to the plugins/ directory',
+
+        // Local File Search
+        'nav.local-files': 'Local Files',
 
         // Common
         'common.loading': 'Loading...',

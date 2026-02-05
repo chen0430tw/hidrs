@@ -152,6 +152,10 @@ class ApiServer:
         def plugins_page():
             return render_template('plugins.html')
 
+        @self.app.route('/local-files')
+        def local_files_page():
+            return render_template('local_files.html')
+
         # API路由
         @self.app.route('/api/search', methods=['GET'])
         def api_search():
@@ -418,6 +422,101 @@ class ApiServer:
                 return jsonify({'success': True, 'message': f'Plugin {plugin_name} config saved successfully'})
             except Exception as e:
                 return jsonify({'success': False, 'error': str(e)}), 500
+
+        # 本地文件搜索API
+        @self.app.route('/api/local-file/search', methods=['POST'])
+        def api_local_file_search():
+            """本地文件搜索"""
+            try:
+                data = request.json
+                pattern = data.get('pattern', '')
+                limit = data.get('limit', 100)
+
+                plugin = self.plugin_manager.get_plugin('LocalFileSearch')
+                if not plugin:
+                    return jsonify({'error': 'Local file search plugin not loaded'}), 400
+
+                results = plugin.search_files(pattern, limit)
+                return jsonify({'success': True, 'results': results})
+            except Exception as e:
+                logger.error(f"File search error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/local-file/rebuild-index', methods=['POST'])
+        def api_rebuild_index():
+            """重建文件索引"""
+            try:
+                data = request.json
+                max_files = data.get('max_files')
+
+                plugin = self.plugin_manager.get_plugin('LocalFileSearch')
+                if not plugin:
+                    return jsonify({'error': 'Local file search plugin not loaded'}), 400
+
+                result = plugin.rebuild_index(max_files)
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Rebuild index error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/local-file/create-baseline', methods=['POST'])
+        def api_create_baseline():
+            """创建基线快照"""
+            try:
+                plugin = self.plugin_manager.get_plugin('LocalFileSearch')
+                if not plugin:
+                    return jsonify({'error': 'Local file search plugin not loaded'}), 400
+
+                result = plugin.create_baseline()
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Create baseline error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/local-file/diagnose-space-leak', methods=['POST'])
+        def api_diagnose_space_leak():
+            """诊断空间泄漏"""
+            try:
+                plugin = self.plugin_manager.get_plugin('LocalFileSearch')
+                if not plugin:
+                    return jsonify({'error': 'Local file search plugin not loaded'}), 400
+
+                result = plugin.diagnose_space_leak()
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Diagnose space leak error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/local-file/find-duplicates', methods=['POST'])
+        def api_find_duplicates():
+            """查找重复文件"""
+            try:
+                data = request.json
+                min_size_mb = data.get('min_size_mb', 1)
+
+                plugin = self.plugin_manager.get_plugin('LocalFileSearch')
+                if not plugin:
+                    return jsonify({'error': 'Local file search plugin not loaded'}), 400
+
+                result = plugin.find_duplicates(min_size_mb)
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Find duplicates error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/local-file/stats', methods=['GET'])
+        def api_local_file_stats():
+            """获取磁盘统计信息"""
+            try:
+                plugin = self.plugin_manager.get_plugin('LocalFileSearch')
+                if not plugin:
+                    return jsonify({'error': 'Local file search plugin not loaded'}), 400
+
+                result = plugin.get_disk_stats()
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Get stats error: {e}")
+                return jsonify({'error': str(e)}), 500
 
     def start(self, host='0.0.0.0', port=5000, debug=False):
         """启动API服务器"""

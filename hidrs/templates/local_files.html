@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-i18n="nav.local-files">本地文件搜索 - HIDRS</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <link href="/static/css/theme-styles.css" rel="stylesheet">
+    <link href="/static/css/backgrounds.css" rel="stylesheet">
+    <style>
+        .local-files-container {
+            max-width: 1400px;
+            margin: 60px auto 40px;
+            padding: 20px;
+        }
+
+        .tab-panel {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .stats-card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .stats-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+
+        .stats-label {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+
+        .file-result {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-left: 4px solid var(--primary-color);
+        }
+
+        .file-name {
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+
+        .file-path {
+            font-family: 'Courier New', monospace;
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+
+        .file-meta {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            margin-top: 5px;
+        }
+
+        .culprit-card {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .duplicate-group {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-left: 4px solid #dc3545;
+        }
+
+        .progress-message {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-muted);
+        }
+
+        .progress-message i {
+            font-size: 3rem;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-diagram-3"></i> HIDRS
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/" data-i18n="nav.home">首页</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/search" data-i18n="nav.search">搜索</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/network" data-i18n="nav.network">网络拓扑</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/dashboard" data-i18n="nav.dashboard">仪表盘</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/feedback" data-i18n="nav.feedback">决策反馈</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/plugins" data-i18n="nav.plugins">插件管理</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/local-files" data-i18n="nav.local-files">本地文件</a>
+                    </li>
+                </ul>
+
+                <!-- 设置菜单 -->
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="settingsDropdown" data-bs-toggle="dropdown">
+                            <i class="bi bi-gear"></i> <span data-i18n="settings.title">设置</span>
+                        </a>
+                        <div class="dropdown-menu dropdown-menu-end settings-dropdown p-3" style="width: 280px;">
+                            <!-- 主题设置 -->
+                            <label class="form-label" data-i18n="settings.theme">主题</label>
+                            <select id="theme-selector" class="form-select form-select-sm mb-3">
+                                <option value="theme-default" data-i18n="settings.theme.default">默认主题</option>
+                                <option value="theme-dark" data-i18n="settings.theme.dark">深色主题</option>
+                                <option value="theme-blue" data-i18n="settings.theme.blue">蓝色主题</option>
+                                <option value="theme-purple" data-i18n="settings.theme.purple">紫色主题</option>
+                                <option value="theme-green" data-i18n="settings.theme.green">绿色主题</option>
+                            </select>
+
+                            <!-- 背景设置 -->
+                            <label class="form-label" data-i18n="settings.background">背景</label>
+                            <div class="bg-options mb-3">
+                                <div class="bg-option active" data-bg="bg-image-none"><i class="bi bi-x-lg"></i></div>
+                                <div class="bg-option" data-bg="bg-image-anime1"></div>
+                                <div class="bg-option" data-bg="bg-image-anime2"></div>
+                                <div class="bg-option" data-bg="bg-image-abstract"></div>
+                                <div class="bg-option" data-bg="bg-image-tech"></div>
+                                <div class="bg-option" data-bg="bg-image-custom"><i class="bi bi-upload"></i></div>
+                            </div>
+                            <input type="file" id="custom-bg-upload" accept="image/*" style="display: none;">
+
+                            <!-- 透明度 -->
+                            <label class="form-label" data-i18n="settings.opacity">透明度</label>
+                            <div class="opacity-options mb-3">
+                                <div class="opacity-option active" data-opacity="content-opacity-100">100</div>
+                                <div class="opacity-option" data-opacity="content-opacity-90">90</div>
+                                <div class="opacity-option" data-opacity="content-opacity-80">80</div>
+                                <div class="opacity-option" data-opacity="content-opacity-70">70</div>
+                            </div>
+
+                            <!-- 毛玻璃效果 -->
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="glass-effect-toggle">
+                                <label class="form-check-label" for="glass-effect-toggle" data-i18n="settings.glass-effect">毛玻璃效果</label>
+                            </div>
+
+                            <hr class="my-3">
+
+                            <!-- 语言切换 -->
+                            <label class="form-label" data-i18n="settings.language">语言</label>
+                            <div class="btn-group w-100" role="group">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-lang="zh">中文</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-lang="en">English</button>
+                            </div>
+                        </div>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主内容 -->
+    <div class="local-files-container">
+        <h1 class="mb-4"><i class="bi bi-hdd"></i> 本地文件搜索与分析</h1>
+
+        <!-- 统计信息 -->
+        <div class="row mb-4" id="statsRow" style="display: none;">
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <div class="stats-value" id="totalFiles">0</div>
+                    <div class="stats-label">总文件数</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <div class="stats-value" id="totalSize">0 GB</div>
+                    <div class="stats-label">总大小</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <div class="stats-value" id="largestType">-</div>
+                    <div class="stats-label">最大类型</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <button class="btn btn-primary btn-sm" onclick="refreshStats()">
+                        <i class="bi bi-arrow-clockwise"></i> 刷新统计
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 选项卡 -->
+        <ul class="nav nav-tabs" id="featureTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="search-tab" data-bs-toggle="tab" data-bs-target="#search" type="button">
+                    <i class="bi bi-search"></i> 文件搜索
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="space-tab" data-bs-toggle="tab" data-bs-target="#space" type="button">
+                    <i class="bi bi-pie-chart"></i> 空间诊断
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="duplicates-tab" data-bs-toggle="tab" data-bs-target="#duplicates" type="button">
+                    <i class="bi bi-files"></i> 重复文件
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="index-tab" data-bs-toggle="tab" data-bs-target="#index" type="button">
+                    <i class="bi bi-database"></i> 索引管理
+                </button>
+            </li>
+        </ul>
+
+        <!-- 选项卡内容 -->
+        <div class="tab-content" id="featureTabContent">
+            <!-- 文件搜索 -->
+            <div class="tab-pane fade show active" id="search" role="tabpanel">
+                <div class="tab-panel">
+                    <h4><i class="bi bi-search"></i> 文件搜索</h4>
+                    <div class="input-group mb-3">
+                        <input type="text" class="form-control" id="search-pattern"
+                               placeholder="输入文件名或正则表达式（如：.*\.log$）">
+                        <input type="number" class="form-control" style="max-width: 120px;" id="search-limit"
+                               value="100" placeholder="结果数量">
+                        <button class="btn btn-primary" onclick="searchFiles()">
+                            <i class="bi bi-search"></i> 搜索
+                        </button>
+                    </div>
+
+                    <div id="search-results"></div>
+                </div>
+            </div>
+
+            <!-- 空间诊断 -->
+            <div class="tab-pane fade" id="space" role="tabpanel">
+                <div class="tab-panel">
+                    <h4><i class="bi bi-pie-chart"></i> 磁盘空间泄漏诊断</h4>
+                    <div class="alert alert-info">
+                        <strong>使用说明:</strong>
+                        <ol>
+                            <li>清理磁盘前，点击"创建基线快照"</li>
+                            <li>清理磁盘后，等待一段时间（建议1-2小时）</li>
+                            <li>点击"执行诊断"查看空间回填原因</li>
+                        </ol>
+                    </div>
+
+                    <div class="btn-group mb-3">
+                        <button class="btn btn-success" onclick="createBaseline()">
+                            <i class="bi bi-camera"></i> 创建基线快照
+                        </button>
+                        <button class="btn btn-danger" onclick="diagnoseSpaceLeak()">
+                            <i class="bi bi-search"></i> 执行诊断
+                        </button>
+                    </div>
+
+                    <div id="space-leak-report"></div>
+                </div>
+            </div>
+
+            <!-- 重复文件 -->
+            <div class="tab-pane fade" id="duplicates" role="tabpanel">
+                <div class="tab-panel">
+                    <h4><i class="bi bi-files"></i> 重复文件检测</h4>
+                    <div class="input-group mb-3">
+                        <span class="input-group-text">最小文件大小 (MB)</span>
+                        <input type="number" class="form-control" id="duplicate-min-size" value="1">
+                        <button class="btn btn-primary" onclick="findDuplicates()">
+                            <i class="bi bi-search"></i> 查找重复文件
+                        </button>
+                    </div>
+
+                    <div id="duplicate-results"></div>
+                </div>
+            </div>
+
+            <!-- 索引管理 -->
+            <div class="tab-pane fade" id="index" role="tabpanel">
+                <div class="tab-panel">
+                    <h4><i class="bi bi-database"></i> 文件索引管理</h4>
+                    <p>重建索引将扫描整个文件系统，可能需要几分钟到几小时（取决于文件数量）。</p>
+
+                    <div class="input-group mb-3">
+                        <span class="input-group-text">最大文件数（可选，留空扫描全部）</span>
+                        <input type="number" class="form-control" id="max-files" placeholder="留空扫描全部">
+                        <button class="btn btn-warning" onclick="rebuildIndex()">
+                            <i class="bi bi-arrow-clockwise"></i> 重建索引
+                        </button>
+                    </div>
+
+                    <div id="index-status"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading overlay -->
+    <div id="loadingOverlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; align-items: center; justify-content: center;">
+        <div class="text-center text-light">
+            <div class="spinner-border mb-3" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <div id="loadingMessage">处理中...</div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="/static/js/theme-manager.js"></script>
+    <script src="/static/js/language-manager.js"></script>
+    <script>
+        // API辅助函数
+        async function apiCall(url, options = {}) {
+            const response = await fetch(url, options);
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+                throw new Error(errorData.error || `HTTP ${response.status}`);
+            }
+            return response.json();
+        }
+
+        // 加载统计信息
+        async function refreshStats() {
+            try {
+                const data = await apiCall('/api/local-file/stats');
+
+                if (data.error) {
+                    document.getElementById('statsRow').style.display = 'none';
+                    return;
+                }
+
+                document.getElementById('totalFiles').textContent = data.total_files.toLocaleString();
+                document.getElementById('totalSize').textContent = (data.total_size_mb / 1024).toFixed(2) + ' GB';
+                document.getElementById('largestType').textContent = data.by_extension[0]?.extension || '-';
+                document.getElementById('statsRow').style.display = 'flex';
+            } catch (error) {
+                console.error('Failed to load stats:', error);
+            }
+        }
+
+        // 搜索文件
+        async function searchFiles() {
+            const pattern = document.getElementById('search-pattern').value;
+            const limit = parseInt(document.getElementById('search-limit').value) || 100;
+
+            if (!pattern) {
+                Swal.fire('提示', '请输入搜索模式', 'info');
+                return;
+            }
+
+            showLoading('搜索中...');
+            try {
+                const data = await apiCall('/api/local-file/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pattern, limit })
+                });
+
+                displaySearchResults(data.results);
+            } catch (error) {
+                Swal.fire('搜索失败', error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function displaySearchResults(results) {
+            const container = document.getElementById('search-results');
+
+            if (!results || results.length === 0) {
+                container.innerHTML = '<div class="progress-message"><i class="bi bi-inbox"></i><p>未找到匹配的文件</p></div>';
+                return;
+            }
+
+            container.innerHTML = `
+                <p class="text-muted mb-3">找到 ${results.length} 个文件</p>
+                ${results.map(file => `
+                    <div class="file-result">
+                        <div class="file-name"><i class="bi bi-file-earmark"></i> ${file.name}</div>
+                        <div class="file-path">${file.path}</div>
+                        <div class="file-meta">
+                            大小: ${formatSize(file.size)} |
+                            修改时间: ${new Date(file.modified * 1000).toLocaleString()}
+                        </div>
+                    </div>
+                `).join('')}
+            `;
+        }
+
+        // 创建基线
+        async function createBaseline() {
+            const confirm = await Swal.fire({
+                title: '创建基线快照',
+                text: '这将保存当前文件系统状态作为基线。建议在清理磁盘前执行此操作。',
+                icon: 'info',
+                showCancelButton: true,
+                confirmButtonText: '创建',
+                cancelButtonText: '取消'
+            });
+
+            if (!confirm.isConfirmed) return;
+
+            showLoading('创建基线快照中...');
+            try {
+                const data = await apiCall('/api/local-file/create-baseline', { method: 'POST' });
+                Swal.fire('成功', '基线快照已创建', 'success');
+            } catch (error) {
+                Swal.fire('创建失败', error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 诊断空间泄漏
+        async function diagnoseSpaceLeak() {
+            showLoading('诊断中...');
+            try {
+                const data = await apiCall('/api/local-file/diagnose-space-leak', { method: 'POST' });
+
+                if (data.error || data.action === 'create_baseline') {
+                    Swal.fire('提示', data.error || '请先创建基线快照', 'info');
+                    return;
+                }
+
+                displaySpaceLeakReport(data);
+            } catch (error) {
+                Swal.fire('诊断失败', error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function displaySpaceLeakReport(report) {
+            const container = document.getElementById('space-leak-report');
+
+            container.innerHTML = `
+                <div class="alert alert-warning">
+                    <h5>📊 诊断报告</h5>
+                    <ul>
+                        <li>时间间隔: ${report.summary.time_elapsed_minutes.toFixed(1)} 分钟</li>
+                        <li>空间增长: ${report.summary.size_increase_mb.toFixed(1)} MB</li>
+                        <li>文件增加: ${report.summary.file_increase} 个</li>
+                        <li>增长速度: ${report.summary.growth_rate_mb_per_hour.toFixed(2)} MB/小时</li>
+                    </ul>
+                </div>
+
+                ${report.culprits.length > 0 ? `
+                    <h5>⚠️ 识别的"罪魁祸首"</h5>
+                    ${report.culprits.map(culprit => `
+                        <div class="culprit-card">
+                            <h6>${culprit.name} (+${culprit.growth_mb.toFixed(1)} MB)</h6>
+                            <p>${culprit.description}</p>
+                            <p><strong>路径:</strong> <code>${culprit.path}</code></p>
+                            <p><strong>解决方案:</strong> ${culprit.solution}</p>
+                        </div>
+                    `).join('')}
+                ` : ''}
+
+                <h5>💡 清理建议</h5>
+                <ul>
+                    ${report.recommendations.map(rec => `<li>${rec}</li>`).join('')}
+                </ul>
+            `;
+        }
+
+        // 查找重复文件
+        async function findDuplicates() {
+            const minSizeMb = parseFloat(document.getElementById('duplicate-min-size').value) || 1;
+
+            showLoading('查找重复文件中...');
+            try {
+                const data = await apiCall('/api/local-file/find-duplicates', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ min_size_mb: minSizeMb })
+                });
+
+                displayDuplicateResults(data);
+            } catch (error) {
+                Swal.fire('查找失败', error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function displayDuplicateResults(data) {
+            const container = document.getElementById('duplicate-results');
+
+            if (data.total_groups === 0) {
+                container.innerHTML = '<div class="progress-message"><i class="bi bi-check-circle"></i><p>未找到重复文件</p></div>';
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="alert alert-info">
+                    找到 ${data.total_groups} 组重复文件（共 ${data.total_duplicates} 个重复），
+                    浪费空间 ${data.wasted_space_mb.toFixed(2)} MB
+                </div>
+
+                ${data.duplicate_groups.map((group, idx) => `
+                    <div class="duplicate-group">
+                        <h6>重复组 #${idx + 1} (${formatSize(group.size)} × ${group.files.length})</h6>
+                        <ul>
+                            ${group.files.map(file => `<li><code>${file}</code></li>`).join('')}
+                        </ul>
+                    </div>
+                `).join('')}
+            `;
+        }
+
+        // 重建索引
+        async function rebuildIndex() {
+            const maxFiles = document.getElementById('max-files').value;
+
+            const confirm = await Swal.fire({
+                title: '重建索引',
+                text: '这将重新扫描文件系统，可能需要较长时间。确定继续吗？',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: '继续',
+                cancelButtonText: '取消'
+            });
+
+            if (!confirm.isConfirmed) return;
+
+            showLoading('重建索引中...');
+            try {
+                const data = await apiCall('/api/local-file/rebuild-index', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ max_files: maxFiles ? parseInt(maxFiles) : null })
+                });
+
+                document.getElementById('index-status').innerHTML = `
+                    <div class="alert alert-success">
+                        <h5>✅ 索引重建完成</h5>
+                        <ul>
+                            <li>文件数: ${data.file_count.toLocaleString()}</li>
+                            <li>总大小: ${data.total_size_mb.toFixed(2)} MB</li>
+                        </ul>
+                    </div>
+                `;
+
+                refreshStats();
+            } catch (error) {
+                Swal.fire('重建失败', error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 工具函数
+        function formatSize(bytes) {
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            let size = bytes;
+            let unitIndex = 0;
+
+            while (size >= 1024 && unitIndex < units.length - 1) {
+                size /= 1024;
+                unitIndex++;
+            }
+
+            return `${size.toFixed(2)} ${units[unitIndex]}`;
+        }
+
+        function showLoading(message = '处理中...') {
+            document.getElementById('loadingMessage').textContent = message;
+            document.getElementById('loadingOverlay').style.display = 'flex';
+        }
+
+        function hideLoading() {
+            document.getElementById('loadingOverlay').style.display = 'none';
+        }
+
+        // 页面加载时
+        document.addEventListener('DOMContentLoaded', () => {
+            refreshStats();
+        });
+    </script>
+</body>
+</html>
