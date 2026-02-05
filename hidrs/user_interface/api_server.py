@@ -120,6 +120,10 @@ class ApiServer:
         self.feedback_system = DecisionFeedbackSystem(
             config_path=self.config['decision_feedback_config_path']
         )
+
+        # 导入插件管理器
+        from plugin_manager import get_plugin_manager
+        self.plugin_manager = get_plugin_manager()
     
     def _register_routes(self):
         """注册API路由"""
@@ -143,7 +147,11 @@ class ApiServer:
         @self.app.route('/feedback')
         def feedback_page():
             return render_template('feedback.html')
-        
+
+        @self.app.route('/plugins')
+        def plugins_page():
+            return render_template('plugins.html')
+
         # API路由
         @self.app.route('/api/search', methods=['GET'])
         def api_search():
@@ -327,7 +335,90 @@ class ApiServer:
             
             # 没有数据或不支持的指标类型
             return jsonify({'error': 'No data available or unsupported metric type'})
-    
+
+        # 插件管理API
+        @self.app.route('/api/plugins/list', methods=['GET'])
+        def api_plugins_list():
+            """获取所有插件列表"""
+            try:
+                plugins = self.plugin_manager.list_plugins()
+                return jsonify(plugins)
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/plugins/load/<plugin_name>', methods=['POST'])
+        def api_plugins_load(plugin_name):
+            """加载插件"""
+            try:
+                success = self.plugin_manager.load_plugin(plugin_name)
+                if success:
+                    return jsonify({'success': True, 'message': f'Plugin {plugin_name} loaded successfully'})
+                else:
+                    return jsonify({'success': False, 'error': f'Failed to load plugin {plugin_name}'}), 400
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/plugins/unload/<plugin_name>', methods=['POST'])
+        def api_plugins_unload(plugin_name):
+            """卸载插件"""
+            try:
+                success = self.plugin_manager.unload_plugin(plugin_name)
+                if success:
+                    return jsonify({'success': True, 'message': f'Plugin {plugin_name} unloaded successfully'})
+                else:
+                    return jsonify({'success': False, 'error': f'Failed to unload plugin {plugin_name}'}), 400
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/plugins/enable/<plugin_name>', methods=['POST'])
+        def api_plugins_enable(plugin_name):
+            """启用插件"""
+            try:
+                success = self.plugin_manager.enable_plugin(plugin_name)
+                if success:
+                    return jsonify({'success': True, 'message': f'Plugin {plugin_name} enabled successfully'})
+                else:
+                    return jsonify({'success': False, 'error': f'Failed to enable plugin {plugin_name}'}), 400
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/plugins/disable/<plugin_name>', methods=['POST'])
+        def api_plugins_disable(plugin_name):
+            """停用插件"""
+            try:
+                success = self.plugin_manager.disable_plugin(plugin_name)
+                if success:
+                    return jsonify({'success': True, 'message': f'Plugin {plugin_name} disabled successfully'})
+                else:
+                    return jsonify({'success': False, 'error': f'Failed to disable plugin {plugin_name}'}), 400
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/plugins/config/<plugin_name>', methods=['POST'])
+        def api_plugins_config(plugin_name):
+            """保存插件配置"""
+            try:
+                config = request.json.get('config', {})
+                plugin = self.plugin_manager.get_plugin(plugin_name)
+
+                if not plugin:
+                    return jsonify({'success': False, 'error': f'Plugin {plugin_name} not found'}), 404
+
+                plugin.set_config(config)
+
+                # 更新配置文件
+                if plugin_name not in self.plugin_manager.config.get('plugins', {}):
+                    if 'plugins' not in self.plugin_manager.config:
+                        self.plugin_manager.config['plugins'] = {}
+                    self.plugin_manager.config['plugins'][plugin_name] = {}
+
+                self.plugin_manager.config['plugins'][plugin_name] = config
+                self.plugin_manager._save_config()
+
+                return jsonify({'success': True, 'message': f'Plugin {plugin_name} config saved successfully'})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)}), 500
+
     def start(self, host='0.0.0.0', port=5000, debug=False):
         """启动API服务器"""
         self.app.run(host=host, port=port, debug=debug)

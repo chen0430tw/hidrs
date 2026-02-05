@@ -59,6 +59,16 @@ const translations = {
         'search.no-results': '未找到结果',
         'search.loading': '搜索中...',
 
+        // 插件管理
+        'plugins.title': '插件管理',
+        'plugins.subtitle': '管理和配置 HIDRS 插件系统',
+        'plugins.stats.total': '总插件数',
+        'plugins.stats.enabled': '已启用',
+        'plugins.stats.loaded': '已加载',
+        'plugins.stats.available': '可用插件',
+        'plugins.empty.title': '暂无插件',
+        'plugins.empty.message': '请在 plugins/ 目录下添加插件文件',
+
         // 通用
         'common.loading': '加载中...',
         'common.error': '错误',
@@ -126,6 +136,16 @@ const translations = {
         'search.results': 'Search Results',
         'search.no-results': 'No results found',
         'search.loading': 'Searching...',
+
+        // Plugins
+        'plugins.title': 'Plugin Management',
+        'plugins.subtitle': 'Manage and configure HIDRS plugin system',
+        'plugins.stats.total': 'Total Plugins',
+        'plugins.stats.enabled': 'Enabled',
+        'plugins.stats.loaded': 'Loaded',
+        'plugins.stats.available': 'Available',
+        'plugins.empty.title': 'No Plugins',
+        'plugins.empty.message': 'Please add plugin files to the plugins/ directory',
 
         // Common
         'common.loading': 'Loading...',
