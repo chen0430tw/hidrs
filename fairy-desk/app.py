@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import logging
 import threading
+import atexit
 from datetime import datetime
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -69,9 +70,11 @@ def load_system_logs():
 
 def save_system_logs():
     """保存系统日志到文件"""
+    global logs_dirty
     try:
         with open(LOGS_PATH, 'w', encoding='utf-8') as f:
             json.dump(system_logs[-MAX_LOG_ENTRIES:], f, ensure_ascii=False)
+        logs_dirty = False  # 保存后重置标记
     except Exception:
         pass
 
@@ -123,8 +126,8 @@ def get_default_config():
 
 
 def add_system_log(level, message):
-    """添加系统日志（同时持久化到文件 + 同步到告警事件流）"""
-    global system_logs
+    """添加系统日志（批量延迟写入，critical 立即写入）"""
+    global system_logs, logs_dirty, events, events_dirty
     entry = {
         "time": datetime.now().isoformat(),
         "level": level,
@@ -133,10 +136,17 @@ def add_system_log(level, message):
     system_logs.append(entry)
     if len(system_logs) > MAX_LOG_ENTRIES:
         system_logs = system_logs[-MAX_LOG_ENTRIES:]
-    save_system_logs()
+
+    # 标记为需要保存（批量延迟写入）
+    logs_dirty = True
+
+    # critical 级别立即保存（安全考虑）
+    if level == 'critical' or level == 'error':
+        save_system_logs()
+
     logger.log(getattr(logging, level.upper(), logging.INFO), message)
 
-    # 同步到告警事件流（让右屏告警面板也能显示 + 持久化）
+    # 同步到告警事件流（让右屏告警面板也能显示）
     level_to_type = {'info': 'info', 'warning': 'warning', 'error': 'critical', 'critical': 'critical'}
     event = {
         "type": level_to_type.get(level, 'info'),
@@ -146,7 +156,13 @@ def add_system_log(level, message):
     events.append(event)
     if len(events) > MAX_EVENTS:
         events[:] = events[-MAX_EVENTS:]
-    save_events()
+
+    # 标记为需要保存（批量延迟写入）
+    events_dirty = True
+
+    # critical 级别立即保存（安全考虑）
+    if level == 'critical' or level == 'error':
+        save_events()
 
 
 # ============================================================
@@ -162,8 +178,8 @@ last_cve_count = 0
 
 
 def add_alert(alert_type, message):
-    """添加告警到事件流（不记录到系统日志，避免重复）"""
-    global events
+    """添加告警到事件流（批量延迟写入，critical 立即写入）"""
+    global events, events_dirty
     event = {
         "type": alert_type,  # 'info', 'warning', 'critical'
         "message": message,
@@ -172,7 +188,13 @@ def add_alert(alert_type, message):
     events.append(event)
     if len(events) > MAX_EVENTS:
         events[:] = events[-MAX_EVENTS:]
-    save_events()
+
+    # 标记为需要保存（批量延迟写入）
+    events_dirty = True
+
+    # critical 级别立即保存（安全考虑）
+    if alert_type == 'critical':
+        save_events()
 
 
 def check_security_advisories():
@@ -333,6 +355,16 @@ def system_monitor_loop():
             check_security_advisories()
 
             check_count += 1
+
+            # 每 5 分钟（5 个循环）批量保存日志和事件（减少文件 I/O）
+            if check_count % 5 == 0:
+                if events_dirty:
+                    save_events()
+                    logger.debug("批量保存告警事件")
+                if logs_dirty:
+                    save_system_logs()
+                    logger.debug("批量保存系统日志")
+
             # 每 60 秒检查一次
             time.sleep(60)
         except Exception as e:
@@ -983,6 +1015,8 @@ def upload_background():
 events = []
 MAX_EVENTS = 100
 EVENTS_PATH = Path(__file__).parent / 'events.json'
+events_dirty = False  # 标记是否需要保存
+logs_dirty = False    # 标记日志是否需要保存
 
 
 def load_events():
@@ -1000,9 +1034,11 @@ def load_events():
 
 def save_events():
     """保存事件到文件"""
+    global events_dirty
     try:
         with open(EVENTS_PATH, 'w', encoding='utf-8') as f:
             json.dump(events, f, ensure_ascii=False)
+        events_dirty = False  # 保存后重置标记
     except Exception as e:
         logger.warning(f"告警文件保存失败: {e}")
 
@@ -1068,11 +1104,98 @@ def health_check():
     })
 
 
+def check_restart_loop():
+    """检测是否陷入重启死循环，如果是则启动保护机制"""
+    import tempfile
+    restart_tracker = Path(tempfile.gettempdir()) / 'fairy-desk-restart-tracker.json'
+
+    current_time = time.time()
+    restart_times = []
+
+    # 加载历史重启记录
+    try:
+        if restart_tracker.exists():
+            with open(restart_tracker, 'r') as f:
+                restart_times = json.load(f)
+    except Exception:
+        restart_times = []
+
+    # 添加当前启动时间
+    restart_times.append(current_time)
+
+    # 只保留最近 2 分钟的记录
+    restart_times = [t for t in restart_times if current_time - t < 120]
+
+    # 保存更新后的记录
+    try:
+        with open(restart_tracker, 'w') as f:
+            json.dump(restart_times, f)
+    except Exception:
+        pass
+
+    # 如果 2 分钟内重启超过 5 次，触发保护机制
+    if len(restart_times) > 5:
+        logger.critical("⚠️ 检测到重启死循环！触发保护机制...")
+        print("\n" + "="*60)
+        print("⚠️  FAIRY-DESK 循环脱出保护机制已触发")
+        print("="*60)
+        print(f"检测到 2 分钟内重启 {len(restart_times)} 次，可能陷入死循环。")
+        print("\n保护措施：")
+        print("  1. 强制禁用 debug 模式")
+        print("  2. 禁用系统监控（减少文件写入）")
+        print("  3. 清理重启记录")
+        print("\n如果问题持续，请检查：")
+        print("  - Flask watchdog 是否监控了日志文件目录")
+        print("  - 是否有其他进程频繁修改项目文件")
+        print("="*60 + "\n")
+
+        # 保护措施 1: 强制禁用 debug
+        global config
+        if config.get('server', {}).get('debug', False):
+            config['server']['debug'] = False
+            save_config()
+            logger.warning("已强制禁用 debug 模式并保存配置")
+
+        # 保护措施 2: 禁用系统监控
+        global monitor_running
+        monitor_running = False
+        logger.warning("已禁用系统监控以减少文件 I/O")
+
+        # 保护措施 3: 清理重启记录（防止下次启动再次触发）
+        try:
+            restart_tracker.unlink()
+        except Exception:
+            pass
+
+        return True  # 返回 True 表示触发了保护机制
+
+    return False  # 正常启动
+
+
+def cleanup_on_exit():
+    """应用退出时保存未保存的数据"""
+    global monitor_running, events_dirty, logs_dirty
+    logger.info("应用退出中，保存数据...")
+    monitor_running = False  # 停止监控线程
+    if events_dirty:
+        save_events()
+        logger.info("退出时保存了告警事件")
+    if logs_dirty:
+        save_system_logs()
+        logger.info("退出时保存了系统日志")
+
+
 # ============================================================
 # 启动
 # ============================================================
 
 if __name__ == '__main__':
+    # 检测重启循环（必须在最开始）
+    in_restart_loop = check_restart_loop()
+
+    # 注册退出时的清理函数
+    atexit.register(cleanup_on_exit)
+
     # 加载配置与历史数据
     load_config()
     load_events()
@@ -1099,9 +1222,12 @@ if __name__ == '__main__':
     add_system_log("info", f"股票标的: {', '.join(config.get('right_screen', {}).get('stocks', {}).get('symbols', []))}")
     add_system_log("info", "系统控制台就绪，等待指令...")
 
-    # 启动系统监控线程
-    start_system_monitor()
-    add_system_log("info", "系统监控告警已启用（CPU/内存/网络/磁盘/RSS/安全公告/健康检查）")
+    # 启动系统监控线程（如果未触发循环保护）
+    if not in_restart_loop:
+        start_system_monitor()
+        add_system_log("info", "系统监控告警已启用（CPU/内存/网络/磁盘/RSS/安全公告/健康检查）")
+    else:
+        add_system_log("warning", "⚠️ 系统监控已禁用（循环保护机制）")
 
     # 启动 Flask
     app.run(
