@@ -168,6 +168,10 @@ class ApiServer:
         def realtime_tracker_page():
             return render_template('realtime_tracker.html')
 
+        @self.app.route('/person-avoidance')
+        def person_avoidance_page():
+            return render_template('person_avoidance.html')
+
         # API路由
         @self.app.route('/api/search', methods=['GET'])
         def api_search():
@@ -719,6 +723,88 @@ class ApiServer:
                 plugin = self.plugin_manager.get_plugin('SEDGeoVisualization')
                 if not plugin:
                     return jsonify({'error': 'SED Geo Visualization plugin not loaded'}), 400
+
+                stats = plugin.get_stats()
+                return jsonify(stats)
+            except Exception as e:
+                logger.error(f"Get stats error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        # ===== 人员躲避系统 API =====
+        @self.app.route('/api/avoidance/analyze', methods=['POST'])
+        def api_avoidance_analyze():
+            """分析活动模式"""
+            try:
+                plugin = self.plugin_manager.get_plugin('PersonAvoidance')
+                if not plugin:
+                    return jsonify({'error': 'Person Avoidance plugin not loaded'}), 400
+
+                data = request.get_json() or {}
+                eps = data.get('eps', 0.01)
+                min_samples = data.get('min_samples', 5)
+
+                result = plugin.analyze_activity_pattern(eps=eps, min_samples=min_samples)
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Analyze activity pattern error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/avoidance/predict', methods=['GET'])
+        def api_avoidance_predict():
+            """预测未来位置"""
+            try:
+                plugin = self.plugin_manager.get_plugin('PersonAvoidance')
+                if not plugin:
+                    return jsonify({'error': 'Person Avoidance plugin not loaded'}), 400
+
+                hours_ahead = int(request.args.get('hours', 1))
+                result = plugin.predict_future_location(hours_ahead=hours_ahead)
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Predict location error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/avoidance/plan-route', methods=['POST'])
+        def api_avoidance_plan_route():
+            """规划安全路线"""
+            try:
+                plugin = self.plugin_manager.get_plugin('PersonAvoidance')
+                if not plugin:
+                    return jsonify({'error': 'Person Avoidance plugin not loaded'}), 400
+
+                data = request.get_json()
+                start_lat = float(data['start_lat'])
+                start_lon = float(data['start_lon'])
+                end_lat = float(data['end_lat'])
+                end_lon = float(data['end_lon'])
+
+                result = plugin.plan_safe_route(start_lat, start_lon, end_lat, end_lon)
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Plan route error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/avoidance/danger-zones', methods=['GET'])
+        def api_avoidance_danger_zones():
+            """获取危险区域"""
+            try:
+                plugin = self.plugin_manager.get_plugin('PersonAvoidance')
+                if not plugin:
+                    return jsonify({'error': 'Person Avoidance plugin not loaded'}), 400
+
+                result = plugin.get_danger_zones()
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Get danger zones error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/avoidance/stats', methods=['GET'])
+        def api_avoidance_stats():
+            """获取统计信息"""
+            try:
+                plugin = self.plugin_manager.get_plugin('PersonAvoidance')
+                if not plugin:
+                    return jsonify({'error': 'Person Avoidance plugin not loaded'}), 400
 
                 stats = plugin.get_stats()
                 return jsonify(stats)
