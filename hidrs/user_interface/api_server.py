@@ -172,6 +172,10 @@ class ApiServer:
         def person_avoidance_page():
             return render_template('person_avoidance.html')
 
+        @self.app.route('/global-broadcast')
+        def global_broadcast_page():
+            return render_template('global_broadcast.html')
+
         # API路由
         @self.app.route('/api/search', methods=['GET'])
         def api_search():
@@ -805,6 +809,115 @@ class ApiServer:
                 plugin = self.plugin_manager.get_plugin('PersonAvoidance')
                 if not plugin:
                     return jsonify({'error': 'Person Avoidance plugin not loaded'}), 400
+
+                stats = plugin.get_stats()
+                return jsonify(stats)
+            except Exception as e:
+                logger.error(f"Get stats error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        # ===== 全球广播系统 API =====
+        @self.app.route('/api/broadcast/start', methods=['POST'])
+        def api_broadcast_start():
+            """启动广播"""
+            try:
+                plugin = self.plugin_manager.get_plugin('GlobalBroadcast')
+                if not plugin:
+                    return jsonify({'error': 'Global Broadcast plugin not loaded'}), 400
+
+                data = request.get_json()
+                result = plugin.start_broadcast(
+                    title=data.get('title', '系统广播'),
+                    level=int(data.get('level', 0)),
+                    content_type=data.get('content_type', 'message'),
+                    content=data.get('content', ''),
+                    duration=int(data.get('duration', 0))
+                )
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Start broadcast error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/broadcast/stop', methods=['POST'])
+        def api_broadcast_stop():
+            """停止广播"""
+            try:
+                plugin = self.plugin_manager.get_plugin('GlobalBroadcast')
+                if not plugin:
+                    return jsonify({'error': 'Global Broadcast plugin not loaded'}), 400
+
+                data = request.get_json()
+                broadcast_id = data.get('broadcast_id')
+                result = plugin.stop_broadcast(broadcast_id)
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Stop broadcast error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/broadcast/active', methods=['GET'])
+        def api_broadcast_active():
+            """获取活跃广播列表"""
+            try:
+                plugin = self.plugin_manager.get_plugin('GlobalBroadcast')
+                if not plugin:
+                    return jsonify({'error': 'Global Broadcast plugin not loaded'}), 400
+
+                result = plugin.get_active_broadcasts()
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Get active broadcasts error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/broadcast/status/<broadcast_id>', methods=['GET'])
+        def api_broadcast_status(broadcast_id):
+            """获取广播状态"""
+            try:
+                plugin = self.plugin_manager.get_plugin('GlobalBroadcast')
+                if not plugin:
+                    return jsonify({'error': 'Global Broadcast plugin not loaded'}), 400
+
+                result = plugin.get_broadcast_status(broadcast_id)
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Get broadcast status error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/broadcast/clients', methods=['GET'])
+        def api_broadcast_clients():
+            """获取已连接客户端列表"""
+            try:
+                plugin = self.plugin_manager.get_plugin('GlobalBroadcast')
+                if not plugin:
+                    return jsonify({'error': 'Global Broadcast plugin not loaded'}), 400
+
+                result = plugin.get_connected_clients()
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Get clients error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/broadcast/simulation-log', methods=['GET'])
+        def api_broadcast_simulation_log():
+            """获取模拟日志"""
+            try:
+                plugin = self.plugin_manager.get_plugin('GlobalBroadcast')
+                if not plugin:
+                    return jsonify({'error': 'Global Broadcast plugin not loaded'}), 400
+
+                limit = int(request.args.get('limit', 100))
+                result = plugin.get_simulation_log(limit)
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Get simulation log error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/broadcast/stats', methods=['GET'])
+        def api_broadcast_stats():
+            """获取统计信息"""
+            try:
+                plugin = self.plugin_manager.get_plugin('GlobalBroadcast')
+                if not plugin:
+                    return jsonify({'error': 'Global Broadcast plugin not loaded'}), 400
 
                 stats = plugin.get_stats()
                 return jsonify(stats)

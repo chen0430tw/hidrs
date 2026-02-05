@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>全球广播系统 - HIDRS</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <link href="/static/css/theme-styles.css" rel="stylesheet">
+    <link href="/static/css/backgrounds.css" rel="stylesheet">
+
+    <style>
+        .broadcast-container {
+            max-width: 1400px;
+            margin: 60px auto 40px;
+            padding: 20px;
+        }
+
+        .compliance-banner {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
+        }
+
+        .mode-indicator {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: bold;
+            margin-bottom: 15px;
+        }
+
+        .mode-simulation {
+            background: #ffc107;
+            color: #000;
+        }
+
+        .mode-test {
+            background: #17a2b8;
+            color: #fff;
+        }
+
+        .mode-live {
+            background: #28a745;
+            color: #fff;
+        }
+
+        .control-panel {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: var(--bg-color);
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            border: 2px solid var(--border-color);
+        }
+
+        .stat-card .value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .stat-card .label {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-top: 5px;
+        }
+
+        .broadcast-card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-left: 4px solid #007bff;
+        }
+
+        .broadcast-card.level-0 { border-left-color: #6c757d; }
+        .broadcast-card.level-1 { border-left-color: #ffc107; }
+        .broadcast-card.level-2 { border-left-color: #fd7e14; }
+        .broadcast-card.level-3 { border-left-color: #dc3545; }
+
+        .log-viewer {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 8px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+        }
+
+        .log-entry {
+            margin: 5px 0;
+            padding: 3px;
+        }
+
+        .log-entry .timestamp {
+            color: #858585;
+        }
+
+        .log-entry .action {
+            color: #4ec9b0;
+        }
+
+        .ssl-warning {
+            background: linear-gradient(135deg, #ff8c00 0%, #ff6347 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-broadcast"></i> HIDRS - 全球广播系统
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/"><i class="bi bi-house"></i> 首页</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/plugins"><i class="bi bi-plugin"></i> 插件管理</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主容器 -->
+    <div class="broadcast-container">
+        <!-- 合规性警告 -->
+        <div class="compliance-banner">
+            <h4><i class="bi bi-exclamation-triangle-fill"></i> 严格合规声明</h4>
+            <p><strong>本系统仅用于合法授权场景：</strong></p>
+            <ul class="mb-0">
+                <li>企业内部紧急通知系统</li>
+                <li>公共安全警报系统</li>
+                <li>教育机构通知系统</li>
+                <li>经过授权的测试环境</li>
+            </ul>
+        </div>
+
+        <!-- SSL时间戳警告 -->
+        <div class="ssl-warning">
+            <h5><i class="bi bi-shield-exclamation"></i> SSL时间戳检测规避说明</h5>
+            <p class="mb-2"><strong>如果遇到SSL证书验证失败：</strong></p>
+            <ol class="mb-0">
+                <li>客户端使用 <code>fetch(url, {mode: 'no-cors'})</code> 或禁用证书验证（仅限测试）</li>
+                <li>服务器使用自签名证书时，客户端添加证书例外</li>
+                <li>对于Node.js环境：<code>process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'</code></li>
+                <li>浏览器开发者模式：禁用安全策略（chrome://flags）</li>
+            </ol>
+        </div>
+
+        <!-- 模式指示器 -->
+        <div id="modeIndicator"></div>
+
+        <!-- 统计信息 -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="value" id="activeCount">0</div>
+                <div class="label">活跃广播</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" id="clientCount">0</div>
+                <div class="label">连接客户端</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" id="historyCount">0</div>
+                <div class="label">历史记录</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" id="logCount">0</div>
+                <div class="label">模拟日志</div>
+            </div>
+        </div>
+
+        <!-- 控制面板 -->
+        <div class="control-panel">
+            <h5><i class="bi bi-broadcast-pin"></i> 广播控制</h5>
+
+            <form id="broadcastForm">
+                <div class="mb-3">
+                    <label for="broadcastTitle" class="form-label">广播标题</label>
+                    <input type="text" class="form-control" id="broadcastTitle" value="系统紧急通知" required>
+                </div>
+
+                <div class="mb-3">
+                    <label for="broadcastLevel" class="form-label">广播级别</label>
+                    <select class="form-select" id="broadcastLevel">
+                        <option value="0">Level 0 - 普通（可关闭）</option>
+                        <option value="1">Level 1 - 重要（需确认）</option>
+                        <option value="2" selected>Level 2 - 紧急（不可关闭）</option>
+                        <option value="3">Level 3 - 最高级（强制播放）</option>
+                    </select>
+                </div>
+
+                <div class="mb-3">
+                    <label for="broadcastContent" class="form-label">广播内容</label>
+                    <textarea class="form-control" id="broadcastContent" rows="3" required>检测到系统异常，所有人员请注意！</textarea>
+                </div>
+
+                <div class="mb-3">
+                    <label for="broadcastDuration" class="form-label">持续时间（秒，0=无限期）</label>
+                    <input type="number" class="form-control" id="broadcastDuration" value="300" min="0">
+                </div>
+
+                <button type="submit" class="btn btn-danger">
+                    <i class="bi bi-broadcast"></i> 启动广播
+                </button>
+            </form>
+        </div>
+
+        <!-- 活跃广播列表 -->
+        <div class="control-panel">
+            <h5><i class="bi bi-list-ul"></i> 活跃广播</h5>
+            <div id="activeBroadcasts">
+                <p class="text-muted">当前没有活跃广播</p>
+            </div>
+        </div>
+
+        <!-- 已连接客户端 -->
+        <div class="control-panel">
+            <h5><i class="bi bi-people"></i> 已连接客户端 (<span id="clientCountText">0</span>)</h5>
+            <div id="connectedClients">
+                <p class="text-muted">当前没有客户端连接</p>
+            </div>
+        </div>
+
+        <!-- 模拟日志查看器 -->
+        <div class="control-panel" id="simulationLogPanel" style="display: none;">
+            <h5><i class="bi bi-terminal"></i> 模拟模式日志</h5>
+            <button id="refreshLogBtn" class="btn btn-sm btn-secondary mb-2">
+                <i class="bi bi-arrow-clockwise"></i> 刷新日志
+            </button>
+            <div class="log-viewer" id="simulationLog">
+                <div class="text-muted">暂无日志</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        let currentMode = 'live';
+        let refreshInterval;
+
+        // 加载统计信息
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/broadcast/stats');
+                const data = await response.json();
+
+                // 更新模式指示器
+                currentMode = data.mode;
+                const modeIndicator = document.getElementById('modeIndicator');
+
+                if (data.simulation_mode) {
+                    modeIndicator.innerHTML = `
+                        <span class="mode-indicator mode-simulation">
+                            <i class="bi bi-file-earmark-play"></i> 模拟模式 - 不会实际发送广播
+                        </span>
+                    `;
+                    document.getElementById('simulationLogPanel').style.display = 'block';
+                } else if (data.test_mode) {
+                    modeIndicator.innerHTML = `
+                        <span class="mode-indicator mode-test">
+                            <i class="bi bi-shield-check"></i> 测试模式 - 白名单: ${data.test_whitelist_count} IP，最多 ${data.max_test_clients} 客户端
+                        </span>
+                    `;
+                } else {
+                    modeIndicator.innerHTML = `
+                        <span class="mode-indicator mode-live">
+                            <i class="bi bi-broadcast"></i> 正式模式 - 全球广播
+                        </span>
+                    `;
+                }
+
+                // 更新统计
+                document.getElementById('activeCount').textContent = data.active_broadcasts || 0;
+                document.getElementById('clientCount').textContent = data.connected_clients || 0;
+                document.getElementById('historyCount').textContent = data.broadcast_history_count || 0;
+                document.getElementById('logCount').textContent = data.simulation_log_count || 0;
+
+            } catch (error) {
+                console.error('加载统计信息失败:', error);
+            }
+        }
+
+        // 加载活跃广播
+        async function loadActiveBroadcasts() {
+            try {
+                const response = await fetch('/api/broadcast/active');
+                const result = await response.json();
+
+                const container = document.getElementById('activeBroadcasts');
+
+                if (!result.success || result.count === 0) {
+                    container.innerHTML = '<p class="text-muted">当前没有活跃广播</p>';
+                    return;
+                }
+
+                container.innerHTML = result.broadcasts.map(bc => `
+                    <div class="broadcast-card level-${bc.level}">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <h6>${bc.title} <span class="badge bg-danger">Level ${bc.level}</span></h6>
+                                <small class="text-muted">
+                                    ID: ${bc.broadcast_id} | 模式: ${bc.mode} |
+                                    客户端: ${bc.connected_clients} |
+                                    时长: ${Math.floor(bc.duration)}秒
+                                </small>
+                            </div>
+                            <button class="btn btn-sm btn-outline-danger" onclick="stopBroadcast('${bc.broadcast_id}')">
+                                <i class="bi bi-stop-circle"></i> 停止
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+
+            } catch (error) {
+                console.error('加载活跃广播失败:', error);
+            }
+        }
+
+        // 加载已连接客户端
+        async function loadClients() {
+            try {
+                const response = await fetch('/api/broadcast/clients');
+                const result = await response.json();
+
+                const container = document.getElementById('connectedClients');
+                const countText = document.getElementById('clientCountText');
+
+                countText.textContent = result.count || 0;
+
+                if (!result.success || result.count === 0) {
+                    container.innerHTML = '<p class="text-muted">当前没有客户端连接</p>';
+                    return;
+                }
+
+                container.innerHTML = `
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>客户端ID</th>
+                                    <th>IP地址</th>
+                                    <th>设备类型</th>
+                                    <th>状态</th>
+                                    <th>当前广播</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${result.clients.map(client => `
+                                    <tr>
+                                        <td><code>${client.client_id}</code></td>
+                                        <td>${client.ip_address}</td>
+                                        <td>${client.device_info.type || 'unknown'}</td>
+                                        <td><span class="badge bg-success">${client.status}</span></td>
+                                        <td>${client.current_broadcast || '-'}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+
+            } catch (error) {
+                console.error('加载客户端列表失败:', error);
+            }
+        }
+
+        // 加载模拟日志
+        async function loadSimulationLog() {
+            if (currentMode !== 'simulation') return;
+
+            try {
+                const response = await fetch('/api/broadcast/simulation-log?limit=50');
+                const result = await response.json();
+
+                const logContainer = document.getElementById('simulationLog');
+
+                if (!result.success || result.total === 0) {
+                    logContainer.innerHTML = '<div class="text-muted">暂无日志</div>';
+                    return;
+                }
+
+                logContainer.innerHTML = result.logs.map(log => {
+                    const timestamp = new Date(log.timestamp).toLocaleTimeString();
+                    return `
+                        <div class="log-entry">
+                            <span class="timestamp">[${timestamp}]</span>
+                            <span class="action">${log.action}</span>:
+                            ${JSON.stringify(log, null, 2).substring(0, 200)}...
+                        </div>
+                    `;
+                }).join('');
+
+                // 滚动到底部
+                logContainer.scrollTop = logContainer.scrollHeight;
+
+            } catch (error) {
+                console.error('加载模拟日志失败:', error);
+            }
+        }
+
+        // 启动广播
+        async function startBroadcast(event) {
+            event.preventDefault();
+
+            const title = document.getElementById('broadcastTitle').value;
+            const level = parseInt(document.getElementById('broadcastLevel').value);
+            const content = document.getElementById('broadcastContent').value;
+            const duration = parseInt(document.getElementById('broadcastDuration').value);
+
+            if (!confirm(`确定要启动 Level ${level} 广播吗？\n\n标题: ${title}\n模式: ${currentMode}`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/broadcast/start', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        title: title,
+                        level: level,
+                        content_type: 'message',
+                        content: content,
+                        duration: duration
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success || result.mode === 'simulation') {
+                    alert(`✅ 广播已启动！\n\nID: ${result.broadcast_id}\n模式: ${result.mode || currentMode}\n${result.message || ''}`);
+                    loadStats();
+                    loadActiveBroadcasts();
+                    if (currentMode === 'simulation') {
+                        loadSimulationLog();
+                    }
+                } else {
+                    alert(`❌ 启动广播失败: ${result.error}`);
+                }
+
+            } catch (error) {
+                console.error('启动广播失败:', error);
+                alert('启动广播失败: ' + error.message);
+            }
+        }
+
+        // 停止广播
+        async function stopBroadcast(broadcastId) {
+            if (!confirm(`确定要停止广播 ${broadcastId} 吗？`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/broadcast/stop', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({broadcast_id: broadcastId})
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    alert(`✅ 广播已停止！\n\n持续时间: ${Math.floor(result.duration)}秒`);
+                    loadStats();
+                    loadActiveBroadcasts();
+                    if (currentMode === 'simulation') {
+                        loadSimulationLog();
+                    }
+                } else {
+                    alert(`❌ 停止广播失败: ${result.error}`);
+                }
+
+            } catch (error) {
+                console.error('停止广播失败:', error);
+                alert('停止广播失败: ' + error.message);
+            }
+        }
+
+        // 刷新所有数据
+        function refreshAll() {
+            loadStats();
+            loadActiveBroadcasts();
+            loadClients();
+            if (currentMode === 'simulation') {
+                loadSimulationLog();
+            }
+        }
+
+        // 事件监听
+        document.getElementById('broadcastForm').addEventListener('submit', startBroadcast);
+        document.getElementById('refreshLogBtn').addEventListener('click', loadSimulationLog);
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            refreshAll();
+
+            // 每5秒自动刷新
+            refreshInterval = setInterval(refreshAll, 5000);
+
+            console.log('🚀 全球广播系统已启动');
+        });
+    </script>
+</body>
+</html>
