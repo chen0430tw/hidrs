@@ -37,6 +37,9 @@ sentence-transformers==2.2.2
 tensorflow-hub==0.13.0
 umap-learn==0.5.3
 
+# DNS安全与防御
+dnspython==2.4.2  # DNS查询和DNSSEC验证
+
 # 其他工具
 joblib==1.2.0
 nltk==3.8.1
