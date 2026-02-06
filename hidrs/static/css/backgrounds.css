@@ -1,0 +1,117 @@
+/* ===================================
+   HIDRS 背景系统
+   支持自定义背景图片
+   ===================================*/
+
+/* 背景基础样式 */
+body {
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+    background-repeat: no-repeat;
+    min-height: 100vh;
+    position: relative;
+}
+
+/* 无背景 */
+body.bg-image-none {
+    background-image: none !important;
+}
+
+/* 预设背景（渐变色） */
+body.bg-image-anime1 {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+body.bg-image-anime2 {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
+
+body.bg-image-abstract {
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+}
+
+body.bg-image-tech {
+    background: linear-gradient(135deg, #434343 0%, #000000 100%);
+}
+
+/* 自定义背景 */
+body.bg-image-custom {
+    /* 通过 JS 动态设置 background-image */
+}
+
+/* 背景遮罩层（改善内容可读性） */
+#background-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    z-index: -1;
+    pointer-events: none;
+    transition: opacity 0.3s;
+}
+
+/* 无背景时隐藏遮罩 */
+body.bg-image-none #background-overlay {
+    opacity: 0;
+}
+
+/* 背景选项预览 */
+.bg-options .bg-option {
+    position: relative;
+    overflow: hidden;
+}
+
+.bg-options .bg-option::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.2);
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.bg-options .bg-option:hover::after {
+    opacity: 1;
+}
+
+.bg-options .bg-option.active::after {
+    opacity: 0;
+}
+
+/* 背景预设的小图标 */
+.bg-option[data-bg="bg-image-none"] {
+    background: white;
+    border: 2px dashed #ccc;
+}
+
+.bg-option[data-bg="bg-image-anime1"] {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.bg-option[data-bg="bg-image-anime2"] {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
+
+.bg-option[data-bg="bg-image-abstract"] {
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+}
+
+.bg-option[data-bg="bg-image-tech"] {
+    background: linear-gradient(135deg, #434343 0%, #000000 100%);
+}
+
+.bg-option[data-bg="bg-image-custom"] {
+    background: linear-gradient(135deg, #ffa500 0%, #ff1493 100%);
+    position: relative;
+}
+
+.bg-option[data-bg="bg-image-custom"] i {
+    color: white;
+    font-size: 20px;
+}

@@ -1,0 +1,225 @@
+/* ===================================
+   HIDRS 主题系统
+   移植自 crawler-system
+   ===================================*/
+
+/* 基础变量 */
+:root {
+    --primary-color: #007bff;
+    --secondary-color: #6c757d;
+    --success-color: #28a745;
+    --danger-color: #dc3545;
+    --warning-color: #ffc107;
+    --info-color: #17a2b8;
+    --bg-color: #ffffff;
+    --text-color: #212529;
+    --border-color: #dee2e6;
+    --card-bg: #f8f9fa;
+}
+
+/* 默认主题 */
+.theme-default {
+    --primary-color: #007bff;
+    --secondary-color: #6c757d;
+    --bg-color: #ffffff;
+    --text-color: #212529;
+    --card-bg: #f8f9fa;
+}
+
+/* 暗色主题 */
+.theme-dark {
+    --primary-color: #375a7f;
+    --secondary-color: #444;
+    --success-color: #00bc8c;
+    --danger-color: #e74c3c;
+    --warning-color: #f39c12;
+    --info-color: #3498db;
+    --bg-color: #222;
+    --text-color: #fff;
+    --border-color: #444;
+    --card-bg: #303030;
+}
+
+.theme-dark .bg-light {
+    background-color: var(--card-bg) !important;
+}
+
+.theme-dark .navbar-light {
+    background-color: var(--card-bg) !important;
+}
+
+.theme-dark .text-muted {
+    color: #adb5bd !important;
+}
+
+/* 蓝色主题 */
+.theme-blue {
+    --primary-color: #0d6efd;
+    --secondary-color: #6c757d;
+    --bg-color: #e7f1ff;
+    --text-color: #212529;
+    --card-bg: #cfe2ff;
+}
+
+/* 紫色主题 */
+.theme-purple {
+    --primary-color: #6f42c1;
+    --secondary-color: #6c757d;
+    --bg-color: #f3e5f5;
+    --text-color: #212529;
+    --card-bg: #e1bee7;
+}
+
+/* 绿色主题 */
+.theme-green {
+    --primary-color: #198754;
+    --secondary-color: #6c757d;
+    --bg-color: #d1e7dd;
+    --text-color: #212529;
+    --card-bg: #a3cfbb;
+}
+
+/* 应用主题颜色 */
+body {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    transition: background-color 0.3s, color 0.3s;
+}
+
+.btn-primary {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.btn-primary:hover {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+    filter: brightness(0.9);
+}
+
+.feature-box {
+    background-color: var(--card-bg) !important;
+    border: 1px solid var(--border-color);
+    transition: all 0.3s;
+}
+
+/* 内容透明度 */
+.content-opacity-100 .container,
+.content-opacity-100 .feature-box,
+.content-opacity-100 .navbar {
+    opacity: 1 !important;
+}
+
+.content-opacity-90 .container,
+.content-opacity-90 .feature-box,
+.content-opacity-90 .navbar {
+    opacity: 0.9 !important;
+}
+
+.content-opacity-80 .container,
+.content-opacity-80 .feature-box,
+.content-opacity-80 .navbar {
+    opacity: 0.8 !important;
+}
+
+.content-opacity-70 .container,
+.content-opacity-70 .feature-box,
+.content-opacity-70 .navbar {
+    opacity: 0.7 !important;
+}
+
+/* 毛玻璃效果 */
+body.glass-effect .feature-box,
+body.glass-effect .navbar {
+    background: rgba(255, 255, 255, 0.1) !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+body.theme-dark.glass-effect .feature-box,
+body.theme-dark.glass-effect .navbar {
+    background: rgba(0, 0, 0, 0.3) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* 设置下拉菜单样式 */
+.settings-dropdown {
+    min-width: 280px;
+}
+
+.opacity-options,
+.bg-options {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.opacity-option,
+.bg-option {
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+.opacity-option:hover,
+.bg-option:hover {
+    border-color: var(--primary-color);
+    transform: scale(1.05);
+}
+
+.opacity-option.active,
+.bg-option.active {
+    border-color: var(--primary-color);
+    background-color: var(--primary-color);
+    color: white;
+}
+
+.bg-option {
+    background-size: cover;
+    background-position: center;
+}
+
+/* 背景图片预设 */
+.bg-image-anime1 { background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ff6b9d" width="100" height="100"/></svg>'); }
+.bg-image-anime2 { background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23c44569" width="100" height="100"/></svg>'); }
+.bg-image-abstract { background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%233c40c6" width="100" height="100"/></svg>'); }
+.bg-image-tech { background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23222f3e" width="100" height="100"/></svg>'); }
+
+/* 背景遮罩 */
+#background-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    z-index: -1;
+    display: none;
+}
+
+body[class*="bg-image-"] #background-overlay {
+    display: block;
+}
+
+/* 响应式优化 */
+@media (max-width: 768px) {
+    .settings-dropdown {
+        min-width: 240px;
+    }
+
+    .opacity-option,
+    .bg-option {
+        width: 40px;
+        height: 40px;
+        font-size: 12px;
+    }
+}

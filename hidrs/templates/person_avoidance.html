@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>人员躲避系统 - HIDRS</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <link href="/static/css/theme-styles.css" rel="stylesheet">
+    <link href="/static/css/backgrounds.css" rel="stylesheet">
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <style>
+        .avoidance-container {
+            max-width: 100%;
+            margin: 60px auto 40px;
+            padding: 20px;
+            height: calc(100vh - 100px);
+        }
+
+        .compliance-banner {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
+        }
+
+        .compliance-banner h4 {
+            margin: 0 0 10px 0;
+        }
+
+        .compliance-banner ul {
+            margin: 10px 0 0 20px;
+        }
+
+        #map {
+            width: 100%;
+            height: 60vh;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            margin-bottom: 20px;
+        }
+
+        .control-panel {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: var(--bg-color);
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            border: 2px solid var(--border-color);
+        }
+
+        .stat-card .value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .stat-card .label {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-top: 5px;
+        }
+
+        .route-input-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .danger-zone-marker {
+            background: rgba(255, 0, 0, 0.3);
+            border: 2px solid #ff0000;
+            border-radius: 50%;
+        }
+
+        .prediction-marker {
+            background: rgba(255, 165, 0, 0.5);
+            border: 2px solid #ff8800;
+            border-radius: 50%;
+        }
+
+        .zone-list {
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
+
+        .zone-item {
+            background: var(--bg-color);
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-left: 4px solid #ff0000;
+        }
+
+        .zone-item h6 {
+            margin: 0 0 5px 0;
+            color: #ff0000;
+        }
+
+        .zone-item .info {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-shield-check"></i> HIDRS - 人员躲避系统
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/"><i class="bi bi-house"></i> 首页</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/plugins"><i class="bi bi-plugin"></i> 插件管理</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主容器 -->
+    <div class="avoidance-container">
+        <!-- 合规性警告 -->
+        <div class="compliance-banner">
+            <h4><i class="bi bi-exclamation-triangle-fill"></i> 严格合规声明</h4>
+            <p><strong>本系统仅用于合法授权场景：</strong></p>
+            <ul>
+                <li>✅ 家长监护未成年子女（需子女知情）</li>
+                <li>✅ 企业管理公司资产（需员工同意）</li>
+                <li>✅ 紧急救援定位（生命安全需要）</li>
+                <li>✅ 执法机关依法使用（需法律授权）</li>
+                <li>✅ 学术研究和技术演示（虚拟数据）</li>
+            </ul>
+            <p><strong>未经授权追踪他人是严重违法行为！违反者承担一切法律后果！</strong></p>
+        </div>
+
+        <!-- 统计信息 -->
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="value" id="totalRecords">0</div>
+                <div class="label">历史记录数</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" id="dangerZones">0</div>
+                <div class="label">危险区域数</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" id="safetyScore">-</div>
+                <div class="label">路线安全评分</div>
+            </div>
+        </div>
+
+        <!-- 地图容器 -->
+        <div id="map"></div>
+
+        <!-- 控制面板 -->
+        <div class="control-panel">
+            <h5><i class="bi bi-gear"></i> 控制面板</h5>
+
+            <!-- 步骤1: 分析活动模式 -->
+            <div class="mb-4">
+                <h6><i class="bi bi-1-circle"></i> 分析目标活动模式</h6>
+                <button id="analyzeBtn" class="btn btn-primary">
+                    <i class="bi bi-graph-up"></i> 开始分析
+                </button>
+                <span id="analyzeStatus" class="ms-3"></span>
+            </div>
+
+            <!-- 步骤2: 查看预测位置 -->
+            <div class="mb-4">
+                <h6><i class="bi bi-2-circle"></i> 预测未来位置</h6>
+                <div class="input-group mb-2" style="max-width: 300px;">
+                    <input type="number" id="hoursAhead" class="form-control" value="1" min="1" max="24">
+                    <span class="input-group-text">小时后</span>
+                </div>
+                <button id="predictBtn" class="btn btn-success" disabled>
+                    <i class="bi bi-compass"></i> 预测位置
+                </button>
+                <span id="predictStatus" class="ms-3"></span>
+            </div>
+
+            <!-- 步骤3: 规划安全路线 -->
+            <div class="mb-4">
+                <h6><i class="bi bi-3-circle"></i> 规划安全路线</h6>
+                <div class="route-input-group">
+                    <div>
+                        <label>起点纬度</label>
+                        <input type="number" id="startLat" class="form-control" value="39.9200" step="0.0001">
+                    </div>
+                    <div>
+                        <label>起点经度</label>
+                        <input type="number" id="startLon" class="form-control" value="116.4200" step="0.0001">
+                    </div>
+                    <div>
+                        <label>终点纬度</label>
+                        <input type="number" id="endLat" class="form-control" value="39.8800" step="0.0001">
+                    </div>
+                    <div>
+                        <label>终点经度</label>
+                        <input type="number" id="endLon" class="form-control" value="116.3600" step="0.0001">
+                    </div>
+                </div>
+                <button id="planRouteBtn" class="btn btn-warning" disabled>
+                    <i class="bi bi-map"></i> 规划路线
+                </button>
+                <span id="routeStatus" class="ms-3"></span>
+            </div>
+
+            <!-- 危险区域列表 -->
+            <div id="dangerZonesList" class="zone-list"></div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        // 全局变量
+        let map;
+        let dangerZones = [];
+        let dangerCircles = [];
+        let routeLine = null;
+        let predictionMarker = null;
+
+        // 初始化地图
+        function initMap() {
+            map = L.map('map').setView([39.9042, 116.4074], 11);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 18
+            }).addTo(map);
+
+            console.log('✅ 地图初始化完成');
+        }
+
+        // 加载统计信息
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/avoidance/stats');
+                const data = await response.json();
+
+                document.getElementById('totalRecords').textContent = data.total_records || 0;
+                document.getElementById('dangerZones').textContent = data.danger_zones || 0;
+            } catch (error) {
+                console.error('加载统计信息失败:', error);
+            }
+        }
+
+        // 分析活动模式
+        async function analyzeActivityPattern() {
+            const btn = document.getElementById('analyzeBtn');
+            const status = document.getElementById('analyzeStatus');
+
+            btn.disabled = true;
+            status.innerHTML = '<span class="text-info">分析中...</span>';
+
+            try {
+                const response = await fetch('/api/avoidance/analyze', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({eps: 0.01, min_samples: 5})
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    status.innerHTML = '<span class="text-success">✅ 分析完成</span>';
+
+                    // 显示危险区域
+                    renderDangerZones(result.hotspots);
+
+                    // 启用后续按钮
+                    document.getElementById('predictBtn').disabled = false;
+                    document.getElementById('planRouteBtn').disabled = false;
+
+                    // 更新统计
+                    document.getElementById('dangerZones').textContent = result.hotspots.length;
+
+                    console.log(`✅ 识别到 ${result.hotspots.length} 个危险区域`);
+                } else {
+                    status.innerHTML = '<span class="text-danger">❌ 分析失败</span>';
+                }
+            } catch (error) {
+                console.error('分析失败:', error);
+                status.innerHTML = '<span class="text-danger">❌ 错误: ' + error.message + '</span>';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // 渲染危险区域
+        function renderDangerZones(hotspots) {
+            // 清除旧的危险区域
+            dangerCircles.forEach(circle => map.removeLayer(circle));
+            dangerCircles = [];
+
+            const zonesList = document.getElementById('dangerZonesList');
+            zonesList.innerHTML = '<h6><i class="bi bi-exclamation-triangle-fill"></i> 危险区域列表</h6>';
+
+            hotspots.forEach((hotspot, index) => {
+                // 绘制红色危险区域
+                const circle = L.circle(
+                    [hotspot.center.lat, hotspot.center.lon],
+                    {
+                        color: '#ff0000',
+                        fillColor: '#ff0000',
+                        fillOpacity: 0.2,
+                        radius: hotspot.radius * 1000,  // 转换为米
+                        className: 'danger-zone'
+                    }
+                ).addTo(map);
+
+                circle.bindPopup(`
+                    <div>
+                        <strong>⚠️ 危险区域 ${index + 1}</strong><br>
+                        访问次数: ${hotspot.visit_count}<br>
+                        危险等级: ${hotspot.danger_level.toFixed(1)}/10<br>
+                        半径: ${(hotspot.radius * 1000).toFixed(0)}米
+                    </div>
+                `);
+
+                dangerCircles.push(circle);
+
+                // 添加到列表
+                const zoneItem = document.createElement('div');
+                zoneItem.className = 'zone-item';
+                zoneItem.innerHTML = `
+                    <h6>区域 ${index + 1}</h6>
+                    <div class="info">
+                        访问次数: ${hotspot.visit_count} |
+                        危险等级: ${hotspot.danger_level.toFixed(1)}/10 |
+                        半径: ${(hotspot.radius * 1000).toFixed(0)}m
+                    </div>
+                `;
+                zoneItem.onclick = () => {
+                    map.setView([hotspot.center.lat, hotspot.center.lon], 14);
+                    circle.openPopup();
+                };
+                zonesList.appendChild(zoneItem);
+            });
+
+            // 自动适应视图
+            if (dangerCircles.length > 0) {
+                const group = L.featureGroup(dangerCircles);
+                map.fitBounds(group.getBounds());
+            }
+        }
+
+        // 预测未来位置
+        async function predictLocation() {
+            const hours = document.getElementById('hoursAhead').value;
+            const status = document.getElementById('predictStatus');
+
+            status.innerHTML = '<span class="text-info">预测中...</span>';
+
+            try {
+                const response = await fetch(`/api/avoidance/predict?hours=${hours}`);
+                const result = await response.json();
+
+                if (result.success) {
+                    const pred = result.prediction;
+                    status.innerHTML = `<span class="text-success">✅ 预测置信度: ${(pred.confidence * 100).toFixed(1)}%</span>`;
+
+                    // 移除旧的预测标记
+                    if (predictionMarker) {
+                        map.removeLayer(predictionMarker);
+                    }
+
+                    // 添加预测位置标记
+                    predictionMarker = L.marker([pred.lat, pred.lon], {
+                        icon: L.divIcon({
+                            className: 'prediction-marker',
+                            html: '<div style="width: 20px; height: 20px; background: rgba(255, 165, 0, 0.7); border: 2px solid #ff8800; border-radius: 50%;"></div>',
+                            iconSize: [20, 20],
+                            iconAnchor: [10, 10]
+                        })
+                    }).addTo(map);
+
+                    predictionMarker.bindPopup(`
+                        <strong>🔮 预测位置</strong><br>
+                        时间: ${hours}小时后<br>
+                        置信度: ${(pred.confidence * 100).toFixed(1)}%<br>
+                        样本数: ${pred.sample_size}
+                    `).openPopup();
+
+                    map.setView([pred.lat, pred.lon], 13);
+                } else {
+                    status.innerHTML = '<span class="text-warning">⚠️ ' + result.message + '</span>';
+                }
+            } catch (error) {
+                console.error('预测失败:', error);
+                status.innerHTML = '<span class="text-danger">❌ 错误: ' + error.message + '</span>';
+            }
+        }
+
+        // 规划安全路线
+        async function planSafeRoute() {
+            const startLat = parseFloat(document.getElementById('startLat').value);
+            const startLon = parseFloat(document.getElementById('startLon').value);
+            const endLat = parseFloat(document.getElementById('endLat').value);
+            const endLon = parseFloat(document.getElementById('endLon').value);
+            const status = document.getElementById('routeStatus');
+
+            status.innerHTML = '<span class="text-info">规划中...</span>';
+
+            try {
+                const response = await fetch('/api/avoidance/plan-route', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        start_lat: startLat,
+                        start_lon: startLon,
+                        end_lat: endLat,
+                        end_lon: endLon
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    const route = result.route;
+                    status.innerHTML = `<span class="text-success">✅ 路线: ${route.route_name} | 安全评分: ${route.safety_score}/100</span>`;
+
+                    // 更新安全评分显示
+                    document.getElementById('safetyScore').textContent = route.safety_score;
+
+                    // 移除旧的路线
+                    if (routeLine) {
+                        map.removeLayer(routeLine);
+                    }
+
+                    // 绘制新路线
+                    const waypoints = route.waypoints.map(wp => [wp.lat, wp.lon]);
+                    routeLine = L.polyline(waypoints, {
+                        color: route.safety_score >= 70 ? '#00ff00' : '#ffaa00',
+                        weight: 4,
+                        opacity: 0.7,
+                        dashArray: '10, 5'
+                    }).addTo(map);
+
+                    routeLine.bindPopup(`
+                        <strong>🛡️ ${route.route_name}</strong><br>
+                        距离: ${route.distance_km} km<br>
+                        安全评分: ${route.safety_score}/100<br>
+                        经过危险区: ${route.danger_zones_crossed.join(', ') || '无'}
+                    `);
+
+                    // 添加起点和终点标记
+                    L.marker([startLat, startLon]).addTo(map).bindPopup('<strong>起点</strong>');
+                    L.marker([endLat, endLon]).addTo(map).bindPopup('<strong>终点</strong>');
+
+                    // 自动适应视图
+                    map.fitBounds(routeLine.getBounds());
+
+                    console.log('✅ 路线规划完成');
+                } else {
+                    status.innerHTML = '<span class="text-danger">❌ ' + result.error + '</span>';
+                }
+            } catch (error) {
+                console.error('路线规划失败:', error);
+                status.innerHTML = '<span class="text-danger">❌ 错误: ' + error.message + '</span>';
+            }
+        }
+
+        // 事件监听
+        document.getElementById('analyzeBtn').addEventListener('click', analyzeActivityPattern);
+        document.getElementById('predictBtn').addEventListener('click', predictLocation);
+        document.getElementById('planRouteBtn').addEventListener('click', planSafeRoute);
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', async () => {
+            initMap();
+            await loadStats();
+            console.log('🚀 人员躲避系统已启动');
+        });
+    </script>
+</body>
+</html>

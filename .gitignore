@@ -49,8 +49,9 @@ logs/
 *.bak
 *.cache
 
-# Xkeystroke cloned repository (we only need the analysis, not the full source)
+# External reference repositories (we only need the analysis, not the full source)
 Xkeystroke/
+crawler-system/
 
 # Test files
 /tmp/test*.txt

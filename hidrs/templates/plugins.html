@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-i18n="nav.plugins">插件管理 - HIDRS</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <link href="/static/css/theme-styles.css" rel="stylesheet">
+    <link href="/static/css/backgrounds.css" rel="stylesheet">
+    <style>
+        .plugins-container {
+            max-width: 1200px;
+            margin: 60px auto 40px;
+            padding: 20px;
+        }
+
+        .plugin-card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+        }
+
+        .plugin-card:hover {
+            box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+            transform: translateY(-2px);
+        }
+
+        .plugin-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .plugin-info {
+            flex: 1;
+        }
+
+        .plugin-name {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--text-color);
+            margin-bottom: 5px;
+        }
+
+        .plugin-meta {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+
+        .plugin-description {
+            color: var(--text-color);
+            margin-bottom: 15px;
+            line-height: 1.6;
+        }
+
+        .plugin-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .plugin-status {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .plugin-status.enabled {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .plugin-status.disabled {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .plugin-status.not-loaded {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .action-btn {
+            padding: 6px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .action-btn.primary {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .action-btn.primary:hover {
+            opacity: 0.9;
+            transform: scale(1.05);
+        }
+
+        .action-btn.secondary {
+            background: var(--secondary-color);
+            color: white;
+        }
+
+        .action-btn.secondary:hover {
+            opacity: 0.9;
+        }
+
+        .action-btn.danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .action-btn.danger:hover {
+            background: #c82333;
+        }
+
+        .action-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .stats-bar {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: var(--card-bg);
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .stat-item {
+            flex: 1;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+
+        .stat-label {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            margin-top: 5px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-muted);
+        }
+
+        .empty-state i {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            opacity: 0.3;
+        }
+
+        .page-header {
+            margin-bottom: 30px;
+        }
+
+        .page-title {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--text-color);
+            margin-bottom: 10px;
+        }
+
+        .page-subtitle {
+            color: var(--text-muted);
+            font-size: 1rem;
+        }
+
+        .refresh-btn {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .refresh-btn:hover {
+            opacity: 0.9;
+            transform: scale(1.05);
+        }
+
+        .config-section {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .config-editor {
+            width: 100%;
+            min-height: 100px;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.875rem;
+            resize: vertical;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-diagram-3"></i> HIDRS
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/" data-i18n="nav.home">首页</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/search" data-i18n="nav.search">搜索</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/network" data-i18n="nav.network">网络拓扑</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/dashboard" data-i18n="nav.dashboard">仪表盘</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/feedback" data-i18n="nav.feedback">决策反馈</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/plugins" data-i18n="nav.plugins">插件管理</a>
+                    </li>
+                </ul>
+
+                <!-- 设置菜单 -->
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="settingsDropdown" data-bs-toggle="dropdown">
+                            <i class="bi bi-gear"></i> <span data-i18n="settings.title">设置</span>
+                        </a>
+                        <div class="dropdown-menu dropdown-menu-end settings-dropdown p-3" style="width: 280px;">
+                            <!-- 主题设置 -->
+                            <label class="form-label" data-i18n="settings.theme">主题</label>
+                            <select id="theme-selector" class="form-select form-select-sm mb-3">
+                                <option value="theme-default" data-i18n="settings.theme.default">默认主题</option>
+                                <option value="theme-dark" data-i18n="settings.theme.dark">深色主题</option>
+                                <option value="theme-blue" data-i18n="settings.theme.blue">蓝色主题</option>
+                                <option value="theme-purple" data-i18n="settings.theme.purple">紫色主题</option>
+                                <option value="theme-green" data-i18n="settings.theme.green">绿色主题</option>
+                            </select>
+
+                            <!-- 背景设置 -->
+                            <label class="form-label" data-i18n="settings.background">背景</label>
+                            <div class="bg-options mb-3">
+                                <div class="bg-option active" data-bg="bg-image-none"><i class="bi bi-x-lg"></i></div>
+                                <div class="bg-option" data-bg="bg-image-anime1"></div>
+                                <div class="bg-option" data-bg="bg-image-anime2"></div>
+                                <div class="bg-option" data-bg="bg-image-abstract"></div>
+                                <div class="bg-option" data-bg="bg-image-tech"></div>
+                                <div class="bg-option" data-bg="bg-image-custom"><i class="bi bi-upload"></i></div>
+                            </div>
+                            <input type="file" id="custom-bg-upload" accept="image/*" style="display: none;">
+
+                            <!-- 透明度 -->
+                            <label class="form-label" data-i18n="settings.opacity">透明度</label>
+                            <div class="opacity-options mb-3">
+                                <div class="opacity-option active" data-opacity="content-opacity-100">100</div>
+                                <div class="opacity-option" data-opacity="content-opacity-90">90</div>
+                                <div class="opacity-option" data-opacity="content-opacity-80">80</div>
+                                <div class="opacity-option" data-opacity="content-opacity-70">70</div>
+                            </div>
+
+                            <!-- 毛玻璃效果 -->
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="glass-effect-toggle">
+                                <label class="form-check-label" for="glass-effect-toggle" data-i18n="settings.glass-effect">毛玻璃效果</label>
+                            </div>
+
+                            <hr class="my-3">
+
+                            <!-- 语言切换 -->
+                            <label class="form-label" data-i18n="settings.language">语言</label>
+                            <div class="btn-group w-100" role="group">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-lang="zh">中文</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-lang="en">English</button>
+                            </div>
+                        </div>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主内容 -->
+    <div class="plugins-container">
+        <div class="page-header d-flex justify-content-between align-items-center">
+            <div>
+                <h1 class="page-title" data-i18n="plugins.title">插件管理</h1>
+                <p class="page-subtitle" data-i18n="plugins.subtitle">管理和配置 HIDRS 插件系统</p>
+            </div>
+            <button class="refresh-btn" onclick="loadPlugins()">
+                <i class="bi bi-arrow-clockwise"></i> <span data-i18n="common.refresh">刷新</span>
+            </button>
+        </div>
+
+        <!-- 统计信息 -->
+        <div class="stats-bar" id="statsBar">
+            <div class="stat-item">
+                <div class="stat-value" id="totalPlugins">0</div>
+                <div class="stat-label" data-i18n="plugins.stats.total">总插件数</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="enabledPlugins">0</div>
+                <div class="stat-label" data-i18n="plugins.stats.enabled">已启用</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="loadedPlugins">0</div>
+                <div class="stat-label" data-i18n="plugins.stats.loaded">已加载</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="availablePlugins">0</div>
+                <div class="stat-label" data-i18n="plugins.stats.available">可用插件</div>
+            </div>
+        </div>
+
+        <!-- 插件列表 -->
+        <div id="pluginsList"></div>
+
+        <!-- 空状态 -->
+        <div id="emptyState" class="empty-state" style="display: none;">
+            <i class="bi bi-plugin"></i>
+            <h3 data-i18n="plugins.empty.title">暂无插件</h3>
+            <p data-i18n="plugins.empty.message">请在 plugins/ 目录下添加插件文件</p>
+        </div>
+    </div>
+
+    <!-- Loading overlay -->
+    <div id="loadingOverlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; align-items: center; justify-content: center;">
+        <div class="spinner-border text-light" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="/static/js/theme-manager.js"></script>
+    <script src="/static/js/language-manager.js"></script>
+    <script>
+        // API调用辅助函数
+        async function apiCall(url, options = {}) {
+            const response = await fetch(url, options);
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+                throw new Error(errorData.error || `HTTP ${response.status}`);
+            }
+            return response.json();
+        }
+
+        // 加载插件列表
+        async function loadPlugins() {
+            showLoading();
+            try {
+                const plugins = await apiCall('/api/plugins/list');
+                displayPlugins(plugins);
+                updateStats(plugins);
+            } catch (error) {
+                console.error('Failed to load plugins:', error);
+                Swal.fire({
+                    icon: 'error',
+                    title: '加载失败',
+                    text: error.message || '无法加载插件列表'
+                });
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 显示插件列表
+        function displayPlugins(plugins) {
+            const container = document.getElementById('pluginsList');
+            const emptyState = document.getElementById('emptyState');
+
+            if (!plugins || plugins.length === 0) {
+                container.innerHTML = '';
+                emptyState.style.display = 'block';
+                return;
+            }
+
+            emptyState.style.display = 'none';
+            container.innerHTML = plugins.map(plugin => `
+                <div class="plugin-card" data-plugin="${plugin.name}">
+                    <div class="plugin-header">
+                        <div class="plugin-info">
+                            <div class="plugin-name">${plugin.name}</div>
+                            <div class="plugin-meta">
+                                版本: ${plugin.version} | 作者: ${plugin.author}
+                            </div>
+                        </div>
+                        <div class="plugin-actions">
+                            <span class="plugin-status ${plugin.enabled ? 'enabled' : (plugin.loaded ? 'disabled' : 'not-loaded')}">
+                                ${plugin.enabled ? '已启用' : (plugin.loaded ? '已停用' : '未加载')}
+                            </span>
+                            ${renderPluginButtons(plugin)}
+                        </div>
+                    </div>
+                    <div class="plugin-description">${plugin.description}</div>
+                    ${plugin.loaded ? renderConfigSection(plugin) : ''}
+                </div>
+            `).join('');
+
+            // 绑定事件
+            bindPluginActions();
+        }
+
+        // 渲染插件操作按钮
+        function renderPluginButtons(plugin) {
+            if (!plugin.loaded) {
+                return `<button class="action-btn primary" onclick="loadPlugin('${plugin.name}')">
+                    <i class="bi bi-box-arrow-in-down"></i> 加载
+                </button>`;
+            }
+
+            if (plugin.enabled) {
+                return `
+                    <button class="action-btn secondary" onclick="disablePlugin('${plugin.name}')">
+                        <i class="bi bi-pause-circle"></i> 停用
+                    </button>
+                    <button class="action-btn danger" onclick="unloadPlugin('${plugin.name}')">
+                        <i class="bi bi-box-arrow-up"></i> 卸载
+                    </button>
+                `;
+            } else {
+                return `
+                    <button class="action-btn primary" onclick="enablePlugin('${plugin.name}')">
+                        <i class="bi bi-play-circle"></i> 启用
+                    </button>
+                    <button class="action-btn danger" onclick="unloadPlugin('${plugin.name}')">
+                        <i class="bi bi-box-arrow-up"></i> 卸载
+                    </button>
+                `;
+            }
+        }
+
+        // 渲染配置区域
+        function renderConfigSection(plugin) {
+            const configJson = JSON.stringify(plugin.config || {}, null, 2);
+            return `
+                <div class="config-section">
+                    <label class="form-label">插件配置</label>
+                    <textarea class="config-editor" id="config-${plugin.name}" data-plugin="${plugin.name}">${configJson}</textarea>
+                    <button class="action-btn primary mt-2" onclick="savePluginConfig('${plugin.name}')">
+                        <i class="bi bi-save"></i> 保存配置
+                    </button>
+                </div>
+            `;
+        }
+
+        // 更新统计信息
+        function updateStats(plugins) {
+            document.getElementById('totalPlugins').textContent = plugins.length;
+            document.getElementById('enabledPlugins').textContent = plugins.filter(p => p.enabled).length;
+            document.getElementById('loadedPlugins').textContent = plugins.filter(p => p.loaded).length;
+            document.getElementById('availablePlugins').textContent = plugins.filter(p => !p.loaded).length;
+        }
+
+        // 加载插件
+        async function loadPlugin(name) {
+            showLoading();
+            try {
+                const result = await apiCall(`/api/plugins/load/${name}`, { method: 'POST' });
+                Swal.fire({
+                    icon: 'success',
+                    title: '加载成功',
+                    text: `插件 ${name} 已加载`,
+                    timer: 2000
+                });
+                loadPlugins();
+            } catch (error) {
+                Swal.fire({
+                    icon: 'error',
+                    title: '加载失败',
+                    text: error.message
+                });
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 卸载插件
+        async function unloadPlugin(name) {
+            const confirm = await Swal.fire({
+                title: '确认卸载',
+                text: `确定要卸载插件 ${name} 吗？`,
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: '确定',
+                cancelButtonText: '取消'
+            });
+
+            if (!confirm.isConfirmed) return;
+
+            showLoading();
+            try {
+                const result = await apiCall(`/api/plugins/unload/${name}`, { method: 'POST' });
+                Swal.fire({
+                    icon: 'success',
+                    title: '卸载成功',
+                    text: `插件 ${name} 已卸载`,
+                    timer: 2000
+                });
+                loadPlugins();
+            } catch (error) {
+                Swal.fire({
+                    icon: 'error',
+                    title: '卸载失败',
+                    text: error.message
+                });
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 启用插件
+        async function enablePlugin(name) {
+            showLoading();
+            try {
+                const result = await apiCall(`/api/plugins/enable/${name}`, { method: 'POST' });
+                Swal.fire({
+                    icon: 'success',
+                    title: '启用成功',
+                    text: `插件 ${name} 已启用`,
+                    timer: 2000
+                });
+                loadPlugins();
+            } catch (error) {
+                Swal.fire({
+                    icon: 'error',
+                    title: '启用失败',
+                    text: error.message
+                });
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 停用插件
+        async function disablePlugin(name) {
+            showLoading();
+            try {
+                const result = await apiCall(`/api/plugins/disable/${name}`, { method: 'POST' });
+                Swal.fire({
+                    icon: 'success',
+                    title: '停用成功',
+                    text: `插件 ${name} 已停用`,
+                    timer: 2000
+                });
+                loadPlugins();
+            } catch (error) {
+                Swal.fire({
+                    icon: 'error',
+                    title: '停用失败',
+                    text: error.message
+                });
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 保存插件配置
+        async function savePluginConfig(name) {
+            const editor = document.getElementById(`config-${name}`);
+            let config;
+
+            try {
+                config = JSON.parse(editor.value);
+            } catch (error) {
+                Swal.fire({
+                    icon: 'error',
+                    title: '配置格式错误',
+                    text: '请输入有效的 JSON 格式'
+                });
+                return;
+            }
+
+            showLoading();
+            try {
+                const result = await apiCall(`/api/plugins/config/${name}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ config })
+                });
+                Swal.fire({
+                    icon: 'success',
+                    title: '保存成功',
+                    text: `插件 ${name} 的配置已保存`,
+                    timer: 2000
+                });
+            } catch (error) {
+                Swal.fire({
+                    icon: 'error',
+                    title: '保存失败',
+                    text: error.message
+                });
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 绑定插件操作
+        function bindPluginActions() {
+            // 所有按钮已通过 onclick 绑定
+        }
+
+        // Loading overlay
+        function showLoading() {
+            document.getElementById('loadingOverlay').style.display = 'flex';
+        }
+
+        function hideLoading() {
+            document.getElementById('loadingOverlay').style.display = 'none';
+        }
+
+        // 页面加载时初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            loadPlugins();
+        });
+    </script>
+</body>
+</html>

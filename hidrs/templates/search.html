@@ -3,31 +3,92 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>全息搜索 - 全息互联网动态实时搜索系统</title>
+    <title data-i18n="search.title">全息搜索 - HIDRS</title>
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="/static/css/theme-styles.css">
+    <link rel="stylesheet" href="/static/css/backgrounds.css">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <style>
         body { padding-top: 2rem; }
-        .search-container { margin-bottom: 2rem; }
-        .result-item {
-            margin-bottom: 1.5rem;
-            padding: 1rem;
+        .search-container {
+            margin-bottom: 2rem;
+            background: var(--card-bg);
+            padding: 2rem;
             border-radius: 0.5rem;
             box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
+        }
+        .result-item {
+            margin-bottom: 1.5rem;
+            padding: 1.5rem;
+            border-radius: 0.5rem;
+            background: var(--card-bg);
+            box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
+            transition: all 0.3s;
+            border-left: 4px solid var(--primary-color);
+        }
+        .result-item:hover {
+            transform: translateX(5px);
+            box-shadow: 0 0.5rem 1rem rgba(0,0,0,0.15);
+        }
+        .result-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--primary-color);
+            margin-bottom: 0.5rem;
         }
         .loading {
             display: none;
             text-align: center;
-            padding: 2rem;
+            padding: 3rem;
+        }
+        .loading.active {
+            display: block;
+        }
+        .advanced-search-panel {
+            background: var(--card-bg);
+            border-radius: 0.5rem;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
+        }
+        .filter-group {
+            margin-bottom: 1rem;
+        }
+        .filter-label {
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            display: block;
+        }
+        .stats-card {
+            background: var(--card-bg);
+            padding: 1rem;
+            border-radius: 0.5rem;
+            text-align: center;
+            box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
+        }
+        .stats-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+        .stats-label {
+            font-size: 0.875rem;
+            color: var(--secondary-color);
         }
     </style>
 </head>
-<body>
+<body class="theme-default content-opacity-100">
+    <div id="background-overlay"></div>
+
     <div class="container">
         <div class="header mb-4">
-            <h1>全息搜索</h1>
-            <p class="lead">基于拉普拉斯矩阵谱分析和全息映射的高效信息检索</p>
+            <h1 data-i18n="search.title">全息搜索</h1>
+            <p class="lead" data-i18n="home.subtitle">基于拉普拉斯矩阵谱分析和全息映射的高效信息检索</p>
         </div>
-        
+
+        <!-- 导航栏（与 index.html 相同）-->
         <div class="row mb-4">
             <div class="col-md-12">
                 <nav class="navbar navbar-expand-lg navbar-light bg-light rounded">
@@ -37,20 +98,63 @@
                         </button>
                         <div class="collapse navbar-collapse" id="navbarNav">
                             <ul class="navbar-nav">
-                                <li class="nav-item">
-                                    <a class="nav-link" href="/">首页</a>
+                                <li class="nav-item"><a class="nav-link" href="/" data-i18n="nav.home">首页</a></li>
+                                <li class="nav-item"><a class="nav-link active" href="/search" data-i18n="nav.search">搜索</a></li>
+                                <li class="nav-item"><a class="nav-link" href="/network" data-i18n="nav.network">网络拓扑</a></li>
+                                <li class="nav-item"><a class="nav-link" href="/dashboard" data-i18n="nav.dashboard">仪表盘</a></li>
+                                <li class="nav-item"><a class="nav-link" href="/feedback" data-i18n="nav.feedback">决策反馈</a></li>
+                            </ul>
+                            <ul class="navbar-nav ms-auto">
+                                <li class="nav-item"><span class="nav-link theme-icon">☀️</span></li>
+                                <li class="nav-item dropdown">
+                                    <a class="nav-link dropdown-toggle" href="#" id="languageDropdown" role="button" data-bs-toggle="dropdown">
+                                        <i class="bi bi-globe"></i> <span data-i18n="settings.language">语言</span>
+                                    </a>
+                                    <ul class="dropdown-menu dropdown-menu-end">
+                                        <li><a class="dropdown-item active" href="#" data-lang="zh">中文</a></li>
+                                        <li><a class="dropdown-item" href="#" data-lang="en">English</a></li>
+                                    </ul>
                                 </li>
-                                <li class="nav-item">
-                                    <a class="nav-link active" href="/search">搜索</a>
-                                </li>
-                                <li class="nav-item">
-                                    <a class="nav-link" href="/network">网络拓扑</a>
-                                </li>
-                                <li class="nav-item">
-                                    <a class="nav-link" href="/dashboard">仪表盘</a>
-                                </li>
-                                <li class="nav-item">
-                                    <a class="nav-link" href="/feedback">决策反馈</a>
+                                <li class="nav-item dropdown">
+                                    <a class="nav-link dropdown-toggle" href="#" id="settingsDropdown" role="button" data-bs-toggle="dropdown">
+                                        <i class="bi bi-gear"></i> <span data-i18n="settings.title">设置</span>
+                                    </a>
+                                    <div class="dropdown-menu dropdown-menu-end settings-dropdown p-3" style="width: 280px;">
+                                        <h6 class="dropdown-header" data-i18n="settings.theme">主题</h6>
+                                        <div class="mb-3">
+                                            <select id="theme-selector" class="form-select form-select-sm">
+                                                <option value="theme-default">默认主题</option>
+                                                <option value="theme-dark">深色主题</option>
+                                                <option value="theme-blue">蓝色主题</option>
+                                                <option value="theme-purple">紫色主题</option>
+                                                <option value="theme-green">绿色主题</option>
+                                            </select>
+                                        </div>
+                                        <h6 class="dropdown-header" data-i18n="settings.background">背景</h6>
+                                        <div class="background-options compact mb-3">
+                                            <div class="bg-option active" data-bg="bg-image-none" title="无背景"><i class="bi bi-x-lg"></i></div>
+                                            <div class="bg-option" data-bg="bg-image-anime1" title="渐变1"></div>
+                                            <div class="bg-option" data-bg="bg-image-anime2" title="渐变2"></div>
+                                            <div class="bg-option" data-bg="bg-image-abstract" title="抽象"></div>
+                                            <div class="bg-option" data-bg="bg-image-tech" title="科技"></div>
+                                            <div class="bg-option" data-bg="bg-image-custom" title="自定义"><i class="bi bi-upload"></i></div>
+                                        </div>
+                                        <label for="custom-bg-upload" class="btn btn-sm btn-outline-secondary w-100 mb-3">
+                                            <i class="bi bi-upload"></i> <span data-i18n="settings.bg.upload">上传自定义背景</span>
+                                        </label>
+                                        <input type="file" id="custom-bg-upload" style="display: none;" accept="image/*">
+                                        <h6 class="dropdown-header" data-i18n="settings.opacity">内容透明度</h6>
+                                        <div class="opacity-options mb-3">
+                                            <div class="opacity-option active" data-opacity="content-opacity-100">100</div>
+                                            <div class="opacity-option" data-opacity="content-opacity-90">90</div>
+                                            <div class="opacity-option" data-opacity="content-opacity-80">80</div>
+                                            <div class="opacity-option" data-opacity="content-opacity-70">70</div>
+                                        </div>
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" id="glass-effect-toggle">
+                                            <label class="form-check-label" for="glass-effect-toggle" data-i18n="settings.glass-effect">毛玻璃效果</label>
+                                        </div>
+                                    </div>
                                 </li>
                             </ul>
                         </div>
@@ -58,112 +162,242 @@
                 </nav>
             </div>
         </div>
-        
+
+        <!-- 搜索框 -->
         <div class="search-container">
-            <div class="row">
+            <div class="row mb-3">
                 <div class="col-md-12">
-                    <div class="input-group mb-3">
-                        <input type="text" id="search-input" class="form-control form-control-lg" placeholder="输入搜索关键词...">
-                        <button class="btn btn-primary" type="button" id="search-button">搜索</button>
+                    <div class="input-group input-group-lg">
+                        <input type="text" class="form-control" id="searchQuery" placeholder="输入搜索关键词..." data-i18n="search.placeholder">
+                        <button class="btn btn-primary" type="button" id="searchBtn">
+                            <i class="bi bi-search"></i> <span data-i18n="search.button">搜索</span>
+                        </button>
+                        <button class="btn btn-outline-secondary" type="button" id="advancedToggle">
+                            <i class="bi bi-sliders"></i> <span data-i18n="search.advanced">高级</span>
+                        </button>
                     </div>
-                    <div class="form-check">
-                        <input class="form-check-input" type="checkbox" id="use-cache" checked>
-                        <label class="form-check-label" for="use-cache">
-                            使用缓存（更快的搜索结果）
-                        </label>
+                </div>
+            </div>
+
+            <!-- 高级搜索面板 -->
+            <div class="advanced-search-panel" id="advancedPanel" style="display: none;">
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="filter-group">
+                            <label class="filter-label" data-i18n="search.filter.time">时间范围</label>
+                            <select class="form-select" id="timeFilter">
+                                <option value="all" selected>不限时间</option>
+                                <option value="1h" data-i18n="search.filter.time.1h">过去1小时</option>
+                                <option value="24h" data-i18n="search.filter.time.24h">过去24小时</option>
+                                <option value="7d" data-i18n="search.filter.time.7d">过去7天</option>
+                                <option value="30d" data-i18n="search.filter.time.30d">过去30天</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="filter-group">
+                            <label class="filter-label">搜索字段</label>
+                            <select class="form-select" id="fieldFilter">
+                                <option value="all" selected>全部字段</option>
+                                <option value="title">标题</option>
+                                <option value="content">内容</option>
+                                <option value="url">URL</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="filter-group">
+                            <label class="filter-label" data-i18n="search.filter.platform">数据源</label>
+                            <select class="form-select" id="platformFilter">
+                                <option value="all" selected data-i18n="search.filter.platform.all">全部</option>
+                                <option value="wikipedia">Wikipedia</option>
+                                <option value="zhihu">知乎</option>
+                                <option value="bilibili">Bilibili</option>
+                                <option value="github">GitHub</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-4">
+                        <div class="filter-group">
+                            <label class="filter-label">结果数量</label>
+                            <select class="form-select" id="limitFilter">
+                                <option value="10">10 条</option>
+                                <option value="20" selected>20 条</option>
+                                <option value="50">50 条</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="filter-group">
+                            <label class="filter-label">排序方式</label>
+                            <select class="form-select" id="sortFilter">
+                                <option value="relevance" selected>相关度</option>
+                                <option value="time">时间</option>
+                                <option value="score">评分</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="filter-group">
+                            <label class="filter-label">其他选项</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="useCache" checked>
+                                <label class="form-check-label" for="useCache" data-i18n="search.cache">使用缓存</label>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
-        
+
+        <!-- 统计信息 -->
+        <div class="row mb-4" id="statsRow" style="display: none;">
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <div class="stats-value" id="totalResults">0</div>
+                    <div class="stats-label">搜索结果</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <div class="stats-value" id="searchTime">0ms</div>
+                    <div class="stats-label">搜索耗时</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <div class="stats-value" id="clusterCount">0</div>
+                    <div class="stats-label">聚类数</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <div class="stats-value" id="avgScore">0.0</div>
+                    <div class="stats-label">平均相关度</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 加载动画 -->
         <div class="loading" id="loading">
-            <div class="spinner-border text-primary" role="status">
+            <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
                 <span class="visually-hidden">Loading...</span>
             </div>
-            <p class="mt-2">搜索中，请稍候...</p>
+            <p class="mt-3" data-i18n="search.loading">搜索中...</p>
         </div>
-        
-        <div class="results-container" id="results-container">
-            <div class="alert alert-info" role="alert">
-                输入关键词开始搜索。
-            </div>
-        </div>
-        
-        <div class="mt-5 pt-3 text-center">
-            <p class="text-muted">© 2023 全息互联网动态实时搜索系统</p>
-        </div>
+
+        <!-- 搜索结果 -->
+        <div id="resultsContainer"></div>
     </div>
-    
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/theme-manager.js"></script>
+    <script src="/static/js/language-manager.js"></script>
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const searchInput = document.getElementById('search-input');
-            const searchButton = document.getElementById('search-button');
-            const useCache = document.getElementById('use-cache');
-            const loading = document.getElementById('loading');
-            const resultsContainer = document.getElementById('results-container');
-            
-            searchButton.addEventListener('click', performSearch);
-            searchInput.addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') {
-                    performSearch();
-                }
-            });
-            
-            function performSearch() {
-                const query = searchInput.value.trim();
-                if (!query) return;
-                
-                // 显示加载状态
-                loading.style.display = 'block';
-                resultsContainer.innerHTML = '';
-                
-                // 构建API URL
-                const apiUrl = `/api/search?q=${encodeURIComponent(query)}&cache=${useCache.checked}&limit=20`;
-                
-                // 发送请求
-                fetch(apiUrl)
-                    .then(response => response.json())
-                    .then(data => {
-                        // 隐藏加载状态
-                        loading.style.display = 'none';
-                        
-                        // 显示结果
-                        if (data.length === 0) {
-                            resultsContainer.innerHTML = `
-                                <div class="alert alert-warning" role="alert">
-                                    没有找到与 "${query}" 相关的结果。
-                                </div>
-                            `;
-                        } else {
-                            const resultsHtml = data.map((item, index) => `
-                                <div class="result-item bg-light">
-                                    <h5><a href="${item.url}" target="_blank">${item.title || '无标题'}</a></h5>
-                                    <p class="text-muted">${item.url}</p>
-                                    <div class="d-flex justify-content-between">
-                                        <span class="badge bg-info">相关度: ${(item.score * 100).toFixed(2)}%</span>
-                                        <span class="badge bg-secondary">聚类: ${item.cluster_id}</span>
-                                    </div>
-                                </div>
-                            `).join('');
-                            
-                            resultsContainer.innerHTML = `
-                                <h4>找到 ${data.length} 条结果:</h4>
-                                ${resultsHtml}
-                            `;
-                        }
-                    })
-                    .catch(error => {
-                        loading.style.display = 'none';
-                        resultsContainer.innerHTML = `
-                            <div class="alert alert-danger" role="alert">
-                                搜索出错: ${error.message}
-                            </div>
-                        `;
-                        console.error('Search error:', error);
-                    });
-            }
+        const searchBtn = document.getElementById('searchBtn');
+        const searchQuery = document.getElementById('searchQuery');
+        const resultsContainer = document.getElementById('resultsContainer');
+        const loading = document.getElementById('loading');
+        const advancedToggle = document.getElementById('advancedToggle');
+        const advancedPanel = document.getElementById('advancedPanel');
+        const statsRow = document.getElementById('statsRow');
+
+        advancedToggle.addEventListener('click', () => {
+            advancedPanel.style.display = advancedPanel.style.display === 'none' ? 'block' : 'none';
+            advancedToggle.innerHTML = advancedPanel.style.display === 'block' ?
+                '<i class="bi bi-sliders"></i> 隐藏高级选项' :
+                '<i class="bi bi-sliders"></i> <span data-i18n="search.advanced">高级</span>';
         });
+
+        searchQuery.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') performSearch();
+        });
+
+        searchBtn.addEventListener('click', performSearch);
+
+        function performSearch() {
+            const query = searchQuery.value.trim();
+            if (!query) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: '请输入搜索关键词',
+                    toast: true,
+                    position: 'top-end',
+                    showConfirmButton: false,
+                    timer: 2000
+                });
+                return;
+            }
+
+            const params = new URLSearchParams({
+                q: query,
+                limit: document.getElementById('limitFilter').value,
+                cache: document.getElementById('useCache').checked
+            });
+
+            loading.classList.add('active');
+            resultsContainer.innerHTML = '';
+            statsRow.style.display = 'none';
+
+            const startTime = performance.now();
+
+            fetch(`/api/search?${params}`)
+                .then(response => response.json())
+                .then(data => {
+                    const searchTime = Math.round(performance.now() - startTime);
+                    loading.classList.remove('active');
+
+                    if (data && data.length > 0) {
+                        displayResults(data, searchTime);
+                    } else {
+                        resultsContainer.innerHTML = '<div class="alert alert-info text-center"><i class="bi bi-info-circle"></i> <span data-i18n="search.no-results">未找到匹配的结果</span></div>';
+                    }
+                })
+                .catch(error => {
+                    loading.classList.remove('active');
+                    console.error('搜索失败:', error);
+                    Swal.fire({
+                        icon: 'error',
+                        title: '搜索失败',
+                        text: error.message || '服务器连接失败，请稍后重试'
+                    });
+                });
+        }
+
+        function displayResults(results, searchTime) {
+            const totalResults = results.length;
+            const clusters = new Set(results.map(r => r.cluster_id)).size;
+            const avgScore = (results.reduce((sum, r) => sum + (r.score || 0), 0) / totalResults).toFixed(2);
+
+            document.getElementById('totalResults').textContent = totalResults;
+            document.getElementById('searchTime').textContent = searchTime + 'ms';
+            document.getElementById('clusterCount').textContent = clusters;
+            document.getElementById('avgScore').textContent = avgScore;
+            statsRow.style.display = 'flex';
+
+            let html = '';
+            results.forEach((result) => {
+                html += `
+                    <div class="result-item">
+                        <div class="result-title">
+                            <a href="${result.url || '#'}" target="_blank" style="text-decoration: none; color: inherit;">
+                                ${result.title || '无标题'}
+                            </a>
+                        </div>
+                        <div class="result-meta">
+                            <span class="badge bg-success">相关度: ${(result.score || 0).toFixed(3)}</span>
+                            ${result.cluster_id !== undefined ? `<span class="badge bg-info ms-2">聚类 ${result.cluster_id}</span>` : ''}
+                        </div>
+                        <div class="mt-2">${result.content ? result.content.substring(0, 200) + '...' : '无内容预览'}</div>
+                        ${result.url ? `<div class="mt-2"><small class="text-muted">${result.url}</small></div>` : ''}
+                    </div>
+                `;
+            });
+
+            resultsContainer.innerHTML = html;
+        }
     </script>
 </body>
 </html>
