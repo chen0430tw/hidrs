@@ -23,6 +23,11 @@ beautifulsoup4==4.12.2
 python-nmap==0.7.1
 netifaces==0.11.0  # 网络接口检测
 
+# Common Crawl 数据接入
+warcio==1.7.4  # 流式WARC文件解析（推荐）
+comcrawl==1.1.0  # Common Crawl索引搜索（简化接口）
+boto3==1.28.0  # AWS S3直连（备用）
+
 # 机器学习与特征提取
 scikit-learn==1.2.2
 tensorflow==2.12.0
