@@ -690,6 +690,11 @@ class HIDRSFirewall:
     """
     HIDRS反向防火墙
     整合所有自我保护机制
+
+    支持三种运行模式：
+    1. 正式模式 (live): 完整防御功能
+    2. 模拟模式 (simulation): 只记录日志，不实际执行防御动作
+    3. 测试模式 (test): 小范围测试，仅对白名单IP执行防御
     """
 
     def __init__(
@@ -698,7 +703,12 @@ class HIDRSFirewall:
         enable_hlig_detection: bool = True,
         enable_syn_cookies: bool = True,
         enable_tarpit: bool = True,
-        enable_traffic_reflection: bool = False  # 默认禁用攻击性功能
+        enable_traffic_reflection: bool = False,  # 默认禁用攻击性功能
+        enable_attack_memory: bool = True,  # 启用攻击记忆系统
+        simulation_mode: bool = False,  # 模拟模式
+        test_mode: bool = False,  # 测试模式
+        test_whitelist_ips: List[str] = None,  # 测试白名单IP
+        max_test_clients: int = 10  # 最大测试客户端数
     ):
         """
         初始化HIDRS防火墙
@@ -709,10 +719,21 @@ class HIDRSFirewall:
         - enable_syn_cookies: 启用SYN Cookie
         - enable_tarpit: 启用Tarpit
         - enable_traffic_reflection: 启用流量反射（⚠️ 攻击性功能）
+        - enable_attack_memory: 启用攻击记忆系统
+        - simulation_mode: 模拟模式（不实际执行防御）
+        - test_mode: 测试模式（小范围测试）
+        - test_whitelist_ips: IP白名单（测试模式用）
+        - max_test_clients: 最大测试客户端数
         """
         logger.info("=" * 60)
         logger.info("🛡️  HIDRS反向防火墙初始化")
         logger.info("=" * 60)
+
+        # 模式配置
+        self.simulation_mode = simulation_mode
+        self.test_mode = test_mode
+        self.test_whitelist_ips = test_whitelist_ips or []
+        self.max_test_clients = max_test_clients
 
         # 组件初始化
         self.packet_analyzer = PacketAnalyzer()
@@ -722,6 +743,17 @@ class HIDRSFirewall:
         self.syn_cookie = SYNCookieDefense() if enable_syn_cookies else None
         self.tarpit = TarpitDefense() if enable_tarpit else None
         self.reflector = TrafficReflector(enable_reflection=enable_traffic_reflection)
+
+        # 攻击记忆系统
+        self.attack_memory = None
+        if enable_attack_memory:
+            from .attack_memory import AttackMemorySystem
+            self.attack_memory = AttackMemorySystem(
+                simulation_mode=simulation_mode,
+                test_mode=test_mode,
+                test_whitelist_ips=test_whitelist_ips,
+                max_test_clients=max_test_clients
+            )
 
         # 连接追踪
         self.connections = {}  # ip -> ConnectionProfile
@@ -733,17 +765,30 @@ class HIDRSFirewall:
             'suspicious_packets': 0,
             'tarpitted_connections': 0,
             'reflected_attacks': 0,
-            'active_probes': 0
+            'active_probes': 0,
+            'memory_recognitions': 0  # 记忆识别次数
         }
 
         # 自动清理线程
         self.running = False
         self.cleanup_thread = None
 
+        # 输出配置信息
+        mode = 'simulation' if simulation_mode else ('test' if test_mode else 'live')
+        logger.info(f"  运行模式: {mode.upper()}")
+        if simulation_mode:
+            logger.warning(f"  ⚠️ 模拟模式 - 不会实际执行防御动作")
+        elif test_mode:
+            logger.warning(
+                f"  ⚠️ 测试模式 - 仅限白名单IP ({len(self.test_whitelist_ips)}个) "
+                f"和最多 {max_test_clients} 个客户端"
+            )
+
         logger.info(f"  主动探测: {'✅' if enable_active_probing else '❌'}")
         logger.info(f"  HLIG检测: {'✅' if enable_hlig_detection else '❌'}")
         logger.info(f"  SYN Cookies: {'✅' if enable_syn_cookies else '❌'}")
         logger.info(f"  Tarpit: {'✅' if enable_tarpit else '❌'}")
+        logger.info(f"  攻击记忆: {'✅' if enable_attack_memory else '❌'}")
         logger.info(f"  流量反射: {'⚠️  已启用' if enable_traffic_reflection else '❌'}")
         logger.info("=" * 60)
 
@@ -760,6 +805,12 @@ class HIDRSFirewall:
     def stop(self):
         """停止防火墙"""
         self.running = False
+
+        # 保存攻击记忆
+        if self.attack_memory:
+            self.attack_memory.save_memory()
+            logger.info("[HIDRSFirewall] 攻击记忆已保存")
+
         logger.info("[HIDRSFirewall] 防火墙已停止")
 
     def process_packet(
@@ -804,6 +855,27 @@ class HIDRSFirewall:
                 ', '.join(analysis['threat_indicators'])
             )
 
+            # 2.1 攻击记忆系统：快速识别已知攻击模式
+            if self.attack_memory and analysis['threat_indicators']:
+                recognized_pattern = self.attack_memory.recognize_attack(analysis['threat_indicators'])
+
+                if recognized_pattern:
+                    self.stats['memory_recognitions'] += 1
+                    logger.info(
+                        f"[HIDRSFirewall] 🧠 识别到已知攻击模式: {recognized_pattern.pattern_id} "
+                        f"(出现过 {recognized_pattern.occurrence_count} 次)"
+                    )
+
+                    # 学习本次攻击（更新频率）
+                    self.attack_memory.learn_attack(
+                        src_ip=src_ip,
+                        attack_type=recognized_pattern.attack_type,
+                        signatures=analysis['threat_indicators'],
+                        packet_size=len(packet_data),
+                        success=False,
+                        port=dst_port
+                    )
+
         # 3. 获取或创建连接画像
         if src_ip not in self.connections:
             self.connections[src_ip] = ConnectionProfile(
@@ -844,45 +916,76 @@ class HIDRSFirewall:
                     profile.threat_level = ThreatLevel.MALICIOUS
                     self.reputation_system.report_malicious(src_ip, 'Scanner detected')
 
-        # 6. 决策
+        # 6. 决策（考虑运行模式）
         action = 'allow'
         reason = 'Normal traffic'
 
-        if profile.threat_level == ThreatLevel.CRITICAL:
-            action = 'block'
-            reason = 'Critical threat'
+        # 检查是否应该执行防御（根据模式）
+        should_defend = True
+        defense_reason = 'live_mode'
 
-            # 可选：反射攻击
-            if self.reflector.enable_reflection:
-                self.reflector.reflect_attack(src_ip, 'http_flood', 100)
-                self.stats['reflected_attacks'] += 1
+        if self.attack_memory and profile.threat_level >= ThreatLevel.SUSPICIOUS:
+            # 使用攻击记忆系统判断是否防御
+            attack_type = analysis.get('attack_type', 'unknown') if analysis.get('suspicious') else 'suspicious'
+            should_defend, defense_reason = self.attack_memory.should_defend_against(src_ip, attack_type)
+
+        if profile.threat_level == ThreatLevel.CRITICAL:
+            if should_defend:
+                action = 'block'
+                reason = 'Critical threat'
+
+                # 可选：反射攻击
+                if self.reflector.enable_reflection:
+                    self.reflector.reflect_attack(src_ip, 'http_flood', 100)
+                    self.stats['reflected_attacks'] += 1
+            else:
+                action = 'allow'
+                reason = f'Critical threat (not defended: {defense_reason})'
+                if self.simulation_mode:
+                    logger.info(f"[HIDRSFirewall] 🎬 模拟模式：将阻断 {src_ip}")
+                elif self.test_mode:
+                    logger.debug(f"[HIDRSFirewall] 测试模式：{src_ip} 未在白名单，跳过阻断")
 
         elif profile.threat_level == ThreatLevel.MALICIOUS:
-            # Tarpit攻击者
-            if self.tarpit:
-                self.tarpit.add_to_tarpit(src_ip)
-                action = 'tarpit'
-                reason = 'Malicious activity'
-                self.stats['tarpitted_connections'] += 1
+            if should_defend:
+                # Tarpit攻击者
+                if self.tarpit:
+                    self.tarpit.add_to_tarpit(src_ip)
+                    action = 'tarpit'
+                    reason = 'Malicious activity'
+                    self.stats['tarpitted_connections'] += 1
+            else:
+                action = 'allow'
+                reason = f'Malicious activity (not defended: {defense_reason})'
+                if self.simulation_mode:
+                    logger.info(f"[HIDRSFirewall] 🎬 模拟模式：将Tarpit {src_ip}")
 
         elif profile.threat_level == ThreatLevel.SUSPICIOUS:
-            # 可疑流量，降低优先级但不阻断
-            action = 'rate_limit'
-            reason = 'Suspicious pattern detected'
+            if should_defend:
+                # 可疑流量，降低优先级但不阻断
+                action = 'rate_limit'
+                reason = 'Suspicious pattern detected'
+            else:
+                action = 'allow'
+                reason = f'Suspicious pattern (not defended: {defense_reason})'
 
         return {
             'action': action,
             'reason': reason,
             'threat_level': profile.threat_level,
             'reputation': reputation,
-            'anomaly_score': profile.fiedler_anomaly_score
+            'anomaly_score': profile.fiedler_anomaly_score,
+            'defense_mode': defense_reason
         }
 
     def _cleanup_loop(self):
         """清理循环"""
+        cleanup_counter = 0
+
         while self.running:
             try:
                 time.sleep(300)  # 5分钟
+                cleanup_counter += 1
 
                 # 清理过期连接
                 now = datetime.utcnow()
@@ -898,6 +1001,11 @@ class HIDRSFirewall:
                 if self.syn_cookie:
                     self.syn_cookie.cleanup_expired()
 
+                # 每小时清理一次旧记忆（12次 * 5分钟 = 60分钟）
+                if self.attack_memory and cleanup_counter % 12 == 0:
+                    self.attack_memory.cleanup_old_memories(days=30)
+                    self.attack_memory.save_memory()
+
                 logger.debug(f"[HIDRSFirewall] 清理完成，移除 {len(expired)} 个过期连接")
 
             except Exception as e:
@@ -905,12 +1013,19 @@ class HIDRSFirewall:
 
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""
-        return {
+        stats = {
             **self.stats,
             'active_connections': len(self.connections),
             'blacklisted_ips': len(self.reputation_system.blacklist),
             'whitelisted_ips': len(self.reputation_system.whitelist)
         }
+
+        # 添加攻击记忆统计
+        if self.attack_memory:
+            memory_stats = self.attack_memory.get_stats()
+            stats['attack_memory'] = memory_stats
+
+        return stats
 
     def get_threat_report(self) -> Dict[str, Any]:
         """获取威胁报告"""
@@ -942,6 +1057,71 @@ class HIDRSFirewall:
 
         return threats
 
+    def get_top_threats(self, limit: int = 10) -> List[Dict]:
+        """
+        获取威胁最高的攻击者（基于记忆系统）
+
+        参数:
+        - limit: 返回数量限制
+
+        返回:
+        - 攻击者列表（按威胁分排序）
+        """
+        if not self.attack_memory:
+            return []
+
+        top_profiles = self.attack_memory.get_top_threats(limit=limit)
+
+        return [
+            {
+                'ip': profile.ip,
+                'threat_score': profile.threat_score,
+                'total_attacks': profile.total_attacks,
+                'attack_types': profile.attack_types,
+                'sophistication_level': profile.sophistication_level,
+                'first_attack': profile.first_attack.isoformat(),
+                'last_attack': profile.last_attack.isoformat()
+            }
+            for profile in top_profiles
+        ]
+
+    def predict_next_attack(self, ip: str) -> Optional[Dict]:
+        """
+        预测指定IP的下一步攻击
+
+        参数:
+        - ip: 攻击者IP
+
+        返回:
+        - 预测信息（如果有历史记录）
+        """
+        if not self.attack_memory:
+            return None
+
+        return self.attack_memory.predict_next_attack(ip)
+
+    def get_simulation_log(self, limit: int = 100) -> Dict:
+        """
+        获取模拟日志（仅模拟模式）
+
+        参数:
+        - limit: 返回条目数限制
+
+        返回:
+        - 模拟日志
+        """
+        if not self.attack_memory:
+            return {'error': '攻击记忆系统未启用'}
+
+        return self.attack_memory.get_simulation_log(limit=limit)
+
+    def get_memory_stats(self) -> Dict:
+        """获取攻击记忆系统统计信息"""
+        if not self.attack_memory:
+            return {'error': '攻击记忆系统未启用'}
+
+        return self.attack_memory.get_stats()
+
 
 # 使用示例
 if __name__ == '__main__':
@@ -953,32 +1133,24 @@ if __name__ == '__main__':
     print("🛡️  HIDRS反向防火墙演示")
     print("=" * 70)
 
-    # 初始化防火墙
-    firewall = HIDRSFirewall(
+    # ========== 示例1: 正式模式 ==========
+    print("\n【示例1：正式模式 (Live Mode)】")
+    print("-" * 70)
+
+    firewall_live = HIDRSFirewall(
         enable_active_probing=True,
         enable_hlig_detection=True,
         enable_syn_cookies=True,
         enable_tarpit=True,
-        enable_traffic_reflection=False  # 演示环境禁用攻击性功能
+        enable_traffic_reflection=False,
+        enable_attack_memory=True
     )
 
-    firewall.start()
-
-    # 模拟正常流量
-    print("\n测试1: 正常流量")
-    result = firewall.process_packet(
-        b'GET / HTTP/1.1\r\nHost: example.com\r\n',
-        '1.2.3.4',
-        12345,
-        '10.0.0.1',
-        80,
-        'tcp'
-    )
-    print(f"结果: {result}")
+    firewall_live.start()
 
     # 模拟SQL注入攻击
-    print("\n测试2: SQL注入攻击")
-    result = firewall.process_packet(
+    print("\n测试: SQL注入攻击")
+    result = firewall_live.process_packet(
         b"GET /?id=1' OR 1=1-- HTTP/1.1\r\n",
         '5.6.7.8',
         54321,
@@ -988,8 +1160,139 @@ if __name__ == '__main__':
     )
     print(f"结果: {result}")
 
-    # 模拟HTTP Flood
-    print("\n测试3: HTTP Flood")
+    # 显示统计
+    print("\n统计信息:")
+    stats = firewall_live.get_stats()
+    print(f"  总包数: {stats['total_packets']}")
+    print(f"  可疑包数: {stats['suspicious_packets']}")
+    print(f"  记忆识别: {stats['memory_recognitions']}")
+    if 'attack_memory' in stats:
+        print(f"  已知模式: {stats['attack_memory']['total_patterns']}")
+        print(f"  已知攻击者: {stats['attack_memory']['total_attackers']}")
+
+    firewall_live.stop()
+
+    # ========== 示例2: 模拟模式 ==========
+    print("\n\n【示例2：模拟模式 (Simulation Mode)】")
+    print("-" * 70)
+
+    firewall_sim = HIDRSFirewall(
+        enable_active_probing=True,
+        enable_hlig_detection=True,
+        enable_attack_memory=True,
+        simulation_mode=True  # 启用模拟模式
+    )
+
+    firewall_sim.start()
+
+    # 模拟攻击
+    print("\n测试: XSS攻击（模拟模式）")
+    result = firewall_sim.process_packet(
+        b"GET /?msg=<script>alert('XSS')</script> HTTP/1.1\r\n",
+        '8.8.8.8',
+        12345,
+        '10.0.0.1',
+        80,
+        'tcp'
+    )
+    print(f"结果: {result}")
+    print(f"  动作: {result['action']} (模拟模式不会实际阻断)")
+    print(f"  防御模式: {result.get('defense_mode', 'N/A')}")
+
+    # 查看模拟日志
+    print("\n模拟日志:")
+    sim_log = firewall_sim.get_simulation_log(limit=5)
+    if 'logs' in sim_log:
+        print(f"  总日志数: {sim_log['total']}")
+        for log in sim_log['logs'][:3]:
+            print(f"  - {log['action']}: {log['timestamp']}")
+
+    firewall_sim.stop()
+
+    # ========== 示例3: 测试模式 ==========
+    print("\n\n【示例3：测试模式 (Test Mode)】")
+    print("-" * 70)
+
+    firewall_test = HIDRSFirewall(
+        enable_active_probing=True,
+        enable_hlig_detection=True,
+        enable_attack_memory=True,
+        test_mode=True,
+        test_whitelist_ips=['192.168.1.0/24', '10.0.0.1'],
+        max_test_clients=5
+    )
+
+    firewall_test.start()
+
+    # 测试白名单IP
+    print("\n测试1: 白名单IP (192.168.1.100)")
+    result = firewall_test.process_packet(
+        b"GET /?malicious=true HTTP/1.1\r\n",
+        '192.168.1.100',
+        12345,
+        '10.0.0.1',
+        80,
+        'tcp'
+    )
+    print(f"  动作: {result['action']}")
+    print(f"  防御模式: {result.get('defense_mode', 'N/A')}")
+
+    # 测试非白名单IP
+    print("\n测试2: 非白名单IP (1.2.3.4)")
+    result = firewall_test.process_packet(
+        b"GET /?malicious=true HTTP/1.1\r\n",
+        '1.2.3.4',
+        12345,
+        '10.0.0.1',
+        80,
+        'tcp'
+    )
+    print(f"  动作: {result['action']}")
+    print(f"  防御模式: {result.get('defense_mode', 'N/A')}")
+
+    firewall_test.stop()
+
+    # ========== 完整功能演示 ==========
+    print("\n\n【完整功能演示】")
+    print("-" * 70)
+
+    firewall = HIDRSFirewall(
+        enable_active_probing=True,
+        enable_hlig_detection=True,
+        enable_syn_cookies=True,
+        enable_tarpit=True,
+        enable_traffic_reflection=False,
+        enable_attack_memory=True
+    )
+
+    firewall.start()
+
+    # 正常流量
+    print("\n测试1: 正常流量")
+    result = firewall.process_packet(
+        b'GET / HTTP/1.1\r\nHost: example.com\r\n',
+        '1.2.3.4',
+        12345,
+        '10.0.0.1',
+        80,
+        'tcp'
+    )
+    print(f"  动作: {result['action']}, 原因: {result['reason']}")
+
+    # SQL注入攻击
+    print("\n测试2: SQL注入攻击")
+    result = firewall.process_packet(
+        b"GET /?id=1' OR 1=1-- HTTP/1.1\r\n",
+        '5.6.7.8',
+        54321,
+        '10.0.0.1',
+        80,
+        'tcp'
+    )
+    print(f"  动作: {result['action']}, 原因: {result['reason']}")
+
+    # HTTP Flood
+    print("\n测试3: HTTP Flood (100个请求)")
     for i in range(100):
         result = firewall.process_packet(
             b'GET / HTTP/1.1\r\n',
@@ -999,13 +1302,45 @@ if __name__ == '__main__':
             80,
             'tcp'
         )
-    print(f"结果: {result}")
+    print(f"  最终动作: {result['action']}, 原因: {result['reason']}")
 
-    # 显示统计
+    # 统计信息
     print("\n统计信息:")
     stats = firewall.get_stats()
-    for key, value in stats.items():
-        print(f"  {key}: {value}")
+    print(f"  总包数: {stats['total_packets']}")
+    print(f"  阻断包数: {stats['blocked_packets']}")
+    print(f"  可疑包数: {stats['suspicious_packets']}")
+    print(f"  Tarpit连接: {stats['tarpitted_connections']}")
+    print(f"  记忆识别: {stats['memory_recognizations']}")
+    print(f"  活跃连接: {stats['active_connections']}")
+
+    # 攻击记忆统计
+    if 'attack_memory' in stats:
+        mem_stats = stats['attack_memory']
+        print(f"\n攻击记忆统计:")
+        print(f"  运行模式: {mem_stats['mode']}")
+        print(f"  已知模式: {mem_stats['total_patterns']}")
+        print(f"  已知攻击者: {mem_stats['total_attackers']}")
+        print(f"  记忆的攻击: {mem_stats['total_attacks_remembered']}")
+        print(f"  平均威胁分: {mem_stats['average_threat_score']:.1f}")
+
+    # Top威胁
+    print("\nTop 5威胁:")
+    top_threats = firewall.get_top_threats(limit=5)
+    for i, threat in enumerate(top_threats, 1):
+        print(f"  {i}. {threat['ip']} - 威胁分: {threat['threat_score']:.1f}, "
+              f"攻击次数: {threat['total_attacks']}, "
+              f"复杂度: {threat['sophistication_level']}/5")
+
+    # 预测攻击
+    if top_threats:
+        top_ip = top_threats[0]['ip']
+        print(f"\n预测 {top_ip} 的下一步攻击:")
+        prediction = firewall.predict_next_attack(top_ip)
+        if prediction:
+            print(f"  预测类型: {prediction['predicted_type']}")
+            print(f"  置信度: {prediction['confidence']}%")
+            print(f"  可能端口: {prediction['predicted_ports']}")
 
     # 威胁报告
     print("\n威胁报告:")
@@ -1014,4 +1349,5 @@ if __name__ == '__main__':
         print(f"  {level.upper()}: {len(items)} 个")
 
     firewall.stop()
-    print("\n防火墙已停止")
+    print("\n" + "=" * 70)
+    print("演示完成！")
