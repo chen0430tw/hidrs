@@ -36,22 +36,36 @@ HLIG理论应用：
 - 分布式计算 = 我有任务，找最优节点借用全球算力
 """
 
-from .node_manager import NodeManager, ComputeNode
+from .node_manager import NodeManager, ComputeNode, NodeStatus
 from .capability_analyzer import CapabilityAnalyzer, NodeCapability
-from .hlig_task_scheduler import HLIGTaskScheduler, ComputeTask
+from .hlig_task_scheduler import HLIGTaskScheduler, ComputeTask, TaskType, TaskStatus
 from .hlig_load_balancer import HLIGLoadBalancer
 from .compute_worker import ComputeWorker, WorkerStatus
-from .result_aggregator import ResultAggregator
+from .result_aggregator import ResultAggregator, AggregationType
+from .network_detector import NetworkDetector, NetworkStatus, NetworkType
+from .auto_broadcaster import AutoBroadcaster, BroadcastMessage
+from .topology_updater import TopologyUpdater, TopologySnapshot
 
 __all__ = [
     'NodeManager',
     'ComputeNode',
+    'NodeStatus',
     'CapabilityAnalyzer',
     'NodeCapability',
     'HLIGTaskScheduler',
     'ComputeTask',
+    'TaskType',
+    'TaskStatus',
     'HLIGLoadBalancer',
     'ComputeWorker',
     'WorkerStatus',
-    'ResultAggregator'
+    'ResultAggregator',
+    'AggregationType',
+    'NetworkDetector',
+    'NetworkStatus',
+    'NetworkType',
+    'AutoBroadcaster',
+    'BroadcastMessage',
+    'TopologyUpdater',
+    'TopologySnapshot'
 ]
