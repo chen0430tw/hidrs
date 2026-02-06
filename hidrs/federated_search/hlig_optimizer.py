@@ -128,8 +128,7 @@ class HLIGOptimizer:
         - 重排序后的结果列表
         """
         try:
-            from hidrs.network_topology.laplacian_matrix_calculator import LaplacianMatrixCalculator
-            from hidrs.network_topology.spectral_analyzer import SpectralAnalyzer
+            from hidrs.hlig import SpectralClustering
 
             # 1. 提取特征向量
             feature_vectors = []
@@ -160,16 +159,29 @@ class HLIGOptimizer:
                 logger.warning("[HLIGOptimizer] 相似度矩阵为空，返回原始结果")
                 return results
 
-            # 3. 构建拉普拉斯矩阵
-            laplacian_calc = LaplacianMatrixCalculator(normalized=True)
-            L = laplacian_calc.compute_laplacian(W)
+            # 3. 使用SpectralClustering进行谱分析
+            # 注意：我们设置n_clusters=2只是为了获取Fiedler向量，不是真的要聚类
+            clustering = SpectralClustering(
+                n_clusters=2,
+                normalized=True,
+                affinity='precomputed'  # 使用预计算的相似度矩阵
+            )
 
-            # 4. 计算Fiedler向量
-            spectral = SpectralAnalyzer(use_sparse=True, k=10)
-            fiedler_vector = spectral.compute_fiedler_vector(L)
-            fiedler_value = spectral.compute_fiedler_value(L)
+            # 执行谱分析（内部会计算拉普拉斯矩阵和特征向量）
+            clustering.fit(W)
 
-            logger.info(f"[HLIGOptimizer] HLIG分析完成: Fiedler值={fiedler_value:.6f}")
+            # 4. 获取Fiedler向量
+            fiedler_vector = clustering.get_fiedler_vector()
+
+            if fiedler_vector is None:
+                logger.warning("[HLIGOptimizer] 无法获取Fiedler向量，返回原始结果")
+                return results
+
+            # 计算Fiedler值（第二小特征值的近似）
+            # 这里我们用Fiedler向量的方差作为近似
+            fiedler_value = float(np.var(fiedler_vector))
+
+            logger.info(f"[HLIGOptimizer] HLIG分析完成: Fiedler方差={fiedler_value:.6f}")
 
             # 5. 重排序
             for i, result in enumerate(valid_results):

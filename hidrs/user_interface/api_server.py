@@ -180,6 +180,10 @@ class ApiServer:
         def broadcast_player_page():
             return render_template('broadcast_player.html')
 
+        @self.app.route('/commoncrawl')
+        def commoncrawl_page():
+            return render_template('commoncrawl_search.html')
+
         # API路由
         @self.app.route('/api/search', methods=['GET'])
         def api_search():
@@ -1054,6 +1058,122 @@ class ApiServer:
                 return jsonify(result)
             except Exception as e:
                 logger.error(f"Activate hijack mode error: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        # ===== Common Crawl API =====
+        @self.app.route('/api/commoncrawl/search', methods=['GET'])
+        def api_commoncrawl_search():
+            """Common Crawl搜索"""
+            try:
+                from hidrs.commoncrawl import CommonCrawlQueryEngine
+
+                # 获取查询参数
+                keywords_str = request.args.get('keywords', '')
+                keywords = [k.strip() for k in keywords_str.split(',') if k.strip()]
+                domain = request.args.get('domain', '')
+                from_date = request.args.get('from_date', '')
+                to_date = request.args.get('to_date', '')
+                language = request.args.get('language', '')
+                limit = int(request.args.get('limit', 20))
+
+                if not keywords:
+                    return jsonify({'error': 'Keywords required'}), 400
+
+                # 初始化查询引擎
+                query_engine = CommonCrawlQueryEngine(
+                    mongodb_uri=self.config['mongodb_uri'],
+                    db_name=self.config['mongodb_db']
+                )
+
+                # 执行搜索
+                results = query_engine.advanced_search(
+                    keywords=keywords,
+                    domain=domain,
+                    from_date=from_date,
+                    to_date=to_date,
+                    language=language,
+                    limit=limit
+                )
+
+                return jsonify({
+                    'success': True,
+                    'results': results,
+                    'total': len(results)
+                })
+
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/commoncrawl/cluster', methods=['POST'])
+        def api_commoncrawl_cluster():
+            """Common Crawl结果聚类"""
+            try:
+                from hidrs.commoncrawl import CommonCrawlQueryEngine
+
+                data = request.get_json()
+                results = data.get('results', [])
+                n_clusters = int(data.get('n_clusters', 5))
+
+                if not results:
+                    return jsonify({'error': 'No results provided'}), 400
+
+                # 初始化查询引擎
+                query_engine = CommonCrawlQueryEngine(
+                    mongodb_uri=self.config['mongodb_uri'],
+                    db_name=self.config['mongodb_db']
+                )
+
+                # 执行聚类
+                cluster_result = query_engine.cluster_results(
+                    results=results,
+                    n_clusters=n_clusters
+                )
+
+                return jsonify({
+                    'success': True,
+                    'clusters': cluster_result.get('clusters', {}),
+                    'method': cluster_result.get('method', 'unknown')
+                })
+
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/commoncrawl/stats', methods=['GET'])
+        def api_commoncrawl_stats():
+            """Common Crawl统计信息"""
+            try:
+                # 从MongoDB获取统计信息
+                collection = self.db.commoncrawl
+
+                total_docs = collection.count_documents({})
+
+                # 域名统计（Top 10）
+                domain_stats = list(collection.aggregate([
+                    {'$group': {'_id': '$domain', 'count': {'$sum': 1}}},
+                    {'$sort': {'count': -1}},
+                    {'$limit': 10}
+                ]))
+
+                # 时间线统计
+                timeline_stats = list(collection.aggregate([
+                    {'$group': {'_id': {'$substr': ['$timestamp', 0, 7]}, 'count': {'$sum': 1}}},
+                    {'$sort': {'_id': 1}}
+                ]))
+
+                return jsonify({
+                    'success': True,
+                    'total_documents': total_docs,
+                    'top_domains': [{'domain': item['_id'], 'count': item['count']} for item in domain_stats],
+                    'timeline': [{'month': item['_id'], 'count': item['count']} for item in timeline_stats]
+                })
+
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
                 return jsonify({'error': str(e)}), 500
 
     def start(self, host='0.0.0.0', port=5000, debug=False):

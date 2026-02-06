@@ -139,6 +139,7 @@ class FederatedSearchEngine:
             # 提取文本并向量化
             from sentence_transformers import SentenceTransformer
             import numpy as np
+            from hidrs.hlig import HLIGAnalyzer, SpectralClustering
 
             logger.info(f"[FederatedSearchEngine] 向量化 {len(results)} 个降级结果...")
 
@@ -147,24 +148,31 @@ class FederatedSearchEngine:
             embeddings = encoder.encode(texts)
 
             # 应用HLIG重排序（和HIDRSAdapter._hlig_rerank相同逻辑）
-            from hidrs.network_topology.similarity_calculator import SimilarityCalculator
-            from hidrs.network_topology.laplacian_matrix_calculator import LaplacianMatrixCalculator
-            from hidrs.network_topology.spectral_analyzer import SpectralAnalyzer
+            # 1. 使用HLIGAnalyzer计算相似度矩阵
+            analyzer = HLIGAnalyzer(output_dim=embeddings.shape[1])
+            W = analyzer.compute_similarity_matrix(embeddings, metric='cosine')
 
-            # 1. 构建相似度矩阵
-            similarity_calc = SimilarityCalculator(metric='cosine', threshold=0.5)
-            W = similarity_calc.compute_similarity_matrix(embeddings.tolist())
+            # 2. 使用SpectralClustering进行谱分析
+            clustering = SpectralClustering(
+                n_clusters=2,
+                normalized=True,
+                affinity='precomputed'
+            )
 
-            # 2. 构建拉普拉斯矩阵
-            laplacian_calc = LaplacianMatrixCalculator(normalized=True)
-            L = laplacian_calc.compute_laplacian(W)
+            # 执行谱分析
+            clustering.fit(W)
 
-            # 3. 计算Fiedler向量
-            spectral = SpectralAnalyzer(use_sparse=True, k=10)
-            fiedler_vector = spectral.compute_fiedler_vector(L)
-            fiedler_value = spectral.compute_fiedler_value(L)
+            # 3. 获取Fiedler向量
+            fiedler_vector = clustering.get_fiedler_vector()
 
-            logger.info(f"[FederatedSearchEngine] HLIG分析完成: Fiedler值={fiedler_value:.6f}")
+            if fiedler_vector is None:
+                logger.warning("[FederatedSearchEngine] 无法获取Fiedler向量，返回原始结果")
+                return results
+
+            # 计算Fiedler值近似
+            fiedler_value = float(np.var(fiedler_vector))
+
+            logger.info(f"[FederatedSearchEngine] HLIG分析完成: Fiedler方差={fiedler_value:.6f}")
 
             # 4. 重排序
             for i, result in enumerate(results):
