@@ -87,11 +87,11 @@ class CommonCrawlImporter:
         self.hlig_analyzer = None
         if self.enable_hlig_analysis:
             try:
-                from hidrs.data_processor import DataProcessor
-                self.data_processor = DataProcessor()
+                from hidrs.hlig import HLIGAnalyzer
+                self.hlig_analyzer = HLIGAnalyzer(output_dim=256)
                 logger.info("✅ HLIG分析器已加载")
-            except ImportError:
-                logger.warning("⚠️ HLIG分析器未找到，将跳过谱分析")
+            except ImportError as e:
+                logger.warning(f"⚠️ HLIG分析器导入失败: {e}，将跳过谱分析")
                 self.enable_hlig_analysis = False
 
         # 统计信息
@@ -242,23 +242,26 @@ class CommonCrawlImporter:
             record.get('timestamp', '')
         )
 
-        # 提取关键词（如果有DataProcessor）
-        if self.enable_hlig_analysis and hasattr(self, 'data_processor'):
+        # 提取关键词和向量（如果启用HLIG分析）
+        if self.enable_hlig_analysis and self.hlig_analyzer:
             try:
                 text = record.get('text', '')
                 if text:
                     # 提取关键词
-                    keywords = self.data_processor.extract_keywords(text)
-                    enhanced['keywords'] = keywords[:20]  # 限制数量
+                    keywords = self.hlig_analyzer.extract_keywords(text, top_n=20)
+                    enhanced['keywords'] = keywords
 
-                    # 提取实体（如果可用）
-                    if hasattr(self.data_processor, 'extract_entities'):
-                        entities = self.data_processor.extract_entities(text)
-                        enhanced['entities'] = entities
+                    # 计算文档向量（可选，根据需求选择方法）
+                    # tfidf_vector = self.hlig_analyzer.compute_document_vector(text, method='tfidf')
+                    # enhanced['tfidf_vector'] = tfidf_vector.tolist()
 
                     # 计算拉普拉斯向量（可选，计算密集）
-                    # laplacian_vector = self.hlig_analyzer.compute_vector(text)
+                    # laplacian_vector = self.hlig_analyzer.compute_document_vector(text, method='laplacian')
                     # enhanced['laplacian_vector'] = laplacian_vector.tolist()
+
+                    # 计算全息向量（可选，最复杂）
+                    # holographic_vector = self.hlig_analyzer.compute_document_vector(text, method='holographic')
+                    # enhanced['holographic_vector'] = holographic_vector.tolist()
 
             except Exception as e:
                 logger.debug(f"HLIG分析失败: {e}")

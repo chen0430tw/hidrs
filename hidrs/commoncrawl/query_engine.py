@@ -71,13 +71,16 @@ class CommonCrawlQueryEngine:
 
         # 尝试加载HLIG分析器
         try:
-            from hidrs.laplacian_analyzer import LaplacianAnalyzer
-            self.laplacian_analyzer = LaplacianAnalyzer()
+            from hidrs.hlig import HLIGAnalyzer, SpectralClustering
+            self.hlig_analyzer = HLIGAnalyzer(output_dim=256)
+            self.SpectralClustering = SpectralClustering
             self.hlig_available = True
             logger.info("✅ HLIG分析器已加载")
-        except ImportError:
+        except ImportError as e:
             self.hlig_available = False
-            logger.warning("⚠️ HLIG分析器未找到")
+            self.hlig_analyzer = None
+            self.SpectralClustering = None
+            logger.warning(f"⚠️ HLIG分析器未找到: {e}")
 
     def search(
         self,
@@ -259,15 +262,59 @@ class CommonCrawlQueryEngine:
         logger.info(f"执行HLIG聚类分析: {len(results)} 条记录")
 
         try:
-            # TODO: 实现基于拉普拉斯谱的聚类
-            # 这需要计算每个文档的拉普拉斯向量，然后进行谱聚类
+            # 提取文本
+            texts = [result.get('text', '') or result.get('title', '') for result in results]
+            valid_texts = [t for t in texts if t.strip()]
 
-            # 目前返回简单分组
-            return self._simple_clustering(results, n_clusters)
+            if len(valid_texts) < n_clusters:
+                logger.warning(f"文本数量({len(valid_texts)})少于聚类数({n_clusters})，使用简单分组")
+                return self._simple_clustering(results, n_clusters)
+
+            # 使用HLIG进行谱聚类
+            logger.info(f"使用HLIG谱聚类算法...")
+
+            # 1. 向量化文档
+            vectors = self.hlig_analyzer.compute_batch_vectors(valid_texts, method='tfidf')
+
+            # 2. 谱聚类
+            clustering = self.SpectralClustering(
+                n_clusters=n_clusters,
+                normalized=True,
+                affinity='cosine',
+            )
+            labels = clustering.fit_predict(vectors)
+
+            # 3. 组织结果
+            clusters = []
+            for k in range(n_clusters):
+                cluster_indices = [i for i, label in enumerate(labels) if label == k]
+
+                # 提取代表文档
+                representative_results = [results[idx] for idx in cluster_indices[:5]]
+
+                clusters.append({
+                    'id': k,
+                    'size': len(cluster_indices),
+                    'percentage': len(cluster_indices) / len(results) * 100,
+                    'representative_urls': [r['url'] for r in representative_results],
+                    'representative_titles': [r.get('title', 'N/A') for r in representative_results],
+                })
+
+            # 按大小排序
+            clusters.sort(key=lambda x: x['size'], reverse=True)
+
+            logger.info(f"✅ HLIG聚类完成: {n_clusters} 个簇")
+
+            return {
+                'clusters': clusters,
+                'n_clusters': n_clusters,
+                'n_documents': len(results),
+                'method': 'spectral_hlig',
+            }
 
         except Exception as e:
-            logger.error(f"聚类分析失败: {e}")
-            return {'clusters': [], 'error': str(e)}
+            logger.error(f"HLIG聚类失败: {e}，使用简单分组")
+            return self._simple_clustering(results, n_clusters)
 
     def _simple_clustering(
         self,
