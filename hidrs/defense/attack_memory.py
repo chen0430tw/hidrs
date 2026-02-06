@@ -781,3 +781,295 @@ if __name__ == '__main__':
 
     print("\n" + "=" * 60)
     print("演示完成！")
+
+
+# =================================================================
+# SOSA集成：增强攻击记忆系统的流式学习能力
+# =================================================================
+
+class AttackMemoryWithSOSA(AttackMemorySystem):
+    """
+    集成SOSA的增强型攻击记忆系统
+
+    新增功能：
+    1. 流式事件处理（时间窗口聚合）
+    2. Binary-Twin特征提取
+    3. Markov状态转移建模
+    4. 探索vs固化自适应平衡
+    """
+
+    def __init__(
+        self,
+        memory_file: str = '/tmp/hidrs_attack_memory.pkl',
+        simulation_mode: bool = False,
+        test_mode: bool = False,
+        test_whitelist_ips: List[str] = None,
+        max_test_clients: int = 10,
+        sosa_states: int = 6,  # Markov状态数
+        sosa_groups: int = 10,  # 行为组数
+        sosa_window: float = 30.0  # 时间窗口（秒）
+    ):
+        """
+        初始化SOSA增强型攻击记忆系统
+
+        新增参数:
+        - sosa_states: SOSA Markov状态数
+        - sosa_groups: 行为分组数
+        - sosa_window: 时间窗口大小（秒）
+        """
+        # 调用父类初始化
+        super().__init__(
+            memory_file=memory_file,
+            simulation_mode=simulation_mode,
+            test_mode=test_mode,
+            test_whitelist_ips=test_whitelist_ips,
+            max_test_clients=max_test_clients
+        )
+
+        # 初始化SOSA
+        try:
+            import sys
+            import os
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+            from spark_seed_sosa import SparkSeedSOSA
+
+            self.sosa = SparkSeedSOSA(
+                N_states=sosa_states,
+                M_groups=sosa_groups,
+                dt_window=sosa_window
+            )
+
+            # 初始化SOSA的Markov链（攻击模式状态转移）
+            markov = self.sosa.get_markov()
+
+            # 设置基础转移概率（6状态示例）
+            # 状态定义：
+            # 0: 正常流量
+            # 1: 可疑活动
+            # 2: 确认攻击
+            # 3: 攻击升级
+            # 4: 攻击持续
+            # 5: 攻击衰退
+
+            # 正常→可疑
+            markov.add_edge(0, 0, 0.9)
+            markov.add_edge(0, 1, 0.1)
+
+            # 可疑→正常或攻击
+            markov.add_edge(1, 0, 0.3)
+            markov.add_edge(1, 1, 0.5)
+            markov.add_edge(1, 2, 0.2)
+
+            # 确认攻击→升级或持续
+            markov.add_edge(2, 2, 0.2)
+            markov.add_edge(2, 3, 0.4)
+            markov.add_edge(2, 4, 0.4)
+
+            # 攻击升级→持续
+            markov.add_edge(3, 3, 0.3)
+            markov.add_edge(3, 4, 0.7)
+
+            # 攻击持续→衰退或持续
+            markov.add_edge(4, 4, 0.6)
+            markov.add_edge(4, 5, 0.4)
+
+            # 攻击衰退→正常或可疑
+            markov.add_edge(5, 0, 0.5)
+            markov.add_edge(5, 1, 0.3)
+            markov.add_edge(5, 5, 0.2)
+
+            markov.normalize_outgoing()
+
+            self.sosa_enabled = True
+            logger.info(f"[AttackMemory] ✅ SOSA算法已启用")
+            logger.info(f"  Markov状态数: {sosa_states}")
+            logger.info(f"  行为分组数: {sosa_groups}")
+            logger.info(f"  时间窗口: {sosa_window}秒")
+
+        except Exception as e:
+            logger.warning(f"[AttackMemory] SOSA初始化失败: {e}")
+            logger.warning(f"  将使用基础攻击记忆功能")
+            self.sosa = None
+            self.sosa_enabled = False
+
+    def learn_attack(
+        self,
+        src_ip: str,
+        attack_type: str,
+        signatures: List[str],
+        packet_size: int,
+        success: bool,
+        port: int
+    ):
+        """
+        学习攻击模式（SOSA增强版）
+
+        除了父类的学习功能外，还会：
+        1. 将攻击事件送入SOSA流式处理
+        2. 更新Markov状态分布
+        3. 使用Binary-Twin特征增强记忆
+        """
+        # 调用父类学习方法
+        super().learn_attack(src_ip, attack_type, signatures, packet_size, success, port)
+
+        # SOSA流式处理
+        if self.sosa_enabled and self.sosa is not None:
+            obs = {
+                'src_ip': src_ip,
+                'attack_type': attack_type,
+                'signatures': signatures,
+                'packet_size': packet_size,
+                'port': port
+            }
+            action = 'block' if not success else 'bypass'
+
+            self.sosa.process_event(
+                obs=obs,
+                action=action,
+                timestamp=datetime.utcnow().timestamp()
+            )
+
+    def get_attack_state_distribution(self) -> Optional[Dict[str, Any]]:
+        """
+        获取SOSA攻击状态分布
+
+        返回:
+        - SOSA状态分布和阶段信息（如果启用）
+        """
+        if not self.sosa_enabled or self.sosa is None:
+            return None
+
+        pi = self.sosa.get_state_distribution()
+
+        # 状态名称映射
+        state_names = [
+            '正常流量',
+            '可疑活动',
+            '确认攻击',
+            '攻击升级',
+            '攻击持续',
+            '攻击衰退'
+        ]
+
+        # 找到最可能的状态
+        max_prob_idx = pi.index(max(pi))
+        current_state = state_names[max_prob_idx] if max_prob_idx < len(state_names) else f'状态{max_prob_idx}'
+
+        return {
+            'state_distribution': {
+                state_names[i] if i < len(state_names) else f'状态{i}': pi[i]
+                for i in range(len(pi))
+            },
+            'current_state': current_state,
+            'confidence': pi[max_prob_idx],
+            'binary_twin_history_count': len(self.sosa.get_history()) if hasattr(self.sosa, 'get_history') else 0
+        }
+
+    def predict_attack_phase(self) -> Optional[str]:
+        """
+        基于SOSA状态分布预测攻击阶段
+
+        返回:
+        - 攻击阶段预测字符串
+        """
+        if not self.sosa_enabled or self.sosa is None:
+            return None
+
+        pi = self.sosa.get_state_distribution()
+
+        # 计算各阶段的概率
+        normal_prob = pi[0]  # 状态0: 正常
+        suspicious_prob = pi[1]  # 状态1: 可疑
+        attack_prob = sum(pi[2:5])  # 状态2-4: 各种攻击
+        decay_prob = pi[5] if len(pi) > 5 else 0.0  # 状态5: 衰退
+
+        if normal_prob > 0.6:
+            return "正常阶段"
+        elif suspicious_prob > 0.4:
+            return "可疑阶段（需要警惕）"
+        elif attack_prob > 0.5:
+            return "攻击活跃阶段（高威胁）"
+        elif decay_prob > 0.3:
+            return "攻击衰退阶段"
+        else:
+            return "过渡阶段"
+
+    def get_stats(self) -> Dict[str, Any]:
+        """获取统计信息（SOSA增强版）"""
+        stats = super().get_stats()
+
+        if self.sosa_enabled and self.sosa is not None:
+            stats['sosa_enabled'] = True
+            stats['sosa_state_distribution'] = self.get_attack_state_distribution()
+            stats['predicted_phase'] = self.predict_attack_phase()
+        else:
+            stats['sosa_enabled'] = False
+
+        return stats
+
+
+# SOSA增强版使用示例
+if __name__ == '__main__':
+    print("\n\n" + "=" * 70)
+    print("🔥 SOSA增强型攻击记忆系统演示")
+    print("=" * 70)
+
+    try:
+        memory_sosa = AttackMemoryWithSOSA(
+            sosa_states=6,
+            sosa_groups=10,
+            sosa_window=10.0
+        )
+
+        # 模拟一系列攻击
+        attack_sequence = [
+            ('1.2.3.4', 'port_scan', ['SYN'], 40, False, 22),
+            ('1.2.3.4', 'port_scan', ['SYN'], 40, False, 80),
+            ('1.2.3.4', 'port_scan', ['SYN'], 40, False, 443),
+            ('5.6.7.8', 'sql_injection', ['UNION SELECT'], 512, False, 80),
+            ('5.6.7.8', 'sql_injection', ['OR 1=1'], 520, False, 80),
+            ('9.10.11.12', 'ddos', ['HTTP Flood'], 64, False, 80),
+            ('9.10.11.12', 'ddos', ['HTTP Flood'], 64, False, 80),
+            ('9.10.11.12', 'ddos', ['HTTP Flood'], 64, False, 80),
+        ]
+
+        print("\n学习攻击模式...")
+        for i, (ip, atype, sigs, size, succ, port) in enumerate(attack_sequence):
+            memory_sosa.learn_attack(ip, atype, sigs, size, succ, port)
+            print(f"  [{i+1}] {ip} - {atype}")
+
+            # 每隔几次显示状态
+            if (i + 1) % 3 == 0:
+                phase = memory_sosa.predict_attack_phase()
+                print(f"      当前阶段: {phase}")
+
+        # 强制刷新SOSA窗口
+        if memory_sosa.sosa:
+            memory_sosa.sosa.force_flush()
+
+        # 显示SOSA状态分布
+        print("\nSOSA状态分布:")
+        state_info = memory_sosa.get_attack_state_distribution()
+        if state_info:
+            print(f"  当前状态: {state_info['current_state']}")
+            print(f"  置信度: {state_info['confidence']:.2%}")
+            print("\n  状态概率分布:")
+            for state, prob in state_info['state_distribution'].items():
+                bar = '█' * int(prob * 50)
+                print(f"    {state:12s}: {bar} {prob:.2%}")
+
+        # 显示攻击记忆统计
+        print("\n攻击记忆统计:")
+        stats = memory_sosa.get_stats()
+        print(f"  运行模式: {stats['mode']}")
+        print(f"  已知模式: {stats['total_patterns']}")
+        print(f"  已知攻击者: {stats['total_attackers']}")
+        print(f"  预测阶段: {stats['predicted_phase']}")
+
+        print("\n" + "=" * 70)
+        print("SOSA增强演示完成！")
+
+    except Exception as e:
+        print(f"\n❌ SOSA演示失败: {e}")
+        import traceback
+        traceback.print_exc()

@@ -744,16 +744,45 @@ class HIDRSFirewall:
         self.tarpit = TarpitDefense() if enable_tarpit else None
         self.reflector = TrafficReflector(enable_reflection=enable_traffic_reflection)
 
-        # 攻击记忆系统
+        # 攻击记忆系统（SOSA增强版）
         self.attack_memory = None
         if enable_attack_memory:
-            from .attack_memory import AttackMemorySystem
-            self.attack_memory = AttackMemorySystem(
-                simulation_mode=simulation_mode,
-                test_mode=test_mode,
-                test_whitelist_ips=test_whitelist_ips,
-                max_test_clients=max_test_clients
+            try:
+                from .attack_memory import AttackMemoryWithSOSA
+                self.attack_memory = AttackMemoryWithSOSA(
+                    simulation_mode=simulation_mode,
+                    test_mode=test_mode,
+                    test_whitelist_ips=test_whitelist_ips,
+                    max_test_clients=max_test_clients,
+                    sosa_states=6,
+                    sosa_groups=10,
+                    sosa_window=30.0
+                )
+                self._attack_memory_sosa = True
+            except Exception:
+                from .attack_memory import AttackMemorySystem
+                self.attack_memory = AttackMemorySystem(
+                    simulation_mode=simulation_mode,
+                    test_mode=test_mode,
+                    test_whitelist_ips=test_whitelist_ips,
+                    max_test_clients=max_test_clients
+                )
+                self._attack_memory_sosa = False
+
+        # 智能资源调度器（ET-WCN降温算法）
+        self.resource_scheduler = None
+        try:
+            from .smart_resource_scheduler import SmartResourceScheduler
+            self.resource_scheduler = SmartResourceScheduler(
+                T_max=1.0,
+                T_min=0.01,
+                delta_crit=3.0,
+                window_size=60.0
             )
+            self._scheduler_enabled = True
+        except Exception:
+            self.resource_scheduler = None
+            self._scheduler_enabled = False
 
         # 连接追踪
         self.connections = {}  # ip -> ConnectionProfile
@@ -766,7 +795,9 @@ class HIDRSFirewall:
             'tarpitted_connections': 0,
             'reflected_attacks': 0,
             'active_probes': 0,
-            'memory_recognitions': 0  # 记忆识别次数
+            'memory_recognitions': 0,  # 记忆识别次数
+            'resource_scheduler_enabled': self._scheduler_enabled,
+            'attack_memory_sosa': self._attack_memory_sosa
         }
 
         # 自动清理线程
@@ -788,7 +819,9 @@ class HIDRSFirewall:
         logger.info(f"  HLIG检测: {'✅' if enable_hlig_detection else '❌'}")
         logger.info(f"  SYN Cookies: {'✅' if enable_syn_cookies else '❌'}")
         logger.info(f"  Tarpit: {'✅' if enable_tarpit else '❌'}")
-        logger.info(f"  攻击记忆: {'✅' if enable_attack_memory else '❌'}")
+        attack_memory_label = "✅ (SOSA增强)" if self._attack_memory_sosa else "✅"
+        logger.info(f"  攻击记忆: {attack_memory_label if enable_attack_memory else '❌'}")
+        logger.info(f"  智能调度: {'✅ (ET-WCN降温)' if self._scheduler_enabled else '❌'}")
         logger.info(f"  流量反射: {'⚠️  已启用' if enable_traffic_reflection else '❌'}")
         logger.info("=" * 60)
 
@@ -969,13 +1002,31 @@ class HIDRSFirewall:
                 action = 'allow'
                 reason = f'Suspicious pattern (not defended: {defense_reason})'
 
+        # 7. 智能资源调度（ET-WCN降温算法）
+        schedule_info = None
+        if self.resource_scheduler:
+            is_attack = (profile.threat_level >= ThreatLevel.SUSPICIOUS)
+            attack_type_str = analysis.get('attack_type', 'unknown') if analysis.get('suspicious') else None
+
+            resource_profile, schedule_info = self.resource_scheduler.process_traffic_event(
+                is_attack=is_attack,
+                attack_type=attack_type_str,
+                threat_level=profile.threat_level,
+                packet_count=1
+            )
+
+            # 根据资源调度器的建议动态调整防御组件
+            # 注意：这里只是建议，实际组件开关在运行时不修改
+            # 但可以影响下一个包的处理决策
+
         return {
             'action': action,
             'reason': reason,
             'threat_level': profile.threat_level,
             'reputation': reputation,
             'anomaly_score': profile.fiedler_anomaly_score,
-            'defense_mode': defense_reason
+            'defense_mode': defense_reason,
+            'scheduler_info': schedule_info  # 添加调度器信息
         }
 
     def _cleanup_loop(self):
