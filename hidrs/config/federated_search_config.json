@@ -1,0 +1,144 @@
+{
+  "description": "联邦搜索系统配置 - Federated Search Configuration",
+  "version": "1.0.0",
+
+  "core_adapter": {
+    "enabled": true,
+    "name": "HIDRS Core",
+    "type": "CORE",
+    "priority": 1,
+    "elasticsearch": {
+      "host": "localhost",
+      "port": 9200,
+      "index_name": "hidrs_documents",
+      "use_ssl": false,
+      "verify_certs": false
+    },
+    "hlig": {
+      "enable_rerank": true,
+      "similarity_metric": "cosine",
+      "similarity_threshold": 0.5,
+      "use_normalized_laplacian": true,
+      "use_sparse_computation": true,
+      "k_eigenvalues": 10,
+      "rerank_weight": {
+        "fiedler": 0.7,
+        "elasticsearch": 0.3
+      }
+    }
+  },
+
+  "fallback_adapters": {
+    "google": {
+      "enabled": true,
+      "name": "Google搜索",
+      "type": "FALLBACK",
+      "priority": 2,
+      "api_key": "${GOOGLE_SEARCH_API_KEY}",
+      "search_engine_id": "${GOOGLE_SEARCH_ENGINE_ID}",
+      "daily_limit": 100,
+      "timeout": 10,
+      "default_params": {
+        "safe": "off",
+        "lang": null
+      }
+    },
+    "baidu": {
+      "enabled": true,
+      "name": "百度搜索",
+      "type": "FALLBACK",
+      "priority": 3,
+      "use_api": false,
+      "api_key": null,
+      "timeout": 10,
+      "rate_limit_delay": 2,
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    },
+    "archive": {
+      "enabled": true,
+      "name": "Internet Archive",
+      "type": "FALLBACK",
+      "priority": 4,
+      "timeout": 15,
+      "default_params": {
+        "media_type": "texts",
+        "sort": "relevance"
+      }
+    }
+  },
+
+  "federated_engine": {
+    "min_results_threshold": 3,
+    "enable_fallback": true,
+    "always_use_hlig": true,
+    "deduplication": {
+      "enabled": true,
+      "similarity_threshold": 0.85,
+      "url_normalization": true
+    },
+    "result_fusion": {
+      "method": "weighted_average",
+      "weights": {
+        "CORE": 1.0,
+        "FALLBACK": 0.5
+      }
+    },
+    "identity_monitoring": {
+      "enabled": true,
+      "purity_threshold": 50.0,
+      "alert_on_degradation": true
+    }
+  },
+
+  "caching": {
+    "enabled": true,
+    "backend": "redis",
+    "redis": {
+      "host": "localhost",
+      "port": 6379,
+      "db": 0,
+      "ttl": 3600
+    },
+    "memory": {
+      "max_size": 1000,
+      "ttl": 600
+    }
+  },
+
+  "monitoring": {
+    "enabled": true,
+    "log_level": "INFO",
+    "metrics": {
+      "track_latency": true,
+      "track_success_rate": true,
+      "track_fallback_rate": true,
+      "track_identity_purity": true
+    },
+    "alerts": {
+      "core_failure_threshold": 0.5,
+      "fallback_rate_threshold": 0.8,
+      "identity_purity_threshold": 30.0
+    }
+  },
+
+  "experimental": {
+    "faiss_index": {
+      "enabled": false,
+      "index_type": "IVF",
+      "nlist": 100,
+      "nprobe": 10,
+      "metric": "cosine"
+    },
+    "ml_reranking": {
+      "enabled": false,
+      "model": "cross-encoder/ms-marco-MiniLM-L-12-v2"
+    }
+  },
+
+  "comments": {
+    "note1": "环境变量替换: 使用 ${VAR_NAME} 格式的值会从环境变量读取",
+    "note2": "忒修斯之船判断标准: identity_purity >= 50 表示系统仍是HIDRS",
+    "note3": "降级策略: 核心失败 -> Google -> 百度 -> Archive，所有结果都经过HLIG重排序",
+    "note4": "HLIG权重: Fiedler得分70% + 原始得分30%，保持HIDRS身份"
+  }
+}

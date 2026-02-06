@@ -27,9 +27,15 @@ scikit-learn==1.2.2
 tensorflow==2.12.0
 torch==2.0.1
 transformers==4.30.2
+sentence-transformers==2.2.2
 tensorflow-hub==0.13.0
 umap-learn==0.5.3
 
 # 其他工具
 joblib==1.2.0
 nltk==3.8.1
+
+# 可选依赖（用于加速）
+# 安装FAISS: pip install faiss-cpu  (CPU版本)
+# 或: pip install faiss-gpu  (GPU版本，需要CUDA)
+# faiss-cpu>=1.7.4
