@@ -175,9 +175,7 @@ class HIDRSAdapter(SearchAdapter):
         """
         try:
             import numpy as np
-            from hidrs.network_topology.similarity_calculator import SimilarityCalculator
-            from hidrs.network_topology.laplacian_matrix_calculator import LaplacianMatrixCalculator
-            from hidrs.network_topology.spectral_analyzer import SpectralAnalyzer
+            from hidrs.hlig import HLIGAnalyzer, SpectralClustering
 
             # 提取特征向量
             feature_vectors = []
@@ -193,20 +191,34 @@ class HIDRSAdapter(SearchAdapter):
                 logger.warning(f"[{self.name}] 特征向量不足，跳过HLIG重排序")
                 return results
 
-            # 1. 构建相似度矩阵（邻接矩阵）
-            similarity_calc = SimilarityCalculator(metric='cosine', threshold=0.5)
-            W = similarity_calc.compute_similarity_matrix(feature_vectors)
+            # 将特征向量转为numpy数组
+            vectors_array = np.vstack(feature_vectors)
 
-            # 2. 构建拉普拉斯矩阵
-            laplacian_calc = LaplacianMatrixCalculator(normalized=True)
-            L = laplacian_calc.compute_laplacian(W)
+            # 1. 使用HLIGAnalyzer计算相似度矩阵
+            analyzer = HLIGAnalyzer(output_dim=vectors_array.shape[1])
+            W = analyzer.compute_similarity_matrix(vectors_array, metric='cosine')
 
-            # 3. 计算Fiedler向量（这是HLIG的核心！）
-            spectral = SpectralAnalyzer(use_sparse=True, k=10)
-            fiedler_vector = spectral.compute_fiedler_vector(L)
-            fiedler_value = spectral.compute_fiedler_value(L)
+            # 2. 使用SpectralClustering进行谱分析
+            clustering = SpectralClustering(
+                n_clusters=2,
+                normalized=True,
+                affinity='precomputed'
+            )
 
-            logger.info(f"[{self.name}] HLIG分析: Fiedler值={fiedler_value:.6f}")
+            # 执行谱分析
+            clustering.fit(W)
+
+            # 3. 获取Fiedler向量（这是HLIG的核心！）
+            fiedler_vector = clustering.get_fiedler_vector()
+
+            if fiedler_vector is None:
+                logger.warning(f"[{self.name}] 无法获取Fiedler向量，返回原始结果")
+                return results
+
+            # 计算Fiedler值近似
+            fiedler_value = float(np.var(fiedler_vector))
+
+            logger.info(f"[{self.name}] HLIG分析: Fiedler方差={fiedler_value:.6f}")
 
             # 4. 根据Fiedler向量重排序
             # Fiedler向量的分量反映了节点在网络中的重要性
