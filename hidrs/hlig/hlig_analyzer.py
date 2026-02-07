@@ -57,6 +57,16 @@ class HLIGAnalyzer:
         self.text_vectorizer = TextVectorizer(output_dim=output_dim)
         self.laplacian_calculator = LaplacianMatrixCalculator(normalized=normalized_laplacian)
 
+        # 全局Fiedler向量：由语料库级别的词图计算得到，用于Φ_hol映射
+        # 当处理足够多的文档后，通过 update_global_fiedler() 更新
+        self.global_fiedler = None
+        # 累积的全局词共现矩阵（用于计算全局Fiedler向量）
+        self._global_cooccurrence = None
+        self._global_token_to_idx = {}
+        self._global_unique_tokens = []
+        self._docs_since_last_update = 0
+        self._global_fiedler_update_interval = 50  # 每处理50篇文档更新一次全局Fiedler
+
         if enable_holographic_mapping:
             try:
                 self.holographic_mapper = HolographicMapper()
@@ -65,7 +75,7 @@ class HLIGAnalyzer:
                 logger.warning(f"全息映射器初始化失败: {e}，将使用基础向量")
                 self.enable_holographic_mapping = False
 
-        logger.info(f"✅ HLIG分析器已初始化 (dim={output_dim}, holographic={enable_holographic_mapping})")
+        logger.info(f"HLIG分析器已初始化 (dim={output_dim}, holographic={enable_holographic_mapping})")
 
     def compute_document_vector(
         self,
@@ -203,7 +213,8 @@ class HLIGAnalyzer:
 
         策略：
         1. 计算局部拉普拉斯矩阵
-        2. 使用全息映射器映射到全局表示
+        2. 累积到全局词共现图，定期更新全局Fiedler向量
+        3. 使用全息映射器映射到全局表示（传入全局Fiedler向量）
         """
         try:
             # 计算局部拉普拉斯矩阵
@@ -218,10 +229,16 @@ class HLIGAnalyzer:
             if hasattr(local_laplacian, 'toarray'):
                 local_laplacian = local_laplacian.toarray()
 
-            # 使用全息映射器
+            # 累积全局词共现信息并定期更新全局Fiedler向量
+            self._accumulate_global_cooccurrence(tokens)
+            self._docs_since_last_update += 1
+            if self._docs_since_last_update >= self._global_fiedler_update_interval:
+                self.update_global_fiedler()
+
+            # 使用全息映射器，传入全局Fiedler向量
             holographic_vector = self.holographic_mapper.map_local_to_global(
                 local_laplacian,
-                global_fiedler=None  # 可以提供全局Fiedler向量
+                global_fiedler=self.global_fiedler
             )
 
             return holographic_vector
@@ -229,6 +246,78 @@ class HLIGAnalyzer:
         except Exception as e:
             logger.debug(f"全息映射计算失败: {e}")
             return np.zeros(self.output_dim)
+
+    def _accumulate_global_cooccurrence(self, tokens: List[str]):
+        """
+        将文档的词共现信息累积到全局共现矩阵
+
+        Args:
+            tokens: 当前文档的词列表
+        """
+        # 找出新出现的词
+        new_tokens = [t for t in set(tokens) if t not in self._global_token_to_idx]
+
+        if new_tokens:
+            # 扩展全局矩阵以容纳新词
+            old_n = len(self._global_unique_tokens)
+            self._global_unique_tokens.extend(new_tokens)
+            for t in new_tokens:
+                self._global_token_to_idx[t] = len(self._global_token_to_idx)
+
+            new_n = len(self._global_unique_tokens)
+            if self._global_cooccurrence is None:
+                self._global_cooccurrence = np.zeros((new_n, new_n))
+            else:
+                # 扩展矩阵
+                expanded = np.zeros((new_n, new_n))
+                expanded[:old_n, :old_n] = self._global_cooccurrence
+                self._global_cooccurrence = expanded
+
+        if self._global_cooccurrence is None:
+            n = len(self._global_unique_tokens)
+            self._global_cooccurrence = np.zeros((n, n))
+
+        # 累积共现（窗口大小=5）
+        window_size = 5
+        for i, token in enumerate(tokens):
+            idx_i = self._global_token_to_idx[token]
+            for j in range(max(0, i - window_size), min(len(tokens), i + window_size + 1)):
+                if i != j:
+                    idx_j = self._global_token_to_idx[tokens[j]]
+                    self._global_cooccurrence[idx_i, idx_j] += 1
+
+    def update_global_fiedler(self):
+        """
+        从全局词共现矩阵计算全局Fiedler向量
+
+        全局Fiedler向量u₂反映了整个语料库的词图拓扑结构，
+        是Φ_hol映射中局部→全局信息编码的关键。
+        """
+        if self._global_cooccurrence is None or len(self._global_unique_tokens) < 3:
+            return
+
+        try:
+            # 对称化
+            sym_matrix = (self._global_cooccurrence + self._global_cooccurrence.T) / 2
+
+            # 计算全局拉普拉斯矩阵
+            global_laplacian = self.laplacian_calculator.compute_laplacian(sym_matrix)
+
+            # 转换为稠密矩阵
+            if hasattr(global_laplacian, 'toarray'):
+                global_laplacian = global_laplacian.toarray()
+
+            # 计算Fiedler向量（第二小特征值对应的特征向量）
+            eigenvalues, eigenvectors = np.linalg.eigh(global_laplacian)
+            idx = eigenvalues.argsort()
+            self.global_fiedler = eigenvectors[:, idx[1]] if len(idx) > 1 else eigenvectors[:, 0]
+
+            self._docs_since_last_update = 0
+            logger.info(f"全局Fiedler向量已更新 (dim={len(self.global_fiedler)}, "
+                        f"词数={len(self._global_unique_tokens)})")
+
+        except Exception as e:
+            logger.warning(f"全局Fiedler向量更新失败: {e}")
 
     def _build_word_cooccurrence_matrix(
         self,

@@ -214,6 +214,74 @@ class TopologyBuilder:
             'previous_fiedler': self.previous_fiedler_value
         }
     
+    def generate_multi_scale_laplacians(self, n_scales=3):
+        """
+        生成多尺度拉普拉斯矩阵，用于多尺度全息映射
+
+        通过图粗化（graph coarsening）在不同尺度上构建拉普拉斯矩阵：
+        - 尺度0：原始图的拉普拉斯矩阵
+        - 尺度1..n：通过谱聚类将节点合并后的粗化图拉普拉斯矩阵
+
+        每一级粗化将节点数减半，保留图的谱特性。
+
+        参数:
+        - n_scales: 尺度数量（包含原始尺度）
+
+        返回:
+        - laplacian_matrices: 多尺度拉普拉斯矩阵列表，从精细到粗糙
+        """
+        if self.laplacian_matrix is None or self.adjacency_matrix is None:
+            return []
+
+        laplacian_matrices = [self.laplacian_matrix]
+        current_adjacency = self.adjacency_matrix
+
+        for scale in range(1, n_scales):
+            # 获取当前邻接矩阵的大小
+            if sp.issparse(current_adjacency):
+                n = current_adjacency.shape[0]
+            else:
+                n = len(current_adjacency)
+
+            if n < 4:  # 节点太少，无法继续粗化
+                break
+
+            # 计算当前尺度的拉普拉斯矩阵用于聚类
+            current_laplacian = self.laplacian_calculator.compute_laplacian(current_adjacency)
+
+            # 通过谱聚类确定粗化后的簇分配
+            n_clusters = max(2, n // 2)
+            try:
+                cluster_labels = self.spectral_analyzer.spectral_clustering(
+                    current_laplacian, n_clusters=n_clusters
+                )
+            except Exception:
+                # 如果谱聚类失败，使用简单的均匀划分
+                cluster_labels = np.array([i % n_clusters for i in range(n)])
+
+            # 构建粗化后的邻接矩阵
+            if sp.issparse(current_adjacency):
+                current_adjacency_dense = current_adjacency.toarray()
+            else:
+                current_adjacency_dense = np.array(current_adjacency)
+
+            coarse_adjacency = np.zeros((n_clusters, n_clusters))
+            for i in range(n):
+                for j in range(i + 1, n):
+                    ci, cj = cluster_labels[i], cluster_labels[j]
+                    if ci != cj:
+                        coarse_adjacency[ci, cj] += current_adjacency_dense[i, j]
+                        coarse_adjacency[cj, ci] += current_adjacency_dense[i, j]
+
+            # 计算粗化图的拉普拉斯矩阵
+            coarse_laplacian = self.laplacian_calculator.compute_laplacian(coarse_adjacency)
+            laplacian_matrices.append(coarse_laplacian)
+
+            # 为下一级粗化准备
+            current_adjacency = coarse_adjacency
+
+        return laplacian_matrices
+
     def save_topology(self, filepath):
         """保存拓扑结构到文件"""
         import pickle
