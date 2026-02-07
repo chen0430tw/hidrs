@@ -32,8 +32,15 @@ from queue import Queue, Empty
 
 logger = logging.getLogger(__name__)
 
+# 尝试导入真实Redis客户端
+try:
+    import redis as _redis_module
+    HAS_REDIS = True
+except ImportError:
+    HAS_REDIS = False
 
-# Redis模拟（用于测试，生产环境应该使用真实Redis）
+
+# Redis模拟（用于测试，或当真实Redis不可用时的后备）
 class MockRedisClient:
     """
     模拟Redis客户端（用于测试）
@@ -121,28 +128,86 @@ class RedisSyncClient:
         node_id: str,
         region: str,
         redis_client: Any = None,
-        use_mock: bool = True
+        redis_url: str = None,
+        redis_host: str = 'localhost',
+        redis_port: int = 6379,
+        redis_db: int = 0,
+        redis_password: str = None,
+        use_mock: bool = False,
     ):
         """
         初始化同步客户端
 
+        优先级：
+        1. 传入redis_client → 直接使用
+        2. 传入redis_url → 通过URL连接
+        3. 尝试连接 redis_host:redis_port
+        4. 以上都失败 → 退回MockRedisClient（并发出警告）
+        5. use_mock=True → 强制使用Mock（仅用于测试）
+
         参数:
             node_id: 节点ID
             region: 地理区域
-            redis_client: Redis客户端实例（如果为None，使用模拟）
-            use_mock: 是否使用模拟Redis（测试用）
+            redis_client: Redis客户端实例（直接传入）
+            redis_url: Redis连接URL (如 redis://user:pass@host:port/db)
+            redis_host: Redis主机
+            redis_port: Redis端口
+            redis_db: Redis数据库编号
+            redis_password: Redis密码
+            use_mock: 强制使用Mock（仅用于单元测试）
         """
         self.node_id = node_id
         self.region = region
+        self.message_queue = Queue()
+        self._use_real_redis = False
+        self._pubsub = None
 
-        # Redis客户端
+        # Redis客户端初始化
         if use_mock:
+            # 强制Mock模式（测试用）
             self.redis_client = _mock_redis
-            self.message_queue = Queue()
-        else:
+            logger.info(f"[{node_id}] 使用Mock Redis（测试模式）")
+        elif redis_client is not None:
+            # 直接传入客户端
             self.redis_client = redis_client
-            if not redis_client:
-                raise ValueError("Must provide redis_client when use_mock=False")
+            self._use_real_redis = True
+            logger.info(f"[{node_id}] 使用传入的Redis客户端")
+        elif HAS_REDIS:
+            # 尝试连接真实Redis
+            try:
+                if redis_url:
+                    client = _redis_module.Redis.from_url(
+                        redis_url, decode_responses=True
+                    )
+                else:
+                    client = _redis_module.Redis(
+                        host=redis_host,
+                        port=redis_port,
+                        db=redis_db,
+                        password=redis_password,
+                        decode_responses=True,
+                        socket_connect_timeout=3,
+                    )
+                # 测试连接
+                client.ping()
+                self.redis_client = client
+                self._use_real_redis = True
+                logger.info(
+                    f"[{node_id}] 已连接真实Redis "
+                    f"({redis_url or f'{redis_host}:{redis_port}'}/{redis_db})"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[{node_id}] 无法连接Redis ({e})，退回Mock模式。"
+                    f"生产环境请确保Redis可用。"
+                )
+                self.redis_client = _mock_redis
+        else:
+            logger.warning(
+                f"[{node_id}] redis-py未安装，使用Mock模式。"
+                f"安装方法: pip install redis"
+            )
+            self.redis_client = _mock_redis
 
         # 消息处理器
         self.handlers: Dict[str, List[Callable]] = {
@@ -288,23 +353,40 @@ class RedisSyncClient:
 
         self.running = True
 
-        # 订阅所有频道
-        for channel in self.handlers.keys():
-            if isinstance(self.redis_client, MockRedisClient):
-                self.redis_client.subscribe(channel, self.message_queue)
+        if self._use_real_redis:
+            # 真实Redis: 使用原生Pub/Sub
+            self._pubsub = self.redis_client.pubsub()
+            channels = list(self.handlers.keys())
+            self._pubsub.subscribe(*channels)
+            logger.info(f"[{self.node_id}] 已订阅 {len(channels)} 个Redis频道")
+        else:
+            # Mock模式: 使用Queue通信
+            for channel in self.handlers.keys():
+                if isinstance(self.redis_client, MockRedisClient):
+                    self.redis_client.subscribe(channel, self.message_queue)
 
         # 启动监听线程
         self.listen_thread = threading.Thread(
-            target=self._listen_loop,
+            target=self._listen_loop if not self._use_real_redis else self._listen_loop_real,
             daemon=True
         )
         self.listen_thread.start()
 
-        logger.info(f"[{self.node_id}] 同步客户端已启动")
+        logger.info(f"[{self.node_id}] 同步客户端已启动 (模式: {'Redis' if self._use_real_redis else 'Mock'})")
 
     def stop(self):
         """停止监听"""
         self.running = False
+
+        # 清理真实Redis Pub/Sub
+        if self._pubsub:
+            try:
+                self._pubsub.unsubscribe()
+                self._pubsub.close()
+            except Exception:
+                pass
+            self._pubsub = None
+
         if self.listen_thread:
             self.listen_thread.join(timeout=2.0)
 
@@ -380,6 +462,90 @@ class RedisSyncClient:
                 logger.error(f"[{self.node_id}] 监听循环异常: {e}")
                 time.sleep(0.1)
 
+    def _listen_loop_real(self):
+        """
+        真实Redis Pub/Sub监听循环
+
+        使用redis-py的pubsub.listen()迭代器接收消息，
+        相比Mock的Queue轮询，这是事件驱动的。
+        """
+        while self.running:
+            try:
+                # get_message() 非阻塞，timeout控制等待时间
+                message_dict = self._pubsub.get_message(
+                    ignore_subscribe_messages=True,
+                    timeout=0.1
+                )
+
+                if message_dict is None:
+                    continue
+
+                if message_dict['type'] != 'message':
+                    continue
+
+                channel = message_dict['channel']
+                # redis-py decode_responses=True 时 data 已是 str
+                data = message_dict['data']
+                if isinstance(data, bytes):
+                    data = data.decode('utf-8')
+                if isinstance(channel, bytes):
+                    channel = channel.decode('utf-8')
+
+                # 解析消息
+                try:
+                    message_data = json.loads(data)
+                    message = SyncMessage(**message_data)
+                except Exception as e:
+                    logger.error(f"[{self.node_id}] 消息解析失败: {e}")
+                    continue
+
+                # 忽略自己发送的消息
+                if message.source_node == self.node_id:
+                    continue
+
+                # 去重
+                if message.message_id in self.processed_messages:
+                    continue
+
+                self.processed_messages.add(message.message_id)
+
+                # 清理去重缓存
+                if len(self.processed_messages) > self.max_processed_cache:
+                    old_items = list(self.processed_messages)[:self.max_processed_cache // 2]
+                    for item in old_items:
+                        self.processed_messages.discard(item)
+
+                # 计算延迟
+                latency = time.time() - message.timestamp
+                self.stats['messages_received'] += 1
+                self.stats['total_latency'] += latency
+                self.stats['min_latency'] = min(self.stats['min_latency'], latency)
+                self.stats['max_latency'] = max(self.stats['max_latency'], latency)
+
+                # 调用处理器
+                handlers = self.handlers.get(channel, [])
+                for handler in handlers:
+                    try:
+                        handler(message)
+                        self.stats['handlers_executed'] += 1
+                    except Exception as e:
+                        logger.error(
+                            f"[{self.node_id}] 处理器异常: {e} "
+                            f"(频道: {channel}, 消息: {message.message_id})"
+                        )
+
+                # 性能日志
+                if latency > 0.5:
+                    logger.warning(
+                        f"[{self.node_id}] 消息延迟过高: {latency*1000:.0f}ms "
+                        f"(来源: {message.source_node})"
+                    )
+
+            except Exception as e:
+                if self.running:
+                    logger.error(f"[{self.node_id}] Redis监听循环异常: {e}")
+                    time.sleep(0.5)
+
     def get_statistics(self) -> Dict[str, Any]:
         """获取性能统计"""
         avg_latency = (
@@ -424,7 +590,7 @@ class DistributedSyncDemo:
             client = RedisSyncClient(
                 node_id=node_id,
                 region=region,
-                use_mock=True
+                use_mock=True  # Demo用Mock，生产环境去掉此参数即可自动连接Redis
             )
 
             # 订阅威胁情报

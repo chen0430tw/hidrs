@@ -141,6 +141,75 @@ docs/                 # GitHub Pages mirror of frontend/ (keep in sync)
 - 如果理论定义了数学框架，先验证代码是否正确实现了该框架，再评价框架本身的价值
 - 区分"概念已有"和"组合创新"——即使每个组件都不是新的，组合方式和应用场景可能是新的
 
+### 偷懒实现 (Lazy Implementation / Stub Disguised as Feature)
+
+**定义**：代码声称实现了某个功能，但实际执行路径是空壳、模拟、或永远走不到的分支。代码表面上"存在"，通过了代码审查的目视检查，但运行时不产生任何真实效果。
+
+**偷懒实现的6种具体形态**：
+
+1. **Logger冒充实现** — 函数体只有 `logger.info("执行了XXX")` 或 `logger.warning("模拟模式")`，没有任何真实逻辑。日志输出制造了"功能正在运行"的假象。
+   ```python
+   # 偷懒
+   def reflect_attack(self, target):
+       logger.info(f"反射攻击到 {target}")  # 什么都没做
+   ```
+
+2. **`return {}` / `return []` / `pass` 空壳** — 函数签名和文档完整，但实现只返回空值或直接pass。调用者收到空数据，静默失败。
+   ```python
+   # 偷懒
+   def get_policy_updates(self, node_id):
+       return []  # 永远没有更新
+   ```
+
+3. **`NotImplementedError` 占位** — 用异常代替实现，声称"待实现"，但从未实现。如果功能确实未开发，应该不写这个函数或在架构文档中标注为TODO，而不是建立完整的调用链指向一个会崩溃的函数。
+   ```python
+   # 偷懒
+   def search_with_s3(self, pattern):
+       raise NotImplementedError("S3直连功能待实现")
+   ```
+
+4. **Mock默认无退路** — 模拟对象（MockXxx）被设为默认选项，但代码中不存在连接真实服务的路径。`use_mock=True` 作为默认参数，而 `use_mock=False` 的分支要么不存在，要么需要调用者自行创建客户端。
+   ```python
+   # 偷懒: 默认Mock，没有自动连接真实Redis的能力
+   def __init__(self, use_mock=True):
+       if use_mock:
+           self.client = MockRedis()
+       else:
+           raise ValueError("Must provide client")  # 调用者自己想办法
+   ```
+
+5. **`time.sleep()` 冒充处理** — 用等待时间模拟处理延迟，制造"正在工作"的假象。常见于tarpit、限流、超时等场景。
+   ```python
+   # 偷懒
+   def tarpit_connection(self, ip):
+       time.sleep(30)  # 假装在tarpit，实际只是阻塞了自己的线程
+   ```
+
+6. **Mock数据硬编码** — 函数永远返回预设的假数据，无论输入是什么。常见于可视化、分析、统计模块。
+   ```python
+   # 偷懒
+   def get_geo_data(self):
+       return [{"lat": 40.7, "lng": -74.0, "label": "New York"}]  # 永远是纽约
+   ```
+
+**偷懒实现 vs 合理的占位的区别**：
+- 合理的占位：函数不存在，或存在但抛 `NotImplementedError` 且没有任何调用者依赖它
+- 偷懒实现：**整条调用链已经建立**（有调用者、有路由、有UI按钮），但执行到关键步骤时悄无声息地什么都没做
+
+**检测方法**：
+- 搜索 `logger.info` / `logger.warning` 作为函数的唯一语句
+- 搜索 `return []` / `return {}` / `return None` / `pass` 作为函数的唯一语句
+- 搜索 `NotImplementedError` 并检查是否有调用者
+- 搜索 `mock` / `Mock` / `simulation` / `模拟` 并验证是否存在非模拟路径
+- 搜索 `time.sleep` 并验证是否有真实处理逻辑
+- 检查函数的注释/文档长度与实现长度的比例：文档100行但实现3行是红旗
+
+**预防规则**：
+- 如果声称实现了功能X，那么必须存在不依赖Mock/模拟的完整执行路径
+- Mock/测试模式只能作为**备用**，不能作为**默认**。默认路径必须尝试真实实现
+- 如果依赖库未安装，应该发出明确警告并降级，而不是静默切换到空壳
+- 任何 `NotImplementedError` 必须在同一次开发中被替换为真实实现，或从调用链中移除
+
 ## Code Completion Checklist (MANDATORY)
 
 Every time you finish writing or modifying code, you MUST run through this checklist BEFORE telling the user you are done. Do NOT skip any item. These are real bugs that have occurred repeatedly in this project.
@@ -225,6 +294,23 @@ Every time you finish writing or modifying code, you MUST run through this check
   - **Data flow**: Every variable the formula needs must actually be passed in, not hardcoded to `None` or `0`.
   - **Upstream pipeline**: If module A needs data from module B, verify module B actually produces and sends that data. A consumer without a producer is dead code.
 - Pattern to catch: code file has extensive docstrings/comments explaining the theory, reference links to papers, detailed architecture diagrams in ASCII art — but the actual function bodies are trivial stubs (`time.sleep()`, `logger.warning("模拟")`, `return {}`, `pass`). The ratio of comments-to-implementation is a red flag.
+
+### 14. Lazy Implementation Detection (偷懒实现检测)
+- After writing any function: verify the function body contains REAL logic, not just logger calls, empty returns, or sleep statements.
+- After writing any module with Mock/simulation mode: verify the DEFAULT code path attempts the REAL implementation. Mock must be opt-in (e.g., `use_mock=False` as default), not opt-out.
+- After writing any function that raises `NotImplementedError`: either implement it NOW or remove it from the call chain. Do not leave live `NotImplementedError` in reachable code paths.
+- Quick grep checks to run after completing code:
+  ```bash
+  # Find functions that are just logger calls
+  grep -n "def .*:" FILE | while read line; do ... done
+  # Find NotImplementedError in reachable code
+  grep -rn "NotImplementedError" hidrs/
+  # Find mock-as-default patterns
+  grep -rn "use_mock.*=.*True" hidrs/
+  # Find time.sleep as implementation
+  grep -rn "time.sleep" hidrs/ | grep -v "test" | grep -v "#"
+  ```
+- The ratio test: if a function has more lines of docstring/comments than lines of actual code (excluding blank lines), flag it for review. This is the #1 indicator of a stub disguised as a feature.
 
 ### Self-Verification Command
 After completing code changes, run:

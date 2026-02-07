@@ -92,6 +92,12 @@ scapy>=2.5.0
 # NetfilterQueue（NFQueue内核封包拦截，需要 apt install libnetfilter-queue-dev）
 # netfilterqueue>=1.1.0
 
+# Redis（AEGIS跨节点同步，自动检测：无Redis时退回Mock模式）
+redis>=4.5.0
+
+# boto3（Common Crawl S3直连搜索，备用接口）
+boto3>=1.28.0
+
 # ============ 可选依赖 ============
 # TensorFlow + TF Hub（Universal Sentence Encoder后端，与BERT二选一）
 # tensorflow>=2.12.0
