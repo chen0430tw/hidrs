@@ -705,6 +705,7 @@ class HIDRSFirewall:
         enable_tarpit: bool = True,
         enable_traffic_reflection: bool = False,  # 默认禁用攻击性功能
         enable_attack_memory: bool = True,  # 启用攻击记忆系统
+        enable_fast_filters: bool = True,  # 启用快速过滤清单
         simulation_mode: bool = False,  # 模拟模式
         test_mode: bool = False,  # 测试模式
         test_whitelist_ips: List[str] = None,  # 测试白名单IP
@@ -720,6 +721,7 @@ class HIDRSFirewall:
         - enable_tarpit: 启用Tarpit
         - enable_traffic_reflection: 启用流量反射（⚠️ 攻击性功能）
         - enable_attack_memory: 启用攻击记忆系统
+        - enable_fast_filters: 启用快速过滤清单（Spamhaus+邮件安全）
         - simulation_mode: 模拟模式（不实际执行防御）
         - test_mode: 测试模式（小范围测试）
         - test_whitelist_ips: IP白名单（测试模式用）
@@ -746,6 +748,7 @@ class HIDRSFirewall:
 
         # 攻击记忆系统（SOSA增强版）
         self.attack_memory = None
+        self._attack_memory_sosa = False  # 初始化标志
         if enable_attack_memory:
             try:
                 from .attack_memory import AttackMemoryWithSOSA
@@ -773,16 +776,40 @@ class HIDRSFirewall:
         self.resource_scheduler = None
         try:
             from .smart_resource_scheduler import SmartResourceScheduler
+
+            # 如果攻击记忆启用了SOSA和特征库，则传递给调度器
+            sig_db = None
+            if self._attack_memory_sosa and hasattr(self.attack_memory, 'signature_db'):
+                sig_db = self.attack_memory.signature_db
+
             self.resource_scheduler = SmartResourceScheduler(
                 T_max=1.0,
                 T_min=0.01,
                 delta_crit=3.0,
-                window_size=60.0
+                window_size=60.0,
+                signature_db=sig_db  # 传递特征库
             )
             self._scheduler_enabled = True
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[HIDRSFirewall] 资源调度器初始化失败: {e}")
             self.resource_scheduler = None
             self._scheduler_enabled = False
+
+        # 快速过滤清单系统（Spamhaus + 邮件安全 + 灰名单）
+        self.filter_lists = None
+        self._filter_lists_enabled = False
+        if enable_fast_filters:
+            try:
+                from .fast_filter_lists import FastFilterLists
+                self.filter_lists = FastFilterLists()
+                self._filter_lists_enabled = True
+                logger.info(f"✅ 快速过滤清单已启用")
+                if self.filter_lists.spamhaus_enabled:
+                    logger.info(f"  - Spamhaus DNSBL: 已集成")
+            except Exception as e:
+                logger.warning(f"[HIDRSFirewall] 快速过滤清单初始化失败: {e}")
+                self.filter_lists = None
+                self._filter_lists_enabled = False
 
         # 连接追踪
         self.connections = {}  # ip -> ConnectionProfile
@@ -797,7 +824,11 @@ class HIDRSFirewall:
             'active_probes': 0,
             'memory_recognitions': 0,  # 记忆识别次数
             'resource_scheduler_enabled': self._scheduler_enabled,
-            'attack_memory_sosa': self._attack_memory_sosa
+            'attack_memory_sosa': self._attack_memory_sosa,
+            'fast_filters_enabled': self._filter_lists_enabled,
+            'filter_list_blocks': 0,  # 快速过滤阻断次数
+            'spamhaus_blocks': 0,  # Spamhaus阻断次数
+            'email_phishing_blocks': 0,  # 邮件钓鱼阻断次数
         }
 
         # 自动清理线程
@@ -822,6 +853,14 @@ class HIDRSFirewall:
         attack_memory_label = "✅ (SOSA增强)" if self._attack_memory_sosa else "✅"
         logger.info(f"  攻击记忆: {attack_memory_label if enable_attack_memory else '❌'}")
         logger.info(f"  智能调度: {'✅ (ET-WCN降温)' if self._scheduler_enabled else '❌'}")
+
+        # 快速过滤清单详细信息
+        if self._filter_lists_enabled:
+            filter_label = "✅ (Spamhaus+邮件安全+灰名单)"
+            logger.info(f"  快速过滤: {filter_label}")
+        else:
+            logger.info(f"  快速过滤: ❌")
+
         logger.info(f"  流量反射: {'⚠️  已启用' if enable_traffic_reflection else '❌'}")
         logger.info("=" * 60)
 
@@ -867,6 +906,58 @@ class HIDRSFirewall:
         """
         self.stats['total_packets'] += 1
 
+        # 0. 快速过滤清单检查（优先级最高）
+        if self._filter_lists_enabled and self.filter_lists:
+            filter_result = self.filter_lists.comprehensive_check(
+                src_ip=src_ip,
+                dst_ip=dst_ip,
+                domain="",  # 如果有DNS信息可以传入
+                payload=packet_data,
+                dst_port=dst_port,
+                ssl_sha256="",  # 如果有SSL信息可以传入
+            )
+
+            # 白名单立即放行
+            if filter_result['action'] == 'allow':
+                return {
+                    'action': 'allow',
+                    'reason': f"快速过滤白名单: {filter_result['reason']}",
+                    'threat_level': ThreatLevel.CLEAN
+                }
+
+            # 黑名单立即阻断
+            elif filter_result['action'] == 'block':
+                self.stats['blocked_packets'] += 1
+                self.stats['filter_list_blocks'] += 1
+
+                # 统计Spamhaus阻断
+                if 'spamhaus' in filter_result.get('matched_filters', []):
+                    self.stats['spamhaus_blocks'] += 1
+
+                # 统计邮件钓鱼阻断
+                if filter_result.get('email_phishing') or filter_result.get('fbi_impersonation'):
+                    self.stats['email_phishing_blocks'] += 1
+
+                logger.warning(
+                    f"[HIDRSFirewall] 🚫 快速过滤阻断: {src_ip}:{src_port} -> {dst_ip}:{dst_port} "
+                    f"原因={filter_result['reason']}"
+                )
+
+                return {
+                    'action': 'block',
+                    'reason': f"快速过滤阻断: {filter_result['reason']}",
+                    'threat_level': ThreatLevel.CRITICAL,
+                    'filter_result': filter_result
+                }
+
+            # 灰名单标记（继续深度检测，但提高警惕）
+            elif filter_result['action'] == 'greylist':
+                logger.info(
+                    f"[HIDRSFirewall] ⚠️ 灰名单匹配: {src_ip}:{src_port} -> {dst_ip}:{dst_port} "
+                    f"原因={filter_result['reason']} - 将进行深度检测"
+                )
+                # 继续处理，但记录灰名单状态
+
         # 1. 检查IP信誉
         reputation = self.reputation_system.get_reputation(src_ip)
 
@@ -881,15 +972,96 @@ class HIDRSFirewall:
         # 2. DPI包分析
         analysis = self.packet_analyzer.analyze_packet(packet_data, src_ip, dst_ip)
 
+        # 2.1 深度Payload检测（木马+IPSec）
+        payload_analysis = {
+            'malware_detected': False,
+            'ipsec_detected': False,
+            'signature_matched': False
+        }
+
+        # 如果攻击记忆系统启用了特征库（SOSA版本）
+        if self._attack_memory_sosa and hasattr(self.attack_memory, 'signature_db'):
+            signature_db = self.attack_memory.signature_db
+
+            # 木马payload检测
+            if len(packet_data) > 0:
+                malware = signature_db.detect_malware_payload(packet_data)
+                if malware:
+                    payload_analysis['malware_detected'] = True
+                    payload_analysis['malware_family'] = malware.malware_family
+                    payload_analysis['malware_id'] = malware.malware_id
+                    logger.critical(
+                        f"[HIDRSFirewall] 🦠 检测到木马payload: {malware.malware_family} "
+                        f"(来源={src_ip}:{src_port})"
+                    )
+                    # 立即标记为关键威胁
+                    analysis['suspicious'] = True
+                    if 'threat_indicators' not in analysis:
+                        analysis['threat_indicators'] = []
+                    analysis['threat_indicators'].append(f'MALWARE_{malware.malware_family}')
+
+            # IPSec流量识别
+            if protocol.upper() in ['ESP', 'AH'] or dst_port in [500, 4500]:  # IKE/IPSec端口
+                ipsec_sig = signature_db.parse_ipsec_packet(packet_data)
+                if ipsec_sig:
+                    payload_analysis['ipsec_detected'] = True
+                    payload_analysis['ipsec_spi'] = ipsec_sig.spi
+                    payload_analysis['ipsec_protocol'] = ipsec_sig.protocol
+                    logger.debug(
+                        f"[HIDRSFirewall] 🔐 检测到IPSec流量: SPI=0x{ipsec_sig.spi:08x}, "
+                        f"协议={ipsec_sig.protocol}"
+                    )
+
+                    # 检测IPSec异常
+                    if ipsec_sig.abnormal_padding or ipsec_sig.abnormal_sequence:
+                        logger.warning(
+                            f"[HIDRSFirewall] ⚠️ IPSec异常: "
+                            f"padding={ipsec_sig.abnormal_padding}, "
+                            f"sequence={ipsec_sig.abnormal_sequence}"
+                        )
+                        analysis['suspicious'] = True
+                        if 'threat_indicators' not in analysis:
+                            analysis['threat_indicators'] = []
+                        analysis['threat_indicators'].append('IPSEC_ANOMALY')
+
+            # 攻击签名匹配
+            sig = signature_db.match_packet(
+                src_ip=src_ip,
+                dst_ip=dst_ip,
+                src_port=src_port,
+                dst_port=dst_port,
+                protocol=protocol.upper(),
+                payload=packet_data,
+                packet_rate=0.0,  # TODO: 从profile计算实时速率
+                packet_size=len(packet_data)
+            )
+
+            if sig:
+                payload_analysis['signature_matched'] = True
+                payload_analysis['signature_id'] = sig.signature_id
+                payload_analysis['attack_type'] = sig.attack_type
+                payload_analysis['severity'] = sig.severity
+                logger.warning(
+                    f"[HIDRSFirewall] 🎯 签名匹配: {sig.signature_id} "
+                    f"(严重度={sig.severity}, 类型={sig.attack_type})"
+                )
+                analysis['suspicious'] = True
+                if 'threat_indicators' not in analysis:
+                    analysis['threat_indicators'] = []
+                analysis['threat_indicators'].append(f'SIG_{sig.signature_id}')
+                # 更新attack_type
+                if 'attack_type' not in analysis or not analysis['attack_type']:
+                    analysis['attack_type'] = sig.attack_type
+
         if analysis['suspicious']:
             self.stats['suspicious_packets'] += 1
             self.reputation_system.report_suspicious(
                 src_ip,
-                ', '.join(analysis['threat_indicators'])
+                ', '.join(analysis.get('threat_indicators', []))
             )
 
-            # 2.1 攻击记忆系统：快速识别已知攻击模式
-            if self.attack_memory and analysis['threat_indicators']:
+            # 2.2 攻击记忆系统：快速识别已知攻击模式
+            if self.attack_memory and analysis.get('threat_indicators'):
                 recognized_pattern = self.attack_memory.recognize_attack(analysis['threat_indicators'])
 
                 if recognized_pattern:
@@ -899,10 +1071,28 @@ class HIDRSFirewall:
                         f"(出现过 {recognized_pattern.occurrence_count} 次)"
                     )
 
-                    # 学习本次攻击（更新频率）
+                # 学习本次攻击（更新频率）
+                # 如果是SOSA版本，传递payload和额外参数
+                attack_type = recognized_pattern.attack_type if recognized_pattern else analysis.get('attack_type', 'unknown')
+
+                if self._attack_memory_sosa:
+                    # SOSA版本：支持payload分析
                     self.attack_memory.learn_attack(
                         src_ip=src_ip,
-                        attack_type=recognized_pattern.attack_type,
+                        attack_type=attack_type,
+                        signatures=analysis['threat_indicators'],
+                        packet_size=len(packet_data),
+                        success=False,
+                        port=dst_port,
+                        payload=packet_data,  # 传递payload
+                        dst_ip=dst_ip,
+                        protocol=protocol.upper()
+                    )
+                else:
+                    # 基础版本：不传递payload
+                    self.attack_memory.learn_attack(
+                        src_ip=src_ip,
+                        attack_type=attack_type,
                         signatures=analysis['threat_indicators'],
                         packet_size=len(packet_data),
                         success=False,
