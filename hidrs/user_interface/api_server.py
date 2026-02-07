@@ -3,11 +3,14 @@ API服务类，提供RESTful API接口
 """
 import os
 import json
+import logging
 from flask import Flask, request, jsonify, render_template, send_from_directory
 from flask_cors import CORS
 from pymongo import MongoClient
 
 from .graph_visualizer import GraphVisualizer
+
+logger = logging.getLogger(__name__)
 
 
 class ApiServer:

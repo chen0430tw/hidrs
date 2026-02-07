@@ -15,7 +15,10 @@ class HolographicMapper:
         - config_path: 配置文件路径（可选）
         """
         self.output_dim = 256  # 默认输出维度
-        
+        self.info_preserve_ratio = 0.9  # 信息保留比率
+        self.local_info_weight = 0.7  # 局部信息权重
+        self.scale_decay = 2.0  # 尺度衰减因子
+
         # 如果提供了配置文件，读取配置
         if config_path:
             self._load_config(config_path)

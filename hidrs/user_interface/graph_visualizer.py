@@ -13,15 +13,24 @@ import numpy as np
 import datetime
 
 
-# 检查字体文件是否存在，如果不存在则下载SimHei字体
+# 配置中文字体支持
 def setup_font():
-    if not os.path.exists('simhei.ttf'):
-        os.system('wget -O simhei.ttf "https://github.com/StellarCN/scp_zh/raw/refs/heads/master/fonts/SimHei.ttf"')
-    
-    # 将下载的字体添加到Matplotlib字体管理器中
-    fm.fontManager.addfont('simhei.ttf')
-    # 设置默认字体为SimHei
-    matplotlib.rcParams['font.sans-serif'] = ['SimHei']
+    """配置Matplotlib中文字体，如果SimHei字体不存在则尝试下载"""
+    font_path = 'simhei.ttf'
+    if not os.path.exists(font_path):
+        try:
+            import subprocess
+            subprocess.run(
+                ['wget', '-q', '-O', font_path,
+                 'https://github.com/StellarCN/scp_zh/raw/refs/heads/master/fonts/SimHei.ttf'],
+                timeout=30, check=False
+            )
+        except Exception:
+            pass  # 下载失败不影响程序运行
+
+    if os.path.exists(font_path):
+        fm.fontManager.addfont(font_path)
+        matplotlib.rcParams['font.sans-serif'] = ['SimHei']
     matplotlib.rcParams['axes.unicode_minus'] = False  # 正确显示负号
 
 

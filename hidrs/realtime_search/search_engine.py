@@ -261,7 +261,7 @@ class RealtimeSearchEngine:
                     'popular_queries': [
                         {
                             '$match': {
-                                'query_text': {'$ne': None, '$ne': ''}
+                                'query_text': {'$nin': [None, '']}
                             }
                         },
                         {
