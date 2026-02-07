@@ -705,6 +705,7 @@ class HIDRSFirewall:
         enable_tarpit: bool = True,
         enable_traffic_reflection: bool = False,  # 默认禁用攻击性功能
         enable_attack_memory: bool = True,  # 启用攻击记忆系统
+        enable_fast_filters: bool = True,  # 启用快速过滤清单
         simulation_mode: bool = False,  # 模拟模式
         test_mode: bool = False,  # 测试模式
         test_whitelist_ips: List[str] = None,  # 测试白名单IP
@@ -720,6 +721,7 @@ class HIDRSFirewall:
         - enable_tarpit: 启用Tarpit
         - enable_traffic_reflection: 启用流量反射（⚠️ 攻击性功能）
         - enable_attack_memory: 启用攻击记忆系统
+        - enable_fast_filters: 启用快速过滤清单（Spamhaus+邮件安全）
         - simulation_mode: 模拟模式（不实际执行防御）
         - test_mode: 测试模式（小范围测试）
         - test_whitelist_ips: IP白名单（测试模式用）
@@ -746,6 +748,7 @@ class HIDRSFirewall:
 
         # 攻击记忆系统（SOSA增强版）
         self.attack_memory = None
+        self._attack_memory_sosa = False  # 初始化标志
         if enable_attack_memory:
             try:
                 from .attack_memory import AttackMemoryWithSOSA
@@ -792,6 +795,22 @@ class HIDRSFirewall:
             self.resource_scheduler = None
             self._scheduler_enabled = False
 
+        # 快速过滤清单系统（Spamhaus + 邮件安全 + 灰名单）
+        self.filter_lists = None
+        self._filter_lists_enabled = False
+        if enable_fast_filters:
+            try:
+                from .fast_filter_lists import FastFilterLists
+                self.filter_lists = FastFilterLists()
+                self._filter_lists_enabled = True
+                logger.info(f"✅ 快速过滤清单已启用")
+                if self.filter_lists.spamhaus_enabled:
+                    logger.info(f"  - Spamhaus DNSBL: 已集成")
+            except Exception as e:
+                logger.warning(f"[HIDRSFirewall] 快速过滤清单初始化失败: {e}")
+                self.filter_lists = None
+                self._filter_lists_enabled = False
+
         # 连接追踪
         self.connections = {}  # ip -> ConnectionProfile
 
@@ -805,7 +824,11 @@ class HIDRSFirewall:
             'active_probes': 0,
             'memory_recognitions': 0,  # 记忆识别次数
             'resource_scheduler_enabled': self._scheduler_enabled,
-            'attack_memory_sosa': self._attack_memory_sosa
+            'attack_memory_sosa': self._attack_memory_sosa,
+            'fast_filters_enabled': self._filter_lists_enabled,
+            'filter_list_blocks': 0,  # 快速过滤阻断次数
+            'spamhaus_blocks': 0,  # Spamhaus阻断次数
+            'email_phishing_blocks': 0,  # 邮件钓鱼阻断次数
         }
 
         # 自动清理线程
@@ -830,6 +853,14 @@ class HIDRSFirewall:
         attack_memory_label = "✅ (SOSA增强)" if self._attack_memory_sosa else "✅"
         logger.info(f"  攻击记忆: {attack_memory_label if enable_attack_memory else '❌'}")
         logger.info(f"  智能调度: {'✅ (ET-WCN降温)' if self._scheduler_enabled else '❌'}")
+
+        # 快速过滤清单详细信息
+        if self._filter_lists_enabled:
+            filter_label = "✅ (Spamhaus+邮件安全+灰名单)"
+            logger.info(f"  快速过滤: {filter_label}")
+        else:
+            logger.info(f"  快速过滤: ❌")
+
         logger.info(f"  流量反射: {'⚠️  已启用' if enable_traffic_reflection else '❌'}")
         logger.info("=" * 60)
 
@@ -874,6 +905,58 @@ class HIDRSFirewall:
         }
         """
         self.stats['total_packets'] += 1
+
+        # 0. 快速过滤清单检查（优先级最高）
+        if self._filter_lists_enabled and self.filter_lists:
+            filter_result = self.filter_lists.comprehensive_check(
+                src_ip=src_ip,
+                dst_ip=dst_ip,
+                domain="",  # 如果有DNS信息可以传入
+                payload=packet_data,
+                dst_port=dst_port,
+                ssl_sha256="",  # 如果有SSL信息可以传入
+            )
+
+            # 白名单立即放行
+            if filter_result['action'] == 'allow':
+                return {
+                    'action': 'allow',
+                    'reason': f"快速过滤白名单: {filter_result['reason']}",
+                    'threat_level': ThreatLevel.CLEAN
+                }
+
+            # 黑名单立即阻断
+            elif filter_result['action'] == 'block':
+                self.stats['blocked_packets'] += 1
+                self.stats['filter_list_blocks'] += 1
+
+                # 统计Spamhaus阻断
+                if 'spamhaus' in filter_result.get('matched_filters', []):
+                    self.stats['spamhaus_blocks'] += 1
+
+                # 统计邮件钓鱼阻断
+                if filter_result.get('email_phishing') or filter_result.get('fbi_impersonation'):
+                    self.stats['email_phishing_blocks'] += 1
+
+                logger.warning(
+                    f"[HIDRSFirewall] 🚫 快速过滤阻断: {src_ip}:{src_port} -> {dst_ip}:{dst_port} "
+                    f"原因={filter_result['reason']}"
+                )
+
+                return {
+                    'action': 'block',
+                    'reason': f"快速过滤阻断: {filter_result['reason']}",
+                    'threat_level': ThreatLevel.CRITICAL,
+                    'filter_result': filter_result
+                }
+
+            # 灰名单标记（继续深度检测，但提高警惕）
+            elif filter_result['action'] == 'greylist':
+                logger.info(
+                    f"[HIDRSFirewall] ⚠️ 灰名单匹配: {src_ip}:{src_port} -> {dst_ip}:{dst_port} "
+                    f"原因={filter_result['reason']} - 将进行深度检测"
+                )
+                # 继续处理，但记录灰名单状态
 
         # 1. 检查IP信誉
         reputation = self.reputation_system.get_reputation(src_ip)
