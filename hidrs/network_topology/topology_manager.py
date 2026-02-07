@@ -115,16 +115,48 @@ class TopologyManager:
                         threshold=self.config['anomaly_threshold']
                     )
                     
+                    # 生成多尺度拉普拉斯矩阵（供下游全息映射使用）
+                    multi_scale_laplacians = self.topology_builder.generate_multi_scale_laplacians(
+                        n_scales=self.config.get('n_scales', 3)
+                    )
+
+                    # 将多尺度拉普拉斯矩阵按节点ID组织
+                    # 每个节点关联其所在社区/局部子图的多尺度拉普拉斯
+                    local_laplacian_matrices = {}
+                    communities = self.topology_builder.get_community_structure()
+                    for cluster_id, node_list in communities.items():
+                        for node_id in node_list:
+                            # 每个节点的多尺度拉普拉斯矩阵列表（从精细到粗糙）
+                            local_laplacian_matrices[node_id] = [
+                                m.toarray().tolist() if hasattr(m, 'toarray') else
+                                np.array(m).tolist() if not isinstance(m, list) else m
+                                for m in multi_scale_laplacians
+                            ]
+
+                    # Fiedler向量序列化
+                    fiedler_vector_list = (
+                        self.topology_builder.fiedler_vector.tolist()
+                        if self.topology_builder.fiedler_vector is not None
+                        else []
+                    )
+
                     # 保存分析结果到MongoDB
                     topology_info = {
                         'time': datetime.now(),
                         'node_count': len(self.topology_builder.node_ids),
                         'edge_count': self.topology_builder.graph.number_of_edges(),
                         'fiedler_value': self.topology_builder.fiedler_value,
+                        'fiedler_vector': fiedler_vector_list,
                         'spectral_gap': self.topology_builder.spectral_gap,
                         'is_anomaly': is_anomaly,
                         'anomaly_info': anomaly_info,
-                        'community_count': len(self.topology_builder.get_community_structure())
+                        'community_count': len(communities),
+                        'local_laplacian_matrices': local_laplacian_matrices,
+                        'cluster_labels': {
+                            node_id: int(cluster_id)
+                            for cluster_id, nodes in communities.items()
+                            for node_id in nodes
+                        }
                     }
                     self.topology_collection.insert_one(topology_info)
                     

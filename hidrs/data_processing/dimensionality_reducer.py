@@ -6,25 +6,31 @@ import json
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
-import umap
+try:
+    import umap
+    HAS_UMAP = True
+except ImportError:
+    HAS_UMAP = False
 
 
 class DimensionalityReducer:
     """降维处理类，使用UMAP、PCA等技术进行降维"""
-    
+
     def __init__(self, method='umap', config_path="config/dimension_reducer_config.json"):
         # 读取配置文件
         with open(config_path, 'r', encoding='utf-8') as f:
             self.config = json.load(f)
-        
+
         self.method = method
         self.fitted = False
-        
+
         # 初始化标准化器
         self.scaler = StandardScaler()
-        
+
         # 根据方法初始化降维器
         if method == 'umap':
+            if not HAS_UMAP:
+                raise ImportError("umap-learn 未安装，请运行: pip install umap-learn")
             self.reducer = umap.UMAP(
                 n_neighbors=self.config['umap_n_neighbors'],
                 min_dist=self.config['umap_min_dist'],

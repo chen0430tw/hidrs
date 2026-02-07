@@ -15,7 +15,10 @@ class HolographicMapper:
         - config_path: 配置文件路径（可选）
         """
         self.output_dim = 256  # 默认输出维度
-        
+        self.info_preserve_ratio = 0.9  # 信息保留比率
+        self.local_info_weight = 0.7  # 局部信息权重
+        self.scale_decay = 2.0  # 尺度衰减因子
+
         # 如果提供了配置文件，读取配置
         if config_path:
             self._load_config(config_path)
@@ -115,19 +118,51 @@ class HolographicMapper:
         return holographic_base
     
     def _compute_global_component(self, local_fiedler, global_fiedler):
-        """计算全局信息组件"""
-        # 计算局部Fiedler向量与全局Fiedler向量的投影
-        projection = np.dot(local_fiedler, global_fiedler)
-        
-        # 构造全局组件
-        global_component = np.array([projection])
-        
+        """
+        计算全局信息组件
+
+        将局部Fiedler向量投影到全局Fiedler空间，生成与output_dim一致的
+        全局表示向量。实现Φ_hol理论中局部→全局信息编码：
+        G = α · (u₂_local · u₂_global) · Ψ(u₂_global)
+        其中Ψ将全局Fiedler向量扩展到目标维度空间。
+        """
+        # 对齐维度：取两个向量的最小长度进行投影
+        min_len = min(len(local_fiedler), len(global_fiedler))
+        local_trunc = local_fiedler[:min_len]
+        global_trunc = global_fiedler[:min_len]
+
+        # 计算投影系数（局部结构在全局拓扑中的表达强度）
+        norm_local = np.linalg.norm(local_trunc)
+        norm_global = np.linalg.norm(global_trunc)
+        if norm_local > 0 and norm_global > 0:
+            projection_coeff = np.dot(local_trunc, global_trunc) / (norm_local * norm_global)
+        else:
+            projection_coeff = 0.0
+
+        # 构造output_dim维的全局组件：
+        # 1. 将全局Fiedler向量扩展/截断到output_dim
+        # 2. 用投影系数调制，编码局部-全局关联强度
+        # 3. 附加谱特征（投影系数的多阶信息）
+        global_expanded = np.zeros(self.output_dim)
+
+        # 第一部分：全局Fiedler向量的直接嵌入（调制后）
+        embed_len = min(len(global_fiedler), self.output_dim // 2)
+        global_expanded[:embed_len] = projection_coeff * global_fiedler[:embed_len]
+
+        # 第二部分：局部-全局交互特征（交叉调制）
+        cross_len = min(min_len, self.output_dim - self.output_dim // 2)
+        cross_start = self.output_dim // 2
+        # 逐元素乘积编码局部与全局的交互模式
+        global_expanded[cross_start:cross_start + cross_len] = (
+            local_trunc[:cross_len] * global_trunc[:cross_len]
+        )
+
         # 标准化
-        norm = np.linalg.norm(global_component)
+        norm = np.linalg.norm(global_expanded)
         if norm > 0:
-            global_component = global_component / norm
-        
-        return global_component
+            global_expanded = global_expanded / norm
+
+        return global_expanded
     
     def map_multi_scale(self, laplacian_matrices, global_fiedler=None):
         """

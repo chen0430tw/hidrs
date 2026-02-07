@@ -249,12 +249,229 @@ class CommonCrawlIndexClient:
         to_date: Optional[str],
         filter_status: Optional[List[int]],
     ) -> List[Dict[str, Any]]:
-        """使用boto3直连S3搜索（备用）"""
+        """
+        使用boto3直连S3搜索（备用）
+
+        Common Crawl索引存储在S3上：
+        - Bucket: commoncrawl (公开，无需认证)
+        - 索引路径: cc-index/collections/{crawl}/indexes/
+        - 索引格式: CDX集群索引 (cluster.idx) + 分片CDX文件
+
+        流程：
+        1. 从cluster.idx找到URL对应的CDX分片
+        2. 下载对应分片的CDX数据
+        3. 在分片中查找匹配的URL记录
+        """
         logger.info("使用boto3 S3直连")
 
-        # TODO: 实现S3直连逻辑
-        # 这需要直接读取S3上的索引文件
-        raise NotImplementedError("boto3 S3直连功能待实现")
+        import gzip
+        import io
+        from bisect import bisect_left, bisect_right
+
+        # 无需认证即可访问commoncrawl公开bucket
+        s3 = self.boto3.client(
+            's3',
+            config=self.boto3.session.Config(signature_version='UNSIGNED')
+        )
+        bucket = 'commoncrawl'
+
+        if not crawls:
+            crawls = self.available_crawls[:3]
+
+        # SURT格式转换：将URL转为排序友好的反转域名格式
+        # 例如: example.com/page → com,example)/page
+        search_key = self._url_to_surt(url_pattern)
+
+        results = []
+
+        for crawl in crawls:
+            if len(results) >= limit:
+                break
+
+            try:
+                # 步骤1: 下载cluster.idx（CDX分片索引）
+                cluster_idx_key = f"cc-index/collections/{crawl}/indexes/cluster.idx"
+                logger.debug(f"下载cluster.idx: {cluster_idx_key}")
+
+                cluster_response = s3.get_object(Bucket=bucket, Key=cluster_idx_key)
+                cluster_data = cluster_response['Body'].read().decode('utf-8')
+                cluster_lines = cluster_data.strip().split('\n')
+
+                # 步骤2: 二分查找定位CDX分片
+                # cluster.idx每行格式: SURT_KEY\tCDX_SHARD_NUM\tOFFSET\tLENGTH
+                shard_nums = self._find_cdx_shards(cluster_lines, search_key)
+
+                if not shard_nums:
+                    logger.debug(f"crawl {crawl} 中未找到匹配的CDX分片")
+                    continue
+
+                # 步骤3: 下载并搜索CDX分片
+                for shard_num in shard_nums:
+                    if len(results) >= limit:
+                        break
+
+                    cdx_key = f"cc-index/collections/{crawl}/indexes/cdx-{shard_num:05d}.gz"
+                    logger.debug(f"下载CDX分片: {cdx_key}")
+
+                    try:
+                        cdx_response = s3.get_object(Bucket=bucket, Key=cdx_key)
+                        compressed = cdx_response['Body'].read()
+
+                        # 解压gzip
+                        with gzip.GzipFile(fileobj=io.BytesIO(compressed)) as f:
+                            cdx_text = f.read().decode('utf-8')
+
+                        # 逐行搜索匹配记录
+                        for line in cdx_text.split('\n'):
+                            if not line.strip():
+                                continue
+
+                            # CDX行格式: SURT_KEY TIMESTAMP JSON_DATA
+                            parts = line.split(' ', 2)
+                            if len(parts) < 3:
+                                continue
+
+                            surt_key = parts[0]
+                            timestamp = parts[1]
+
+                            # URL匹配检查
+                            if not self._surt_matches(surt_key, search_key, url_pattern):
+                                continue
+
+                            # 解析JSON部分
+                            try:
+                                record = json.loads(parts[2])
+                            except json.JSONDecodeError:
+                                continue
+
+                            # 应用时间过滤
+                            if from_date and timestamp < from_date:
+                                continue
+                            if to_date and timestamp > to_date:
+                                continue
+
+                            # 应用状态码过滤
+                            status_code = int(record.get('status', 0))
+                            if filter_status and status_code not in filter_status:
+                                continue
+
+                            record['timestamp'] = timestamp
+                            results.append(self._normalize_result(record))
+
+                            if len(results) >= limit:
+                                break
+
+                    except Exception as e:
+                        logger.warning(f"CDX分片 {cdx_key} 读取失败: {e}")
+                        continue
+
+            except Exception as e:
+                logger.warning(f"crawl {crawl} S3搜索失败: {e}")
+                continue
+
+        logger.info(f"boto3 S3返回 {len(results)} 个结果")
+        return results
+
+    def _url_to_surt(self, url: str) -> str:
+        """
+        将URL转换为SURT（Sort-friendly URI Rewriting Transform）格式
+
+        SURT是Common Crawl索引的排序键格式：
+        - 反转域名部分，用逗号分隔
+        - 例如: http://www.example.com/page → com,example,www)/page
+        - 通配符*保留用于前缀匹配
+        """
+        # 去掉协议前缀
+        url_clean = url
+        for prefix in ['https://', 'http://']:
+            if url_clean.startswith(prefix):
+                url_clean = url_clean[len(prefix):]
+                break
+
+        # 分离域名和路径
+        if '/' in url_clean:
+            domain, path = url_clean.split('/', 1)
+            path = '/' + path
+        else:
+            domain = url_clean
+            path = ''
+
+        # 处理通配符
+        if domain.startswith('*.'):
+            domain = domain[2:]
+            # 通配符域名：返回反转的基础域名作为前缀搜索键
+            parts = domain.split('.')
+            parts.reverse()
+            return ','.join(parts) + ','
+
+        # 去掉端口号
+        if ':' in domain:
+            domain = domain.split(':')[0]
+
+        # 反转域名
+        parts = domain.split('.')
+        parts.reverse()
+        surt = ','.join(parts) + ')'
+
+        if path and path != '/*':
+            surt += path.rstrip('*')
+
+        return surt
+
+    def _find_cdx_shards(self, cluster_lines: List[str], search_key: str) -> List[int]:
+        """
+        从cluster.idx中定位包含搜索键的CDX分片编号
+
+        cluster.idx每行格式: SURT_KEY \\t CDX_SHARD_PATH \\t OFFSET \\t LENGTH \\t CDX_SHARD_NUM
+        使用二分查找定位目标分片范围
+        """
+        # 提取所有SURT键用于二分查找
+        keys = []
+        shard_info = []
+        for line in cluster_lines:
+            parts = line.split('\t')
+            if len(parts) >= 2:
+                keys.append(parts[0])
+                shard_info.append(parts)
+
+        if not keys:
+            return []
+
+        # 二分查找：找到search_key可能落入的分片范围
+        idx = bisect_left(keys, search_key)
+
+        # 取前后各1个分片以确保覆盖（SURT前缀匹配可能跨分片）
+        shard_nums = set()
+        for i in range(max(0, idx - 1), min(len(shard_info), idx + 2)):
+            try:
+                # 分片编号从路径中提取: cdx-NNNNN.gz
+                shard_path = shard_info[i][1] if len(shard_info[i]) > 1 else ''
+                if 'cdx-' in shard_path:
+                    num_str = shard_path.split('cdx-')[1].split('.')[0]
+                    shard_nums.add(int(num_str))
+                else:
+                    # 有些cluster.idx格式直接是数字
+                    shard_nums.add(i)
+            except (ValueError, IndexError):
+                shard_nums.add(i)
+
+        return sorted(shard_nums)
+
+    def _surt_matches(self, surt_key: str, search_surt: str, original_pattern: str) -> bool:
+        """
+        检查CDX记录的SURT键是否匹配搜索模式
+
+        支持:
+        - 精确匹配
+        - 前缀匹配（通配符*）
+        - 域名匹配
+        """
+        # 通配符模式：前缀匹配
+        if '*' in original_pattern:
+            return surt_key.startswith(search_surt)
+
+        # 精确或前缀匹配
+        return surt_key.startswith(search_surt)
 
     def _normalize_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """标准化不同来源的结果格式"""

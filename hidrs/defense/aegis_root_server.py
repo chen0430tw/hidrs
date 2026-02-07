@@ -182,6 +182,21 @@ class AEGISRootServer:
             'anycast_routes': 0,
         }
 
+        # Redis同步客户端（用于跨节点广播）
+        self._sync_client = None
+        try:
+            from .redis_sync_client import RedisSyncClient
+            self._sync_client = RedisSyncClient(
+                node_id=server_id,
+                region='root',
+                use_mock=True,  # 默认用mock，可通过set_redis_client切换到真实Redis
+            )
+        except Exception as e:
+            logger.warning(f"[{self.server_id}] Redis同步客户端初始化失败: {e}")
+
+        # 节点已知策略版本追踪（用于增量策略分发）
+        self._node_policy_versions: Dict[str, Set[str]] = defaultdict(set)
+
         # 监控线程
         self.running = False
         self.monitor_thread = None
@@ -189,6 +204,7 @@ class AEGISRootServer:
         logger.info(f"[{self.server_id}] AEGIS根协调服务器初始化")
         logger.info(f"  Anycast: {'启用' if anycast_enabled else '禁用'}")
         logger.info(f"  心跳超时: {heartbeat_timeout}秒")
+        logger.info(f"  Redis同步: {'启用' if self._sync_client else '禁用'}")
 
     def start(self):
         """启动根服务器"""
@@ -410,17 +426,42 @@ class AEGISRootServer:
         return intel_id
 
     def _broadcast_critical_threat(self, intel: GlobalThreatIntel):
-        """广播关键威胁到所有节点"""
+        """
+        广播关键威胁到所有节点
+
+        通过Redis Pub/Sub发送威胁情报到aegis:threat_intel频道，
+        所有订阅该频道的节点会立即收到通知。
+        """
         logger.critical(
-            f"[{self.server_id}] 🚨 全球威胁警报: {intel.intel_id} "
+            f"[{self.server_id}] 全球威胁警报: {intel.intel_id} "
             f"(目标: {intel.target}, 严重性: {intel.severity})"
         )
 
-        # 在实际实现中，这里会通过Redis Pub/Sub广播
-        # 现在只是记录日志
-        logger.critical(
-            f"[{self.server_id}] 广播到 {len(self.nodes)} 个节点"
-        )
+        # 通过Redis Pub/Sub广播到所有节点
+        if self._sync_client:
+            from .redis_sync_client import SyncMessage
+            msg = SyncMessage(
+                message_type='threat_intel',
+                source_node=self.server_id,
+                source_region='root',
+                timestamp=time.time(),
+                data={
+                    'intel_id': intel.intel_id,
+                    'threat_type': intel.threat_type,
+                    'target': intel.target,
+                    'severity': intel.severity,
+                    'confidence': intel.confidence,
+                    'action': intel.action,
+                    'ttl': intel.ttl,
+                    'indicators': intel.indicators,
+                }
+            )
+            self._sync_client.publish_threat_intel(msg)
+            logger.critical(
+                f"[{self.server_id}] 已广播到 {len(self.nodes)} 个节点 (Redis Pub/Sub)"
+            )
+        else:
+            logger.warning(f"[{self.server_id}] Redis不可用，无法广播威胁情报")
 
     def deploy_policy(
         self,
@@ -513,9 +554,44 @@ class AEGISRootServer:
         ]
 
     def _get_policy_updates(self, node_id: str) -> List[Dict[str, Any]]:
-        """获取策略更新（简化版，实际应该追踪节点已知的策略版本）"""
-        # 这里简化处理，实际应该维护每个节点的策略版本状态
-        return []
+        """
+        获取节点尚未收到的策略更新
+
+        通过追踪每个节点已知的策略ID集合，返回增量策略列表。
+        """
+        known_policies = self._node_policy_versions.get(node_id, set())
+
+        # 查找该节点的region
+        node_info = self.nodes.get(node_id)
+        node_region = node_info.region if node_info else ''
+
+        new_policies = []
+        for policy_id, policy in self.policies.items():
+            if policy_id in known_policies:
+                continue
+            if not policy.enabled:
+                continue
+
+            # 检查策略是否适用于该节点
+            if policy.target_nodes and node_id not in policy.target_nodes:
+                continue
+            if policy.target_regions and node_region not in policy.target_regions:
+                # 如果没有指定target_regions，则适用于所有区域
+                if policy.target_regions:
+                    continue
+
+            new_policies.append({
+                'policy_id': policy_id,
+                'policy_name': policy.policy_name,
+                'policy_type': policy.policy_type,
+                'config': policy.config,
+                'created_at': policy.created_at,
+            })
+
+            # 标记该节点已知此策略
+            self._node_policy_versions[node_id].add(policy_id)
+
+        return new_policies
 
     def _get_threat_intel_updates(self, node_id: str) -> List[Dict[str, Any]]:
         """获取威胁情报更新"""

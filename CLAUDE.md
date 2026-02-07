@@ -96,6 +96,120 @@ docs/                 # GitHub Pages mirror of frontend/ (keep in sync)
 4. Add API routes in `crawler_server.py`
 5. Add mock endpoints if needed
 
+## Known Anti-Patterns (已知反模式)
+
+以下是本项目开发过程中实际发生过的严重问题，记录在此防止重犯。
+
+### 调研-实现脱节 (Research-Implementation Disconnect)
+
+**现象**：花大量时间调研论文、阅读开源代码、分析技术原理，但最终写出的代码完全没有体现调研内容。代码中保留了调研痕迹（架构图、参考文献链接、技术注释），但实现本身是模拟stub或空壳。
+
+**本项目的真实案例**：
+- AEGIS防御系统调研了GFW DPI论文、OpenGFW源码、SYN Cookie内核机制、Tarpit网络技术
+- 代码顶部写了完整的4层架构图，标注了5篇参考文献
+- 但实际实现：NFQueue包拦截→不存在；SYN Cookie→只有HMAC计算存dict；Tarpit→`time.sleep(30)`；流量反射→`logger.warning("模拟模式")`
+- 整个"防火墙"只接受手动传入的字典参数，没有任何真实网络封包处理
+
+**另一个案例**：
+- HLIG理论文档详细定义了Φ_hol映射、λ₂(t)动态监控、多尺度一致性
+- 代码中`_compute_global_component`将全局Fiedler投影压缩成标量(1维)，导致70/30加权融合完全失效
+- `HLIGAnalyzer`始终传`global_fiedler=None`，核心全息映射退化为纯局部表示
+- `TopologyBuilder`缺少多尺度拉普拉斯生成，`map_multi_scale()`永远收不到数据
+
+**根本原因**：
+1. 调研阶段和编码阶段之间没有建立强制映射关系
+2. 先写了骨架/接口，打算"后续填充"，但填充从未发生
+3. 用注释和架构图代替了实际实现，产生了"已完成"的错觉
+4. 对理论文档只读了表面，没有逐条验证代码是否正确实现了每个数学定义
+
+**预防规则**：
+- 调研内容必须直接体现在代码中。如果调研了某个技术，代码里必须有对应的import和调用链
+- 禁止"先占位后填充"模式。如果某个功能还没实现，要么不写，要么抛`NotImplementedError`，不要用模拟代码伪装成已完成
+- 每个架构文档中声称的技术能力，必须有可执行的代码路径支撑。注释和架构图不算实现
+- 涉及理论文档时，逐条对照数学公式与代码实现，确认维度、数据流、计算逻辑完全一致
+
+### 先入为主的技术判断 (Premature Technical Dismissal)
+
+**现象**：在没有完全理解理论或代码的情况下，就给出"这只不过是XXX换了个名字"的评价，导致忽略真正的创新点。
+
+**本项目的真实案例**：
+- HLIG的Φ_hol全息映射被判断为"标准谱图论换了名字"
+- 实际上Φ_hol映射框架（局部拉普拉斯→全局全息表示）、λ₂(t)动态监控（Fiedler值时序追踪异常检测）、多尺度一致性（图粗化保谱特性）是组合创新
+
+**预防规则**：
+- 不要在没有逐行读完理论文档的情况下做"本质上就是XXX"的判断
+- 如果理论定义了数学框架，先验证代码是否正确实现了该框架，再评价框架本身的价值
+- 区分"概念已有"和"组合创新"——即使每个组件都不是新的，组合方式和应用场景可能是新的
+
+### 偷懒实现 (Lazy Implementation / Stub Disguised as Feature)
+
+**定义**：代码声称实现了某个功能，但实际执行路径是空壳、模拟、或永远走不到的分支。代码表面上"存在"，通过了代码审查的目视检查，但运行时不产生任何真实效果。
+
+**偷懒实现的6种具体形态**：
+
+1. **Logger冒充实现** — 函数体只有 `logger.info("执行了XXX")` 或 `logger.warning("模拟模式")`，没有任何真实逻辑。日志输出制造了"功能正在运行"的假象。
+   ```python
+   # 偷懒
+   def reflect_attack(self, target):
+       logger.info(f"反射攻击到 {target}")  # 什么都没做
+   ```
+
+2. **`return {}` / `return []` / `pass` 空壳** — 函数签名和文档完整，但实现只返回空值或直接pass。调用者收到空数据，静默失败。
+   ```python
+   # 偷懒
+   def get_policy_updates(self, node_id):
+       return []  # 永远没有更新
+   ```
+
+3. **`NotImplementedError` 占位** — 用异常代替实现，声称"待实现"，但从未实现。如果功能确实未开发，应该不写这个函数或在架构文档中标注为TODO，而不是建立完整的调用链指向一个会崩溃的函数。
+   ```python
+   # 偷懒
+   def search_with_s3(self, pattern):
+       raise NotImplementedError("S3直连功能待实现")
+   ```
+
+4. **Mock默认无退路** — 模拟对象（MockXxx）被设为默认选项，但代码中不存在连接真实服务的路径。`use_mock=True` 作为默认参数，而 `use_mock=False` 的分支要么不存在，要么需要调用者自行创建客户端。
+   ```python
+   # 偷懒: 默认Mock，没有自动连接真实Redis的能力
+   def __init__(self, use_mock=True):
+       if use_mock:
+           self.client = MockRedis()
+       else:
+           raise ValueError("Must provide client")  # 调用者自己想办法
+   ```
+
+5. **`time.sleep()` 冒充处理** — 用等待时间模拟处理延迟，制造"正在工作"的假象。常见于tarpit、限流、超时等场景。
+   ```python
+   # 偷懒
+   def tarpit_connection(self, ip):
+       time.sleep(30)  # 假装在tarpit，实际只是阻塞了自己的线程
+   ```
+
+6. **Mock数据硬编码** — 函数永远返回预设的假数据，无论输入是什么。常见于可视化、分析、统计模块。
+   ```python
+   # 偷懒
+   def get_geo_data(self):
+       return [{"lat": 40.7, "lng": -74.0, "label": "New York"}]  # 永远是纽约
+   ```
+
+**偷懒实现 vs 合理的占位的区别**：
+- 合理的占位：函数不存在，或存在但抛 `NotImplementedError` 且没有任何调用者依赖它
+- 偷懒实现：**整条调用链已经建立**（有调用者、有路由、有UI按钮），但执行到关键步骤时悄无声息地什么都没做
+
+**检测方法**：
+- 搜索 `logger.info` / `logger.warning` 作为函数的唯一语句
+- 搜索 `return []` / `return {}` / `return None` / `pass` 作为函数的唯一语句
+- 搜索 `NotImplementedError` 并检查是否有调用者
+- 搜索 `mock` / `Mock` / `simulation` / `模拟` 并验证是否存在非模拟路径
+- 搜索 `time.sleep` 并验证是否有真实处理逻辑
+- 检查函数的注释/文档长度与实现长度的比例：文档100行但实现3行是红旗
+
+**预防规则**：
+- 如果声称实现了功能X，那么必须存在不依赖Mock/模拟的完整执行路径
+- Mock/测试模式只能作为**备用**，不能作为**默认**。默认路径必须尝试真实实现
+- 如果依赖库未安装，应该发出明确警告并降级，而不是静默切换到空壳
+- 任何 `NotImplementedError` 必须在同一次开发中被替换为真实实现，或从调用链中移除
+
 ## Code Completion Checklist (MANDATORY)
 
 Every time you finish writing or modifying code, you MUST run through this checklist BEFORE telling the user you are done. Do NOT skip any item. These are real bugs that have occurred repeatedly in this project.
@@ -170,6 +284,33 @@ Every time you finish writing or modifying code, you MUST run through this check
 - Number fields from JSON may arrive as strings (e.g., query params are always strings). Parse explicitly with `parseInt()`/`parseFloat()` where needed.
 - Python `None` becomes JSON `null` becomes JS `null`. Python `True/False` becomes `true/false`. Do not compare with `==` to string `"true"`.
 - When passing data between frontend and backend, verify types match: JS `number` vs Python `int`/`float`, JS `array` vs Python `list`, JS `object` vs Python `dict`.
+
+### 13. Research-Implementation Alignment (调研-实现一致性)
+- If you researched a technology (read papers, source code, docs) during this session, verify the code you wrote ACTUALLY USES that technology. Not just comments referencing it — real imports, real function calls, real data flow.
+- If the architecture doc or code comments claim a capability (e.g., "NFQueue packet interception"), grep the codebase for the corresponding library import. If `import netfilterqueue` doesn't exist anywhere, the capability is fake.
+- If the code has a `simulation_mode` / `test_mode` / `mock` flag, verify there is ALSO a non-simulation code path that does the real thing. A function that ONLY works in simulation mode is not an implementation — it is a stub.
+- If the code implements a mathematical formula from a theory document, verify:
+  - **Dimensions**: Input/output dimensions match what the formula defines. A formula producing a vector must not collapse to a scalar.
+  - **Data flow**: Every variable the formula needs must actually be passed in, not hardcoded to `None` or `0`.
+  - **Upstream pipeline**: If module A needs data from module B, verify module B actually produces and sends that data. A consumer without a producer is dead code.
+- Pattern to catch: code file has extensive docstrings/comments explaining the theory, reference links to papers, detailed architecture diagrams in ASCII art — but the actual function bodies are trivial stubs (`time.sleep()`, `logger.warning("模拟")`, `return {}`, `pass`). The ratio of comments-to-implementation is a red flag.
+
+### 14. Lazy Implementation Detection (偷懒实现检测)
+- After writing any function: verify the function body contains REAL logic, not just logger calls, empty returns, or sleep statements.
+- After writing any module with Mock/simulation mode: verify the DEFAULT code path attempts the REAL implementation. Mock must be opt-in (e.g., `use_mock=False` as default), not opt-out.
+- After writing any function that raises `NotImplementedError`: either implement it NOW or remove it from the call chain. Do not leave live `NotImplementedError` in reachable code paths.
+- Quick grep checks to run after completing code:
+  ```bash
+  # Find functions that are just logger calls
+  grep -n "def .*:" FILE | while read line; do ... done
+  # Find NotImplementedError in reachable code
+  grep -rn "NotImplementedError" hidrs/
+  # Find mock-as-default patterns
+  grep -rn "use_mock.*=.*True" hidrs/
+  # Find time.sleep as implementation
+  grep -rn "time.sleep" hidrs/ | grep -v "test" | grep -v "#"
+  ```
+- The ratio test: if a function has more lines of docstring/comments than lines of actual code (excluding blank lines), flag it for review. This is the #1 indicator of a stub disguised as a feature.
 
 ### Self-Verification Command
 After completing code changes, run:

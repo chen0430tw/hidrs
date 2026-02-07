@@ -7,7 +7,11 @@ import time
 import threading
 import random
 from datetime import datetime
-import nmap
+try:
+    import nmap
+    HAS_NMAP = True
+except ImportError:
+    HAS_NMAP = False
 import pymongo
 from kafka import KafkaProducer
 
@@ -26,6 +30,8 @@ class PortScanner:
         self.port_scan_collection = self.db[self.config['port_scan_collection']]
         
         # 初始化nmap扫描器
+        if not HAS_NMAP:
+            raise ImportError("python-nmap 未安装，请运行: pip install python-nmap")
         self.nm = nmap.PortScanner()
         
         # 初始化Kafka生产者

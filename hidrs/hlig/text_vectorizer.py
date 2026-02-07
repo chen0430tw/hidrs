@@ -124,9 +124,12 @@ class TextVectorizer:
 
     def vectorize_embedding(self, text: str) -> np.ndarray:
         """
-        使用词嵌入向量化文本（简化版）
+        使用词嵌入向量化文本
 
-        注：完整的词嵌入需要预训练模型（Word2Vec/BERT），这里使用简化实现
+        尝试加载顺序：
+        1. sentence-transformers（效果最好，支持中文）
+        2. gensim Word2Vec（英文为主）
+        3. 回退到TF-IDF（明确警告）
 
         Args:
             text: 文本
@@ -134,9 +137,72 @@ class TextVectorizer:
         Returns:
             嵌入向量 (output_dim,)
         """
-        # TODO: 集成预训练词嵌入模型
-        # 目前使用TF-IDF作为备用
-        logger.debug("词嵌入功能待实现，使用TF-IDF备用")
+        if not text or not text.strip():
+            return np.zeros(self.output_dim)
+
+        # 延迟加载嵌入模型（只初始化一次）
+        if not hasattr(self, '_embedding_model'):
+            self._embedding_model = None
+            self._embedding_type = None
+
+            try:
+                from sentence_transformers import SentenceTransformer
+                self._embedding_model = SentenceTransformer(
+                    'paraphrase-multilingual-MiniLM-L12-v2'
+                )
+                self._embedding_type = 'sentence_transformer'
+                logger.info("[TextVectorizer] 已加载sentence-transformers模型")
+            except (ImportError, Exception):
+                pass
+
+            if self._embedding_model is None:
+                try:
+                    import gensim.downloader as api
+                    self._embedding_model = api.load('word2vec-google-news-300')
+                    self._embedding_type = 'word2vec'
+                    logger.info("[TextVectorizer] 已加载Word2Vec模型")
+                except (ImportError, Exception):
+                    pass
+
+            if self._embedding_model is None:
+                logger.warning(
+                    "[TextVectorizer] 无可用词嵌入模型"
+                    "（需要 sentence-transformers 或 gensim），回退到TF-IDF"
+                )
+
+        # sentence-transformers路径
+        if self._embedding_type == 'sentence_transformer':
+            try:
+                vec = self._embedding_model.encode(text)
+                if len(vec) > self.output_dim:
+                    vec = vec[:self.output_dim]
+                elif len(vec) < self.output_dim:
+                    vec = np.concatenate([vec, np.zeros(self.output_dim - len(vec))])
+                self.stats['total_vectorized'] += 1
+                return vec
+            except Exception as e:
+                logger.debug(f"sentence-transformers编码失败: {e}")
+
+        # Word2Vec路径（词向量平均）
+        if self._embedding_type == 'word2vec':
+            try:
+                tokens = self.tokenize(text)
+                vectors = [
+                    self._embedding_model[t] for t in tokens
+                    if t in self._embedding_model
+                ]
+                if vectors:
+                    vec = np.mean(vectors, axis=0)
+                    if len(vec) > self.output_dim:
+                        vec = vec[:self.output_dim]
+                    elif len(vec) < self.output_dim:
+                        vec = np.concatenate([vec, np.zeros(self.output_dim - len(vec))])
+                    self.stats['total_vectorized'] += 1
+                    return vec
+            except Exception as e:
+                logger.debug(f"Word2Vec编码失败: {e}")
+
+        # 回退到TF-IDF
         return self.vectorize_tfidf(text)
 
     def vectorize_batch(
