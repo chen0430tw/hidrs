@@ -96,6 +96,51 @@ docs/                 # GitHub Pages mirror of frontend/ (keep in sync)
 4. Add API routes in `crawler_server.py`
 5. Add mock endpoints if needed
 
+## Known Anti-Patterns (已知反模式)
+
+以下是本项目开发过程中实际发生过的严重问题，记录在此防止重犯。
+
+### 调研-实现脱节 (Research-Implementation Disconnect)
+
+**现象**：花大量时间调研论文、阅读开源代码、分析技术原理，但最终写出的代码完全没有体现调研内容。代码中保留了调研痕迹（架构图、参考文献链接、技术注释），但实现本身是模拟stub或空壳。
+
+**本项目的真实案例**：
+- AEGIS防御系统调研了GFW DPI论文、OpenGFW源码、SYN Cookie内核机制、Tarpit网络技术
+- 代码顶部写了完整的4层架构图，标注了5篇参考文献
+- 但实际实现：NFQueue包拦截→不存在；SYN Cookie→只有HMAC计算存dict；Tarpit→`time.sleep(30)`；流量反射→`logger.warning("模拟模式")`
+- 整个"防火墙"只接受手动传入的字典参数，没有任何真实网络封包处理
+
+**另一个案例**：
+- HLIG理论文档详细定义了Φ_hol映射、λ₂(t)动态监控、多尺度一致性
+- 代码中`_compute_global_component`将全局Fiedler投影压缩成标量(1维)，导致70/30加权融合完全失效
+- `HLIGAnalyzer`始终传`global_fiedler=None`，核心全息映射退化为纯局部表示
+- `TopologyBuilder`缺少多尺度拉普拉斯生成，`map_multi_scale()`永远收不到数据
+
+**根本原因**：
+1. 调研阶段和编码阶段之间没有建立强制映射关系
+2. 先写了骨架/接口，打算"后续填充"，但填充从未发生
+3. 用注释和架构图代替了实际实现，产生了"已完成"的错觉
+4. 对理论文档只读了表面，没有逐条验证代码是否正确实现了每个数学定义
+
+**预防规则**：
+- 调研内容必须直接体现在代码中。如果调研了某个技术，代码里必须有对应的import和调用链
+- 禁止"先占位后填充"模式。如果某个功能还没实现，要么不写，要么抛`NotImplementedError`，不要用模拟代码伪装成已完成
+- 每个架构文档中声称的技术能力，必须有可执行的代码路径支撑。注释和架构图不算实现
+- 涉及理论文档时，逐条对照数学公式与代码实现，确认维度、数据流、计算逻辑完全一致
+
+### 先入为主的技术判断 (Premature Technical Dismissal)
+
+**现象**：在没有完全理解理论或代码的情况下，就给出"这只不过是XXX换了个名字"的评价，导致忽略真正的创新点。
+
+**本项目的真实案例**：
+- HLIG的Φ_hol全息映射被判断为"标准谱图论换了名字"
+- 实际上Φ_hol映射框架（局部拉普拉斯→全局全息表示）、λ₂(t)动态监控（Fiedler值时序追踪异常检测）、多尺度一致性（图粗化保谱特性）是组合创新
+
+**预防规则**：
+- 不要在没有逐行读完理论文档的情况下做"本质上就是XXX"的判断
+- 如果理论定义了数学框架，先验证代码是否正确实现了该框架，再评价框架本身的价值
+- 区分"概念已有"和"组合创新"——即使每个组件都不是新的，组合方式和应用场景可能是新的
+
 ## Code Completion Checklist (MANDATORY)
 
 Every time you finish writing or modifying code, you MUST run through this checklist BEFORE telling the user you are done. Do NOT skip any item. These are real bugs that have occurred repeatedly in this project.
@@ -170,6 +215,16 @@ Every time you finish writing or modifying code, you MUST run through this check
 - Number fields from JSON may arrive as strings (e.g., query params are always strings). Parse explicitly with `parseInt()`/`parseFloat()` where needed.
 - Python `None` becomes JSON `null` becomes JS `null`. Python `True/False` becomes `true/false`. Do not compare with `==` to string `"true"`.
 - When passing data between frontend and backend, verify types match: JS `number` vs Python `int`/`float`, JS `array` vs Python `list`, JS `object` vs Python `dict`.
+
+### 13. Research-Implementation Alignment (调研-实现一致性)
+- If you researched a technology (read papers, source code, docs) during this session, verify the code you wrote ACTUALLY USES that technology. Not just comments referencing it — real imports, real function calls, real data flow.
+- If the architecture doc or code comments claim a capability (e.g., "NFQueue packet interception"), grep the codebase for the corresponding library import. If `import netfilterqueue` doesn't exist anywhere, the capability is fake.
+- If the code has a `simulation_mode` / `test_mode` / `mock` flag, verify there is ALSO a non-simulation code path that does the real thing. A function that ONLY works in simulation mode is not an implementation — it is a stub.
+- If the code implements a mathematical formula from a theory document, verify:
+  - **Dimensions**: Input/output dimensions match what the formula defines. A formula producing a vector must not collapse to a scalar.
+  - **Data flow**: Every variable the formula needs must actually be passed in, not hardcoded to `None` or `0`.
+  - **Upstream pipeline**: If module A needs data from module B, verify module B actually produces and sends that data. A consumer without a producer is dead code.
+- Pattern to catch: code file has extensive docstrings/comments explaining the theory, reference links to papers, detailed architecture diagrams in ASCII art — but the actual function bodies are trivial stubs (`time.sleep()`, `logger.warning("模拟")`, `return {}`, `pass`). The ratio of comments-to-implementation is a red flag.
 
 ### Self-Verification Command
 After completing code changes, run:
