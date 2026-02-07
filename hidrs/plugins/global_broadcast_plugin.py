@@ -493,22 +493,79 @@ class GlobalBroadcastPlugin(PluginBase):
             logger.error(f"IP白名单检查失败: {e}")
             return False
 
+    def set_message_sender(self, sender_fn):
+        """
+        注册消息发送回调
+
+        宿主应用（Flask-SocketIO / WebSocket服务器）通过此方法注册
+        真正的消息发送函数，插件通过该回调将消息推送到客户端。
+
+        参数:
+        - sender_fn: 回调函数，签名 sender_fn(client_id: str, message: dict)
+
+        使用示例（Flask-SocketIO）:
+            from flask_socketio import SocketIO, emit
+            socketio = SocketIO(app)
+            plugin.set_message_sender(
+                lambda cid, msg: socketio.emit('broadcast', msg, room=cid)
+            )
+        """
+        self._external_sender = sender_fn
+        logger.info(f"[{self.name}] 消息发送回调已注册")
+
     def _send_to_client(self, client_id: str, message: Dict):
-        """发送消息到客户端（模拟WebSocket）"""
+        """
+        发送消息到客户端
+
+        优先使用通过set_message_sender()注册的外部回调（WebSocket/SSE），
+        如果没有注册外部发送器，将消息放入客户端的消息队列供轮询获取。
+        """
         if client_id not in self.connected_clients:
             return
 
         client = self.connected_clients[client_id]
 
-        # 这里应该通过WebSocket发送消息
-        # 由于这是插件，实际的WebSocket实现在外部
-        # 这里只记录发送行为
-        logger.debug(f"[{self.name}] 📤 发送消息到客户端 {client_id}: {message.get('action', 'broadcast')}")
+        # 1. 通过外部回调发送（WebSocket/SSE）
+        if hasattr(self, '_external_sender') and self._external_sender:
+            try:
+                self._external_sender(client_id, message)
+                logger.debug(f"[{self.name}] 发送消息到客户端 {client_id} (外部回调)")
+            except Exception as e:
+                logger.error(f"[{self.name}] 外部发送失败: {e}，转入消息队列")
+                self._enqueue_message(client_id, message)
+        else:
+            # 2. 放入消息队列（供HTTP轮询获取）
+            self._enqueue_message(client_id, message)
 
         # 更新客户端状态
         if 'broadcast_id' in message:
             client.current_broadcast = message['broadcast_id']
             client.status = 'playing'
+
+    def _enqueue_message(self, client_id: str, message: Dict):
+        """将消息放入客户端队列（供轮询API获取）"""
+        if not hasattr(self, '_message_queues'):
+            self._message_queues = {}
+        if client_id not in self._message_queues:
+            from collections import deque
+            self._message_queues[client_id] = deque(maxlen=1000)
+        self._message_queues[client_id].append(message)
+
+    def poll_messages(self, client_id: str, max_count: int = 50) -> List[Dict]:
+        """
+        轮询获取待发送消息（供HTTP API调用）
+
+        当没有WebSocket连接时，客户端可通过此方法定期获取消息。
+        """
+        if not hasattr(self, '_message_queues'):
+            return []
+        queue = self._message_queues.get(client_id)
+        if not queue:
+            return []
+        messages = []
+        while queue and len(messages) < max_count:
+            messages.append(queue.popleft())
+        return messages
 
     # ===== RTMP推流管理 =====
 

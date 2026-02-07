@@ -208,8 +208,9 @@ class SEDGeoVisualizationPlugin(PluginBase):
         self.domain_analyzer = None
         self.leak_analyzer = None
 
-        # 模拟数据（用于演示，实际应该连接Elasticsearch）
-        self.mock_data = []
+        # 数据存储（支持真实数据输入和演示mock数据）
+        self.data = []
+        self._demo_mode = False
 
     def on_load(self):
         """插件加载时调用"""
@@ -220,10 +221,27 @@ class SEDGeoVisualizationPlugin(PluginBase):
         self.domain_analyzer = EmailDomainAnalyzer()
         self.leak_analyzer = DataLeakAnalyzer(self.geoip_locator, self.domain_analyzer)
 
-        # 生成模拟数据
-        self._generate_mock_data()
+        # 如果没有外部数据，使用演示数据
+        if not self.data:
+            self._generate_mock_data()
+            self._demo_mode = True
+            logger.warning(f"[{self.name}] 使用演示数据（调用ingest_data()导入真实数据）")
 
         logger.info(f"[{self.name}] 加载完成")
+
+    def ingest_data(self, records: list):
+        """
+        导入真实泄露数据
+
+        参数:
+        - records: 记录列表，每条记录应包含:
+            {'email': str, 'source': str, 'xtime': str(ISO格式), ...}
+
+        调用后会替换演示数据，切换到真实数据模式。
+        """
+        self.data = records
+        self._demo_mode = False
+        logger.info(f"[{self.name}] 已导入 {len(records)} 条真实数据")
 
     def on_unload(self):
         """插件卸载时调用"""
@@ -238,7 +256,7 @@ class SEDGeoVisualizationPlugin(PluginBase):
     def _generate_mock_data(self):
         """生成模拟数据（用于演示）"""
         # 模拟一些常见的数据泄露事件
-        self.mock_data = [
+        self.data = [
             {
                 'email': 'user1@qq.com',
                 'source': 'QQ数据库泄露',
@@ -270,7 +288,7 @@ class SEDGeoVisualizationPlugin(PluginBase):
     def get_source_distribution(self) -> Dict:
         """获取数据源地理分布"""
         try:
-            result = self.leak_analyzer.analyze_sources(self.mock_data)
+            result = self.leak_analyzer.analyze_sources(self.data)
             return {
                 'success': True,
                 'data': result
@@ -282,7 +300,7 @@ class SEDGeoVisualizationPlugin(PluginBase):
     def get_heatmap_data(self) -> Dict:
         """获取热力图数据"""
         try:
-            heatmap = self.leak_analyzer.generate_heatmap_data(self.mock_data)
+            heatmap = self.leak_analyzer.generate_heatmap_data(self.data)
             return {
                 'success': True,
                 'data': heatmap,
@@ -295,7 +313,7 @@ class SEDGeoVisualizationPlugin(PluginBase):
     def get_timeline_data(self) -> Dict:
         """获取时间轴数据"""
         try:
-            timeline = self.leak_analyzer.analyze_timeline(self.mock_data)
+            timeline = self.leak_analyzer.analyze_timeline(self.data)
             return {
                 'success': True,
                 'data': timeline
@@ -310,7 +328,7 @@ class SEDGeoVisualizationPlugin(PluginBase):
             # 过滤指定地区的数据
             region_data = []
 
-            for item in self.mock_data:
+            for item in self.data:
                 email = item.get('email', '')
                 domain = self.domain_analyzer.extract_domain(email)
 
@@ -340,12 +358,12 @@ class SEDGeoVisualizationPlugin(PluginBase):
     def get_stats(self) -> Dict:
         """获取统计信息"""
         return {
-            'total_records': len(self.mock_data),
+            'total_records': len(self.data),
             'geoip_enabled': self.geoip_locator.enabled if self.geoip_locator else False,
-            'unique_sources': len(set(item.get('source') for item in self.mock_data)),
+            'unique_sources': len(set(item.get('source') for item in self.data)),
             'unique_domains': len(set(
                 self.domain_analyzer.extract_domain(item.get('email', ''))
-                for item in self.mock_data
+                for item in self.data
                 if self.domain_analyzer.extract_domain(item.get('email', ''))
             ))
         }

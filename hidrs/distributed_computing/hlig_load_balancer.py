@@ -189,23 +189,51 @@ class HLIGLoadBalancer:
         """
         计算目标负载分布
 
-        求解拉普拉斯方程: L·x = b
-        其中:
-        - x 是目标负载
-        - b 是当前负载（作为"电流源"）
+        通过拉普拉斯扩散使负载沿图的拓扑结构从高负载节点流向低负载节点。
 
-        简化处理：直接平均分配到所有节点
+        数学原理：
+        拉普拉斯矩阵L的行和为0（奇异），不能直接求逆。
+        使用热扩散迭代：x_{t+1} = x_t - α · L · x_t
+        其中 L·x 表示每个节点的净流出梯度，α是步长。
+        按最大特征值缩放α保证数值稳定性。
         """
-        # 简化版：均匀分配
-        total_load = np.sum(current_loads)
         n = len(current_loads)
-        target_loads = np.full(n, total_load / n)
 
-        # TODO: 实现真正的拉普拉斯流求解
-        # 需要求解线性系统 L·x = b，但L是奇异矩阵（行和为0）
-        # 可以使用伪逆或者固定一个节点的负载
+        if n < 2:
+            return current_loads.copy()
 
-        return target_loads
+        # 转为稠密矩阵
+        if hasattr(L, 'toarray'):
+            L_dense = L.toarray().astype(float)
+        else:
+            L_dense = np.array(L, dtype=float)
+
+        # 归一化步长（按最大特征值缩放，保证扩散收敛）
+        eigenvalues = np.linalg.eigvalsh(L_dense)
+        lambda_max = max(abs(eigenvalues.max()), 1e-10)
+        alpha = 0.5 / lambda_max
+
+        # 迭代扩散
+        x = current_loads.copy().astype(float)
+        total_load = np.sum(x)
+
+        for _ in range(20):
+            gradient = L_dense @ x
+            x_new = x - alpha * gradient
+
+            # 总负载守恒
+            x_new = x_new * (total_load / (np.sum(x_new) + 1e-10))
+
+            # 非负约束
+            x_new = np.maximum(x_new, 0.0)
+
+            # 收敛检查
+            if np.linalg.norm(x_new - x) < 1e-6 * np.linalg.norm(x):
+                break
+
+            x = x_new
+
+        return x
 
     def _generate_migration_plan(
         self,

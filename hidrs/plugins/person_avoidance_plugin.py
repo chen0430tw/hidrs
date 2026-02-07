@@ -365,8 +365,13 @@ class PersonAvoidancePlugin(PluginBase):
                 f"请阅读合规声明后，在配置中设置 'user_consent: true'"
             )
 
-        # 生成模拟数据
-        self._generate_mock_data()
+        # 如果没有真实数据，使用演示数据
+        if not self.analyzer.location_history:
+            self._generate_mock_data()
+            logger.warning(
+                f"[{self.name}] 使用演示数据 "
+                f"（调用 analyzer.add_location_record() 导入真实位置数据）"
+            )
 
         logger.info(f"[{self.name}] 加载完成")
 

