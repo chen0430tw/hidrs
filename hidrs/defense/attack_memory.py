@@ -826,6 +826,24 @@ class AttackMemoryWithSOSA(AttackMemorySystem):
             max_test_clients=max_test_clients
         )
 
+        # 初始化攻击特征库（优先级最高，先加载）
+        try:
+            from .attack_signature_db import (
+                AttackSignatureDatabase,
+                LightweightFeatureExtractor
+            )
+            self.signature_db = AttackSignatureDatabase()
+            self.feature_extractor = LightweightFeatureExtractor()
+            self.signature_db_enabled = True
+            logger.info(f"[AttackMemory] ✅ 攻击特征库已加载")
+            logger.info(f"  攻击签名数: {len(self.signature_db.attack_signatures)}")
+            logger.info(f"  木马签名数: {len(self.signature_db.malware_signatures)}")
+        except Exception as e:
+            self.signature_db = None
+            self.feature_extractor = None
+            self.signature_db_enabled = False
+            logger.warning(f"[AttackMemory] ⚠️ 攻击特征库加载失败: {e}")
+
         # 初始化SOSA
         try:
             import sys
@@ -842,41 +860,55 @@ class AttackMemoryWithSOSA(AttackMemorySystem):
             # 初始化SOSA的Markov链（攻击模式状态转移）
             markov = self.sosa.get_markov()
 
-            # 设置基础转移概率（6状态示例）
-            # 状态定义：
-            # 0: 正常流量
-            # 1: 可疑活动
-            # 2: 确认攻击
-            # 3: 攻击升级
-            # 4: 攻击持续
-            # 5: 攻击衰退
+            # 使用自适应转移矩阵（如果特征库可用）
+            if self.signature_db_enabled:
+                adaptive_matrix = self.signature_db.adaptive_matrix
+                # 状态定义：
+                # 0: 正常流量
+                # 1: 可疑活动
+                # 2: 确认攻击
+                # 3: 攻击升级
+                # 4: 攻击持续
+                # 5: 攻击衰退
 
-            # 正常→可疑
-            markov.add_edge(0, 0, 0.9)
-            markov.add_edge(0, 1, 0.1)
+                # 使用自适应概率初始化Markov链
+                for from_state in range(sosa_states):
+                    transitions = adaptive_matrix.get_all_transitions(from_state)
+                    for to_state, prob in transitions.items():
+                        if prob > 0:
+                            markov.add_edge(from_state, to_state, prob)
 
-            # 可疑→正常或攻击
-            markov.add_edge(1, 0, 0.3)
-            markov.add_edge(1, 1, 0.5)
-            markov.add_edge(1, 2, 0.2)
+                logger.info(f"[AttackMemory] 🧠 使用自适应状态转移矩阵")
+            else:
+                # 降级：使用静态概率
+                # 正常→可疑
+                markov.add_edge(0, 0, 0.9)
+                markov.add_edge(0, 1, 0.1)
 
-            # 确认攻击→升级或持续
-            markov.add_edge(2, 2, 0.2)
-            markov.add_edge(2, 3, 0.4)
-            markov.add_edge(2, 4, 0.4)
+                # 可疑→正常或攻击
+                markov.add_edge(1, 0, 0.3)
+                markov.add_edge(1, 1, 0.5)
+                markov.add_edge(1, 2, 0.2)
 
-            # 攻击升级→持续
-            markov.add_edge(3, 3, 0.3)
-            markov.add_edge(3, 4, 0.7)
+                # 确认攻击→升级或持续
+                markov.add_edge(2, 2, 0.2)
+                markov.add_edge(2, 3, 0.4)
+                markov.add_edge(2, 4, 0.4)
 
-            # 攻击持续→衰退或持续
-            markov.add_edge(4, 4, 0.6)
-            markov.add_edge(4, 5, 0.4)
+                # 攻击升级→持续
+                markov.add_edge(3, 3, 0.3)
+                markov.add_edge(3, 4, 0.7)
 
-            # 攻击衰退→正常或可疑
-            markov.add_edge(5, 0, 0.5)
-            markov.add_edge(5, 1, 0.3)
-            markov.add_edge(5, 5, 0.2)
+                # 攻击持续→衰退或持续
+                markov.add_edge(4, 4, 0.6)
+                markov.add_edge(4, 5, 0.4)
+
+                # 攻击衰退→正常或可疑
+                markov.add_edge(5, 0, 0.5)
+                markov.add_edge(5, 1, 0.3)
+                markov.add_edge(5, 5, 0.2)
+
+                logger.info(f"[AttackMemory] 📊 使用静态状态转移概率")
 
             markov.normalize_outgoing()
 
@@ -899,18 +931,114 @@ class AttackMemoryWithSOSA(AttackMemorySystem):
         signatures: List[str],
         packet_size: int,
         success: bool,
-        port: int
+        port: int,
+        payload: bytes = b"",  # 新增：payload数据
+        dst_ip: str = "",     # 新增：目标IP
+        protocol: str = "TCP"  # 新增：协议类型
     ):
         """
-        学习攻击模式（SOSA增强版）
+        学习攻击模式（SOSA + 特征库增强版）
 
         除了父类的学习功能外，还会：
-        1. 将攻击事件送入SOSA流式处理
-        2. 更新Markov状态分布
-        3. 使用Binary-Twin特征增强记忆
+        1. 使用特征库匹配攻击签名
+        2. 检测木马payload
+        3. 更新自适应状态转移矩阵
+        4. 将攻击事件送入SOSA流式处理
+        5. 使用轻量级特征提取增强判断
         """
         # 调用父类学习方法
         super().learn_attack(src_ip, attack_type, signatures, packet_size, success, port)
+
+        # 特征库增强检测
+        matched_signature = None
+        detected_malware = None
+        is_false_positive = False
+
+        if self.signature_db_enabled and self.signature_db is not None:
+            # 1. 匹配攻击签名
+            try:
+                matched_signature = self.signature_db.match_packet(
+                    src_ip=src_ip,
+                    dst_ip=dst_ip if dst_ip else "0.0.0.0",
+                    src_port=port,
+                    dst_port=port,
+                    protocol=protocol,
+                    payload=payload,
+                    packet_rate=0.0,  # 这里需要从外部传入，暂时设为0
+                    packet_size=packet_size
+                )
+
+                if matched_signature:
+                    logger.info(f"[AttackMemory] 🎯 特征库匹配: {matched_signature.signature_id} "
+                               f"(严重度={matched_signature.severity}, 可信度={matched_signature.confidence():.2%})")
+
+                    # 如果成功（未被防御），可能是误报
+                    if success:
+                        is_false_positive = True
+                        self.signature_db.report_false_positive(matched_signature.signature_id)
+
+            except Exception as e:
+                logger.warning(f"[AttackMemory] 签名匹配失败: {e}")
+
+            # 2. 检测木马payload
+            if len(payload) > 0:
+                try:
+                    detected_malware = self.signature_db.detect_malware_payload(payload)
+                    if detected_malware:
+                        logger.warning(f"[AttackMemory] 🦠 检测到木马: {detected_malware.malware_family} "
+                                      f"(ID={detected_malware.malware_id})")
+                except Exception as e:
+                    logger.warning(f"[AttackMemory] 木马检测失败: {e}")
+
+            # 3. 轻量级特征提取
+            if self.feature_extractor is not None and len(payload) > 0:
+                try:
+                    features = self.feature_extractor.extract_packet_features(
+                        payload=payload,
+                        protocol=protocol,
+                        packet_size=packet_size
+                    )
+                    is_suspicious, suspicion_score = self.feature_extractor.is_suspicious(features)
+
+                    if is_suspicious:
+                        logger.info(f"[AttackMemory] 🔍 轻量级特征判定可疑 (分数={suspicion_score:.2f})")
+
+                except Exception as e:
+                    logger.warning(f"[AttackMemory] 特征提取失败: {e}")
+
+            # 4. 更新自适应转移矩阵
+            # 根据当前攻击状态更新状态转移观测
+            if self.sosa_enabled and self.sosa is not None:
+                try:
+                    pi = self.sosa.get_state_distribution()
+                    current_state = pi.index(max(pi))  # 最可能的当前状态
+
+                    # 推断下一个状态
+                    if attack_type in ["SYN_FLOOD", "UDP_FLOOD", "ICMP_FLOOD"]:
+                        # DDoS攻击 → 倾向于进入"确认攻击"或"攻击升级"
+                        next_state = 2 if current_state <= 1 else min(4, current_state + 1)
+                    elif detected_malware:
+                        # 检测到木马 → 严重威胁，直接升级
+                        next_state = 3
+                    elif is_false_positive:
+                        # 误报 → 回到正常或可疑
+                        next_state = 0 if current_state == 1 else 1
+                    else:
+                        # 一般攻击 → 根据当前状态递进
+                        next_state = min(5, current_state + 1) if current_state < 5 else 5
+
+                    # 更新自适应矩阵
+                    self.signature_db.adaptive_matrix.update_observation(
+                        from_state=current_state,
+                        to_state=next_state,
+                        is_false_positive=is_false_positive
+                    )
+
+                    logger.debug(f"[AttackMemory] 状态转移: {current_state} → {next_state} "
+                                f"(误报={is_false_positive})")
+
+                except Exception as e:
+                    logger.warning(f"[AttackMemory] 自适应矩阵更新失败: {e}")
 
         # SOSA流式处理
         if self.sosa_enabled and self.sosa is not None:
@@ -919,7 +1047,10 @@ class AttackMemoryWithSOSA(AttackMemorySystem):
                 'attack_type': attack_type,
                 'signatures': signatures,
                 'packet_size': packet_size,
-                'port': port
+                'port': port,
+                'matched_signature': matched_signature.signature_id if matched_signature else None,
+                'detected_malware': detected_malware.malware_id if detected_malware else None,
+                'is_false_positive': is_false_positive
             }
             action = 'block' if not success else 'bypass'
 

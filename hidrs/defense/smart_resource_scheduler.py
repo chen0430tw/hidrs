@@ -175,7 +175,8 @@ class SmartResourceScheduler:
         wcn_nodes: int = 10,
         sosa_states: int = 5,
         sosa_groups: int = 8,
-        window_size: float = 60.0  # 60秒窗口
+        window_size: float = 60.0,  # 60秒窗口
+        signature_db = None  # 可选：攻击特征库
     ):
         """
         初始化智能资源调度器
@@ -215,6 +216,12 @@ class SmartResourceScheduler:
             dt_window=window_size
         )
 
+        # 攻击特征库（可选）
+        self.signature_db = signature_db
+        self.signature_db_enabled = signature_db is not None
+        if self.signature_db_enabled:
+            logger.info(f"  ✅ 特征库已集成: {len(signature_db.attack_signatures)} 个签名")
+
         # 当前资源配置
         self.current_profile = self.PROFILES[DefenseLevel.MAXIMUM]
         self.current_level = DefenseLevel.MAXIMUM
@@ -226,7 +233,9 @@ class SmartResourceScheduler:
             'normal_events': 0,
             'profile_switches': 0,
             'resource_saved_ratio': 0.0,
-            'last_profile_switch': datetime.utcnow()
+            'last_profile_switch': datetime.utcnow(),
+            'signature_matches': 0,  # 特征库匹配次数
+            'malware_detections': 0   # 木马检测次数
         }
 
         # 事件历史（用于计算对称落差）

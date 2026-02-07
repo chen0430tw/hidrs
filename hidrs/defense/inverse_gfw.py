@@ -773,14 +773,22 @@ class HIDRSFirewall:
         self.resource_scheduler = None
         try:
             from .smart_resource_scheduler import SmartResourceScheduler
+
+            # 如果攻击记忆启用了SOSA和特征库，则传递给调度器
+            sig_db = None
+            if self._attack_memory_sosa and hasattr(self.attack_memory, 'signature_db'):
+                sig_db = self.attack_memory.signature_db
+
             self.resource_scheduler = SmartResourceScheduler(
                 T_max=1.0,
                 T_min=0.01,
                 delta_crit=3.0,
-                window_size=60.0
+                window_size=60.0,
+                signature_db=sig_db  # 传递特征库
             )
             self._scheduler_enabled = True
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[HIDRSFirewall] 资源调度器初始化失败: {e}")
             self.resource_scheduler = None
             self._scheduler_enabled = False
 
@@ -881,15 +889,96 @@ class HIDRSFirewall:
         # 2. DPI包分析
         analysis = self.packet_analyzer.analyze_packet(packet_data, src_ip, dst_ip)
 
+        # 2.1 深度Payload检测（木马+IPSec）
+        payload_analysis = {
+            'malware_detected': False,
+            'ipsec_detected': False,
+            'signature_matched': False
+        }
+
+        # 如果攻击记忆系统启用了特征库（SOSA版本）
+        if self._attack_memory_sosa and hasattr(self.attack_memory, 'signature_db'):
+            signature_db = self.attack_memory.signature_db
+
+            # 木马payload检测
+            if len(packet_data) > 0:
+                malware = signature_db.detect_malware_payload(packet_data)
+                if malware:
+                    payload_analysis['malware_detected'] = True
+                    payload_analysis['malware_family'] = malware.malware_family
+                    payload_analysis['malware_id'] = malware.malware_id
+                    logger.critical(
+                        f"[HIDRSFirewall] 🦠 检测到木马payload: {malware.malware_family} "
+                        f"(来源={src_ip}:{src_port})"
+                    )
+                    # 立即标记为关键威胁
+                    analysis['suspicious'] = True
+                    if 'threat_indicators' not in analysis:
+                        analysis['threat_indicators'] = []
+                    analysis['threat_indicators'].append(f'MALWARE_{malware.malware_family}')
+
+            # IPSec流量识别
+            if protocol.upper() in ['ESP', 'AH'] or dst_port in [500, 4500]:  # IKE/IPSec端口
+                ipsec_sig = signature_db.parse_ipsec_packet(packet_data)
+                if ipsec_sig:
+                    payload_analysis['ipsec_detected'] = True
+                    payload_analysis['ipsec_spi'] = ipsec_sig.spi
+                    payload_analysis['ipsec_protocol'] = ipsec_sig.protocol
+                    logger.debug(
+                        f"[HIDRSFirewall] 🔐 检测到IPSec流量: SPI=0x{ipsec_sig.spi:08x}, "
+                        f"协议={ipsec_sig.protocol}"
+                    )
+
+                    # 检测IPSec异常
+                    if ipsec_sig.abnormal_padding or ipsec_sig.abnormal_sequence:
+                        logger.warning(
+                            f"[HIDRSFirewall] ⚠️ IPSec异常: "
+                            f"padding={ipsec_sig.abnormal_padding}, "
+                            f"sequence={ipsec_sig.abnormal_sequence}"
+                        )
+                        analysis['suspicious'] = True
+                        if 'threat_indicators' not in analysis:
+                            analysis['threat_indicators'] = []
+                        analysis['threat_indicators'].append('IPSEC_ANOMALY')
+
+            # 攻击签名匹配
+            sig = signature_db.match_packet(
+                src_ip=src_ip,
+                dst_ip=dst_ip,
+                src_port=src_port,
+                dst_port=dst_port,
+                protocol=protocol.upper(),
+                payload=packet_data,
+                packet_rate=0.0,  # TODO: 从profile计算实时速率
+                packet_size=len(packet_data)
+            )
+
+            if sig:
+                payload_analysis['signature_matched'] = True
+                payload_analysis['signature_id'] = sig.signature_id
+                payload_analysis['attack_type'] = sig.attack_type
+                payload_analysis['severity'] = sig.severity
+                logger.warning(
+                    f"[HIDRSFirewall] 🎯 签名匹配: {sig.signature_id} "
+                    f"(严重度={sig.severity}, 类型={sig.attack_type})"
+                )
+                analysis['suspicious'] = True
+                if 'threat_indicators' not in analysis:
+                    analysis['threat_indicators'] = []
+                analysis['threat_indicators'].append(f'SIG_{sig.signature_id}')
+                # 更新attack_type
+                if 'attack_type' not in analysis or not analysis['attack_type']:
+                    analysis['attack_type'] = sig.attack_type
+
         if analysis['suspicious']:
             self.stats['suspicious_packets'] += 1
             self.reputation_system.report_suspicious(
                 src_ip,
-                ', '.join(analysis['threat_indicators'])
+                ', '.join(analysis.get('threat_indicators', []))
             )
 
-            # 2.1 攻击记忆系统：快速识别已知攻击模式
-            if self.attack_memory and analysis['threat_indicators']:
+            # 2.2 攻击记忆系统：快速识别已知攻击模式
+            if self.attack_memory and analysis.get('threat_indicators'):
                 recognized_pattern = self.attack_memory.recognize_attack(analysis['threat_indicators'])
 
                 if recognized_pattern:
@@ -899,10 +988,28 @@ class HIDRSFirewall:
                         f"(出现过 {recognized_pattern.occurrence_count} 次)"
                     )
 
-                    # 学习本次攻击（更新频率）
+                # 学习本次攻击（更新频率）
+                # 如果是SOSA版本，传递payload和额外参数
+                attack_type = recognized_pattern.attack_type if recognized_pattern else analysis.get('attack_type', 'unknown')
+
+                if self._attack_memory_sosa:
+                    # SOSA版本：支持payload分析
                     self.attack_memory.learn_attack(
                         src_ip=src_ip,
-                        attack_type=recognized_pattern.attack_type,
+                        attack_type=attack_type,
+                        signatures=analysis['threat_indicators'],
+                        packet_size=len(packet_data),
+                        success=False,
+                        port=dst_port,
+                        payload=packet_data,  # 传递payload
+                        dst_ip=dst_ip,
+                        protocol=protocol.upper()
+                    )
+                else:
+                    # 基础版本：不传递payload
+                    self.attack_memory.learn_attack(
+                        src_ip=src_ip,
+                        attack_type=attack_type,
                         signatures=analysis['threat_indicators'],
                         packet_size=len(packet_data),
                         success=False,
