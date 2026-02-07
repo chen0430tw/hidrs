@@ -85,6 +85,13 @@ lxml>=4.9.0
 # SciPy（稀疏矩阵、特征值分解）
 scipy>=1.10.0
 
+# ============ AEGIS封包处理（需要Linux + root权限）============
+# Scapy（封包解析/构造）
+scapy>=2.5.0
+
+# NetfilterQueue（NFQueue内核封包拦截，需要 apt install libnetfilter-queue-dev）
+# netfilterqueue>=1.1.0
+
 # ============ 可选依赖 ============
 # TensorFlow + TF Hub（Universal Sentence Encoder后端，与BERT二选一）
 # tensorflow>=2.12.0
