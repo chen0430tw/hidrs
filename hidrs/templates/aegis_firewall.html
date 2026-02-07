@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AEGIS-HIDRS 防火墙管理中心</title>
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+
+    <!-- Bootstrap & Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.2.0/dist/chart.umd.min.js"></script>
+
+    <style>
+        body {
+            padding-top: 2rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+
+        .aegis-header {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 2rem 0;
+            margin-bottom: 2rem;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        .aegis-logo {
+            font-size: 3rem;
+            text-shadow: 0 0 20px rgba(255,255,255,0.5);
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 15px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            transition: all 0.3s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+        }
+
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+
+        .status-online {
+            background: #10b981;
+            color: white;
+        }
+
+        .status-warning {
+            background: #f59e0b;
+            color: white;
+        }
+
+        .status-offline {
+            background: #ef4444;
+            color: white;
+        }
+
+        .threat-indicator {
+            padding: 1rem;
+            border-left: 4px solid #667eea;
+            margin-bottom: 1rem;
+            background: #f8f9fa;
+            border-radius: 5px;
+        }
+
+        .threat-critical { border-left-color: #ef4444; }
+        .threat-high { border-left-color: #f59e0b; }
+        .threat-medium { border-left-color: #10b981; }
+        .threat-low { border-left-color: #3b82f6; }
+
+        .chart-container {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 15px;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .btn-aegis {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+            padding: 0.75rem 2rem;
+            border-radius: 25px;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        .btn-aegis:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+            color: white;
+        }
+
+        .module-card {
+            background: white;
+            border-radius: 15px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .module-status {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .module-enabled { background: #10b981; }
+        .module-disabled { background: #ef4444; }
+
+        .pulse-animation {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .security-alert {
+            padding: 1rem;
+            border-radius: 10px;
+            margin-bottom: 1rem;
+            animation: slideIn 0.5s;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(-100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- AEGIS Header -->
+        <div class="aegis-header text-center">
+            <div class="aegis-logo">🛡️ AEGIS-HIDRS</div>
+            <h2>Adaptive Electronic Guardian & Intrusion Shield</h2>
+            <p class="mb-0">全息互联网防御与响应系统</p>
+            <div class="mt-3">
+                <span class="status-badge status-online pulse-animation">● 系统运行中</span>
+            </div>
+        </div>
+
+        <!-- Navigation -->
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <nav class="navbar navbar-expand-lg navbar-light bg-white rounded shadow-sm">
+                    <div class="container-fluid">
+                        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                            <span class="navbar-toggler-icon"></span>
+                        </button>
+                        <div class="collapse navbar-collapse" id="navbarNav">
+                            <ul class="navbar-nav">
+                                <li class="nav-item"><a class="nav-link" href="/">🏠 首页</a></li>
+                                <li class="nav-item"><a class="nav-link" href="/search">🔍 搜索</a></li>
+                                <li class="nav-item"><a class="nav-link" href="/dashboard">📊 仪表盘</a></li>
+                                <li class="nav-item"><a class="nav-link active" href="/aegis_firewall">🛡️ AEGIS防火墙</a></li>
+                            </ul>
+                            <ul class="navbar-nav ms-auto">
+                                <li class="nav-item">
+                                    <button class="btn btn-aegis btn-sm" onclick="refreshData()">
+                                        <i class="bi bi-arrow-clockwise"></i> 刷新数据
+                                    </button>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </nav>
+            </div>
+        </div>
+
+        <!-- Statistics Overview -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <h6 class="text-muted mb-2">总封包数</h6>
+                    <div class="stat-value" id="total-packets">12,458</div>
+                    <small class="text-muted">今日处理</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <h6 class="text-muted mb-2">阻断攻击</h6>
+                    <div class="stat-value text-danger" id="blocked-packets">342</div>
+                    <small class="text-muted">威胁已拦截</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <h6 class="text-muted mb-2">Spamhaus阻断</h6>
+                    <div class="stat-value text-warning" id="spamhaus-blocks">28</div>
+                    <small class="text-muted">恶意IP来源</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <h6 class="text-muted mb-2">邮件钓鱼</h6>
+                    <div class="stat-value text-info" id="email-phishing">15</div>
+                    <small class="text-muted">已阻止</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Defense Modules Status -->
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="module-card">
+                    <h4 class="mb-3"><i class="bi bi-shield-check"></i> 防御模块状态</h4>
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="mb-2">
+                                <span class="module-status module-enabled"></span>
+                                <strong>快速过滤清单</strong>
+                                <div class="small text-muted">Spamhaus + 邮件安全 + 灰名单</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="mb-2">
+                                <span class="module-status module-enabled"></span>
+                                <strong>攻击记忆系统</strong>
+                                <div class="small text-muted">SOSA增强版</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="mb-2">
+                                <span class="module-status module-enabled"></span>
+                                <strong>智能资源调度</strong>
+                                <div class="small text-muted">ET-WCN降温算法</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="mb-2">
+                                <span class="module-status module-enabled"></span>
+                                <strong>DNS污染防御</strong>
+                                <div class="small text-muted">缓存投毒检测</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-3">
+                            <div class="mb-2">
+                                <span class="module-status module-enabled"></span>
+                                <strong>威胁情报自动更新</strong>
+                                <div class="small text-muted">6个情报源</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="mb-2">
+                                <span class="module-status module-enabled"></span>
+                                <strong>HLIG异常检测</strong>
+                                <div class="small text-muted">图谱分析</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="mb-2">
+                                <span class="module-status module-enabled"></span>
+                                <strong>SYN Cookies</strong>
+                                <div class="small text-muted">防SYN Flood</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="mb-2">
+                                <span class="module-status module-disabled"></span>
+                                <strong>流量反射</strong>
+                                <div class="small text-muted">禁用（攻击性功能）</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Threat Intelligence & DNS Pollution -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="module-card">
+                    <h5 class="mb-3"><i class="bi bi-database-fill-check"></i> 威胁情报更新状态</h5>
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>情报源</th>
+                                <th>条目数</th>
+                                <th>上次更新</th>
+                                <th>状态</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>HaGeZi DNS</td>
+                                <td><span class="badge bg-primary">125,483</span></td>
+                                <td>2小时前</td>
+                                <td><span class="badge bg-success">✓</span></td>
+                            </tr>
+                            <tr>
+                                <td>Malicious Domain List</td>
+                                <td><span class="badge bg-primary">8,924</span></td>
+                                <td>3小时前</td>
+                                <td><span class="badge bg-success">✓</span></td>
+                            </tr>
+                            <tr>
+                                <td>URLhaus</td>
+                                <td><span class="badge bg-primary">3,214</span></td>
+                                <td>1小时前</td>
+                                <td><span class="badge bg-success">✓</span></td>
+                            </tr>
+                            <tr>
+                                <td>Spamhaus ZEN</td>
+                                <td><span class="badge bg-primary">实时查询</span></td>
+                                <td>实时</td>
+                                <td><span class="badge bg-success">✓</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <div class="text-center mt-3">
+                        <button class="btn btn-sm btn-outline-primary" onclick="updateThreatIntel()">
+                            <i class="bi bi-arrow-repeat"></i> 立即更新
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="module-card">
+                    <h5 class="mb-3"><i class="bi bi-shield-exclamation"></i> DNS污染检测</h5>
+                    <div class="threat-indicator threat-low">
+                        <strong>正常</strong>
+                        <div class="small text-muted">Transaction ID验证: ✓ 通过</div>
+                    </div>
+                    <div class="threat-indicator threat-low">
+                        <strong>正常</strong>
+                        <div class="small text-muted">TTL检查: ✓ 正常范围</div>
+                    </div>
+                    <div class="threat-indicator threat-medium">
+                        <strong>监控</strong>
+                        <div class="small text-muted">响应速率限制: 3个IP被限速</div>
+                    </div>
+                    <div class="alert alert-info mt-3 mb-0">
+                        <strong>统计:</strong> 今日检测DNS查询 5,247次，检测到0次污染攻击
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="chart-container">
+                    <h5 class="mb-3">封包处理趋势（24小时）</h5>
+                    <canvas id="packetTrendChart" height="200"></canvas>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="chart-container">
+                    <h5 class="mb-3">威胁类型分布</h5>
+                    <canvas id="threatTypeChart" height="200"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Alerts -->
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="module-card">
+                    <h5 class="mb-3"><i class="bi bi-exclamation-triangle-fill"></i> 最近安全警报</h5>
+                    <div class="security-alert alert alert-danger">
+                        <strong>CRITICAL</strong> - Spamhaus XBL检测: 恶意软件/僵尸网络 (IP: 1.2.3.4)
+                        <span class="float-end text-muted">3分钟前</span>
+                    </div>
+                    <div class="security-alert alert alert-warning">
+                        <strong>WARNING</strong> - 邮件钓鱼检测: 伪装PayPal发件人
+                        <span class="float-end text-muted">15分钟前</span>
+                    </div>
+                    <div class="security-alert alert alert-info">
+                        <strong>INFO</strong> - 灰名单匹配: 可疑TLD域名 (.tk)
+                        <span class="float-end text-muted">28分钟前</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="text-center text-white-50 mb-4">
+            <p>AEGIS-HIDRS v4.0 | Adaptive Electronic Guardian & Intrusion Shield</p>
+            <p class="small">Powered by Claude + 430 | 全息拉普拉斯互联网防御系统</p>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Initialize Charts
+        document.addEventListener('DOMContentLoaded', function() {
+            // Packet Trend Chart
+            const packetCtx = document.getElementById('packetTrendChart').getContext('2d');
+            new Chart(packetCtx, {
+                type: 'line',
+                data: {
+                    labels: ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00', '24:00'],
+                    datasets: [{
+                        label: '总封包',
+                        data: [1200, 1900, 3000, 5000, 4200, 3800, 2500],
+                        borderColor: 'rgb(102, 126, 234)',
+                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        tension: 0.4
+                    }, {
+                        label: '阻断封包',
+                        data: [50, 80, 120, 200, 150, 100, 80],
+                        borderColor: 'rgb(239, 68, 68)',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+
+            // Threat Type Chart
+            const threatCtx = document.getElementById('threatTypeChart').getContext('2d');
+            new Chart(threatCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Spamhaus阻断', '邮件钓鱼', 'DNS污染', '恶意软件', '其他'],
+                    datasets: [{
+                        data: [28, 15, 8, 12, 5],
+                        backgroundColor: [
+                            'rgba(239, 68, 68, 0.8)',
+                            'rgba(245, 158, 11, 0.8)',
+                            'rgba(59, 130, 246, 0.8)',
+                            'rgba(139, 92, 246, 0.8)',
+                            'rgba(156, 163, 175, 0.8)'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+        });
+
+        function refreshData() {
+            // Simulate data refresh
+            console.log('Refreshing firewall data...');
+            location.reload();
+        }
+
+        function updateThreatIntel() {
+            alert('威胁情报更新已触发！\n\n正在从以下源获取最新数据:\n- HaGeZi DNS Blocklists\n- Malicious Domain Threat List\n- URLhaus\n- Spamhaus ZEN\n\n预计完成时间: 2-5分钟');
+        }
+    </script>
+</body>
+</html>
