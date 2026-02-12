@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
 文档内容搜索器 (Document Content Searcher) - HIDRS
-类取证工具级别的全盘/目录文本文件关键词搜索
+基于 ripgrep/grep 的全盘文本文件关键词搜索，附加编码检测与文件名翻译
 
-功能:
-- 遍历指定目录或盘符，递归搜索所有文本文件
-- 自动检测文件是否为文本（不依赖扩展名，通过内容判定）
-- 自动识别文件编码（支持 UTF-8/GBK/GB2312/Big5/Shift_JIS/EUC-KR/Latin-1 等）
-- 精准关键词搜索 + 正则表达式搜索
-- 反查模式：找出不包含指定关键词的文件
-- 多维筛选：日期范围、文件大小、名称模式、排除模式
-- 多维排序：按名称、大小、修改日期、匹配数排序
-- 中英文文件名自动翻译
-- 双输出模式：人类可读文本 / Agent可解析JSON
+设计原则:
+  搜索本身交给 rg/grep（不重复造轮子）
+  本工具专注于它们做不到的事：
+  1. chardet 自动编码检测（rg 只认 UTF-8，遇到 GBK/Big5 会跳过）
+  2. 无扩展名文件的文本/二进制判定
+  3. 中英文文件名自动翻译
+  4. Agent 友好的结构化 JSON 输出
+  5. 对 rg 跳过的非 UTF-8 文件做回退搜索
+
+搜索后端优先级: ripgrep → grep → Python 内置
 
 作者: HIDRS Team
 日期: 2026-02-12
@@ -23,15 +23,14 @@ import re
 import sys
 import json
 import time
+import shutil
 import fnmatch
 import argparse
 import logging
+import subprocess
 from datetime import datetime
-from typing import (
-    Dict, Any, List, Optional, Tuple, Set, Generator, Pattern, Union
-)
+from typing import Dict, Any, List, Optional, Tuple, Set
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # 编码检测
 try:
@@ -50,16 +49,12 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 常量定义
+# 常量
 # ============================================================
 
-# 采样大小：读取文件头部多少字节来判定是否为文本
 TEXT_DETECT_SAMPLE_SIZE = 8192
-
-# 搜索时单文件最大读取量（防止超大文件撑爆内存）
 MAX_FILE_READ_BYTES = 100 * 1024 * 1024  # 100MB
 
-# 已知二进制扩展名（跳过这些文件加速搜索）
 KNOWN_BINARY_EXTENSIONS: Set[str] = {
     '.exe', '.dll', '.so', '.dylib', '.o', '.a', '.lib',
     '.zip', '.gz', '.bz2', '.xz', '.7z', '.rar', '.tar',
@@ -74,21 +69,6 @@ KNOWN_BINARY_EXTENSIONS: Set[str] = {
     '.pkl', '.joblib', '.npy', '.npz', '.h5', '.hdf5',
 }
 
-# 已知文本扩展名（优先当作文本处理）
-KNOWN_TEXT_EXTENSIONS: Set[str] = {
-    '.txt', '.md', '.rst', '.csv', '.tsv', '.log', '.ini', '.cfg', '.conf',
-    '.json', '.jsonl', '.xml', '.yaml', '.yml', '.toml',
-    '.py', '.js', '.ts', '.jsx', '.tsx', '.html', '.htm', '.css', '.scss',
-    '.java', '.c', '.cpp', '.h', '.hpp', '.cs', '.go', '.rs', '.rb',
-    '.php', '.pl', '.pm', '.lua', '.r', '.R', '.m', '.swift', '.kt',
-    '.sh', '.bash', '.zsh', '.fish', '.bat', '.cmd', '.ps1',
-    '.sql', '.graphql', '.proto',
-    '.tex', '.bib', '.srt', '.ass', '.vtt',
-    '.env', '.gitignore', '.dockerignore', '.editorconfig',
-    '.makefile', '.cmake',
-}
-
-# 尝试的编码列表（chardet 不可用时的回退）
 FALLBACK_ENCODINGS = [
     'utf-8', 'gbk', 'gb2312', 'gb18030', 'big5',
     'shift_jis', 'euc-jp', 'euc-kr',
@@ -99,81 +79,62 @@ FALLBACK_ENCODINGS = [
 
 
 # ============================================================
-# 文本检测与编码识别
+# 编码检测（rg/grep 做不到的事 #1）
 # ============================================================
 
 class TextDetector:
     """文件文本检测器：判定文件是否为文本，并识别编码"""
 
-    # 文本文件中允许的控制字符
-    ALLOWED_CONTROL_CHARS = {0x09, 0x0A, 0x0D}  # tab, LF, CR
+    ALLOWED_CONTROL_CHARS = {0x09, 0x0A, 0x0D}
 
     @staticmethod
     def is_text_file(file_path: str, sample_size: int = TEXT_DETECT_SAMPLE_SIZE) -> Tuple[bool, Optional[str]]:
         """
-        判定文件是否为文本文件，并返回检测到的编码
-
-        不依赖扩展名，通过读取文件头部字节内容来判定：
-        1. 已知二进制扩展名 → 直接跳过（加速）
-        2. 已知文本扩展名 → 优先尝试文本解码
-        3. 无扩展名或未知扩展名 → 通过内容检测
-
-        Returns:
-            (is_text, encoding) - 是否为文本，检测到的编码名称
+        判定文件是否为文本，返回 (is_text, encoding)
+        不依赖扩展名，通过字节内容判定
         """
         try:
             ext = os.path.splitext(file_path)[1].lower()
-
-            # 已知二进制 → 快速跳过
             if ext in KNOWN_BINARY_EXTENSIONS:
                 return False, None
 
-            # 读取样本
             file_size = os.path.getsize(file_path)
             if file_size == 0:
-                return True, 'utf-8'  # 空文件视为文本
+                return True, 'utf-8'
 
             with open(file_path, 'rb') as f:
                 sample = f.read(min(sample_size, file_size))
 
-            # 检查 BOM 标记
+            # BOM 检查
             encoding = TextDetector._detect_bom(sample)
             if encoding:
                 return True, encoding
 
-            # 空字节检测：文本文件中不应包含 \x00
-            # 但 UTF-16 文件会有大量 \x00，所以需要排除 BOM 情况
+            # 空字节 → 可能是二进制或 UTF-16 无 BOM
             null_ratio = sample.count(b'\x00') / len(sample) if sample else 0
             if null_ratio > 0.1:
-                # 可能是 UTF-16 无 BOM
                 encoding = TextDetector._try_utf16_no_bom(sample)
                 if encoding:
                     return True, encoding
                 return False, None
 
-            # 控制字符检测
-            non_text_chars = 0
-            for byte in sample:
-                if byte < 0x20 and byte not in TextDetector.ALLOWED_CONTROL_CHARS:
-                    non_text_chars += 1
-            if len(sample) > 0 and non_text_chars / len(sample) > 0.05:
+            # 控制字符过多 → 二进制
+            non_text = sum(1 for b in sample if b < 0x20 and b not in TextDetector.ALLOWED_CONTROL_CHARS)
+            if len(sample) > 0 and non_text / len(sample) > 0.05:
                 return False, None
 
-            # chardet 检测编码
+            # chardet 检测
             if HAS_CHARDET:
-                detection = chardet.detect(sample)
-                if detection and detection['encoding']:
-                    confidence = detection.get('confidence', 0)
-                    detected_enc = detection['encoding'].lower()
-                    if confidence >= 0.5:
-                        # 验证能否解码
-                        try:
-                            sample.decode(detected_enc)
-                            return True, detected_enc
-                        except (UnicodeDecodeError, LookupError):
-                            pass
+                det = chardet.detect(sample)
+                if det and det['encoding'] and det.get('confidence', 0) >= 0.5:
+                    enc = det['encoding'].lower()
+                    try:
+                        sample.decode(enc)
+                        return True, enc
+                    except (UnicodeDecodeError, LookupError):
+                        pass
 
-            # 回退：逐一尝试编码
+            # 回退逐一尝试
             for enc in FALLBACK_ENCODINGS:
                 try:
                     sample.decode(enc)
@@ -182,32 +143,28 @@ class TextDetector:
                     continue
 
             return False, None
-
         except (OSError, PermissionError):
             return False, None
 
     @staticmethod
     def _detect_bom(data: bytes) -> Optional[str]:
-        """检查 BOM (Byte Order Mark)"""
         if data[:3] == b'\xef\xbb\xbf':
             return 'utf-8-sig'
-        if data[:2] == b'\xff\xfe':
-            return 'utf-16-le'
-        if data[:2] == b'\xfe\xff':
-            return 'utf-16-be'
         if data[:4] == b'\xff\xfe\x00\x00':
             return 'utf-32-le'
         if data[:4] == b'\x00\x00\xfe\xff':
             return 'utf-32-be'
+        if data[:2] == b'\xff\xfe':
+            return 'utf-16-le'
+        if data[:2] == b'\xfe\xff':
+            return 'utf-16-be'
         return None
 
     @staticmethod
     def _try_utf16_no_bom(data: bytes) -> Optional[str]:
-        """尝试无 BOM 的 UTF-16 解码"""
         for enc in ('utf-16-le', 'utf-16-be'):
             try:
                 text = data.decode(enc)
-                # 验证：解码后应该大部分是可打印字符
                 printable = sum(1 for c in text if c.isprintable() or c in '\n\r\t')
                 if len(text) > 0 and printable / len(text) > 0.8:
                     return enc
@@ -218,47 +175,31 @@ class TextDetector:
     @staticmethod
     def read_text_file(file_path: str, encoding: str,
                        max_bytes: int = MAX_FILE_READ_BYTES) -> Optional[str]:
-        """
-        以检测到的编码读取文本文件内容
-
-        Returns:
-            文件文本内容，读取失败返回 None
-        """
+        """以检测到的编码读取文件内容"""
         try:
-            file_size = os.path.getsize(file_path)
-            read_size = min(file_size, max_bytes)
-
             with open(file_path, 'rb') as f:
-                raw = f.read(read_size)
-
-            # 首选检测到的编码
+                raw = f.read(min(os.path.getsize(file_path), max_bytes))
             try:
                 return raw.decode(encoding)
             except (UnicodeDecodeError, LookupError):
                 pass
-
-            # 回退尝试
             for enc in FALLBACK_ENCODINGS:
                 try:
                     return raw.decode(enc)
                 except (UnicodeDecodeError, LookupError):
                     continue
-
-            # 最后用 errors='replace' 强制解码
             return raw.decode('utf-8', errors='replace')
-
         except (OSError, PermissionError):
             return None
 
 
 # ============================================================
-# 文件名翻译器
+# 文件名翻译（rg/grep 做不到的事 #2）
 # ============================================================
 
 class FilenameTranslator:
     """中英文文件名自动翻译"""
 
-    # 中文字符范围正则
     _CJK_PATTERN = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]')
 
     def __init__(self, cache_size: int = 1000):
@@ -279,97 +220,61 @@ class FilenameTranslator:
         return self._available
 
     def contains_chinese(self, text: str) -> bool:
-        """检测文本是否包含中文字符"""
         return bool(self._CJK_PATTERN.search(text))
 
     def translate(self, filename: str) -> Optional[str]:
-        """
-        自动翻译文件名（保留扩展名）
-
-        中文文件名 → 英文翻译
-        英文文件名 → 中文翻译
-        """
+        """自动翻译文件名（保留扩展名），中→英 / 英→中"""
         if not self._available:
             return None
-
-        # 缓存查询
         if filename in self._cache:
             return self._cache[filename]
 
         stem = Path(filename).stem
         ext = Path(filename).suffix
-
         try:
             if self.contains_chinese(stem):
                 translated = self._translator_zh_en.translate(stem)
             else:
                 translated = self._translator_en_zh.translate(stem)
-
             if translated:
-                # 清理翻译结果用于文件名
                 translated = re.sub(r'[<>:"/\\|?*]', '_', translated.strip())
                 result = translated + ext
-                # 写入缓存
                 if len(self._cache) < self._cache_size:
                     self._cache[filename] = result
                 return result
         except Exception as e:
             logger.debug(f"翻译失败 '{filename}': {e}")
-
         return None
 
-    def batch_translate(self, filenames: List[str]) -> Dict[str, Optional[str]]:
-        """批量翻译文件名"""
-        results = {}
-        for name in filenames:
-            results[name] = self.translate(name)
-        return results
-
 
 # ============================================================
-# 搜索匹配引擎
+# 搜索后端
 # ============================================================
 
-class SearchMatch:
-    """单条搜索匹配结果"""
-    __slots__ = ('line_number', 'line_content', 'match_start', 'match_end',
-                 'context_before', 'context_after')
+class SearchResult:
+    """统一的搜索结果结构"""
 
-    def __init__(self, line_number: int, line_content: str,
-                 match_start: int, match_end: int,
-                 context_before: List[str], context_after: List[str]):
-        self.line_number = line_number
-        self.line_content = line_content
-        self.match_start = match_start
-        self.match_end = match_end
-        self.context_before = context_before
-        self.context_after = context_after
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'line': self.line_number,
-            'content': self.line_content.rstrip('\n\r'),
-            'match_span': [self.match_start, self.match_end],
-            'context_before': [l.rstrip('\n\r') for l in self.context_before],
-            'context_after': [l.rstrip('\n\r') for l in self.context_after],
-        }
-
-
-class FileResult:
-    """单个文件的搜索结果"""
-    __slots__ = ('path', 'encoding', 'size', 'modified', 'created',
-                 'matches', 'match_count', 'translated_name')
-
-    def __init__(self, path: str, encoding: str, size: int,
-                 modified: float, created: float):
+    def __init__(self, path: str, matches: Optional[List[Dict]] = None,
+                 encoding: Optional[str] = None):
         self.path = path
+        self.matches = matches or []  # [{'line': int, 'content': str}]
         self.encoding = encoding
-        self.size = size
-        self.modified = modified
-        self.created = created
-        self.matches: List[SearchMatch] = []
-        self.match_count = 0
+        self.size = 0
+        self.modified = 0.0
+        self.created = 0.0
         self.translated_name: Optional[str] = None
+
+        try:
+            stat = os.stat(path)
+            self.size = stat.st_size
+            self.modified = stat.st_mtime
+            self.created = stat.st_ctime
+        except OSError:
+            pass
+
+    @property
+    def match_count(self) -> int:
+        return len(self.matches)
 
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {
@@ -378,35 +283,377 @@ class FileResult:
             'encoding': self.encoding,
             'size': self.size,
             'size_display': format_size(self.size),
-            'modified': datetime.fromtimestamp(self.modified).isoformat(),
-            'created': datetime.fromtimestamp(self.created).isoformat(),
+            'modified': datetime.fromtimestamp(self.modified).isoformat() if self.modified else None,
+            'created': datetime.fromtimestamp(self.created).isoformat() if self.created else None,
             'match_count': self.match_count,
         }
         if self.translated_name:
             d['translated_name'] = self.translated_name
         if self.matches:
-            d['matches'] = [m.to_dict() for m in self.matches]
+            d['matches'] = self.matches
         return d
 
 
+class RipgrepBackend:
+    """ripgrep 搜索后端 —— 速度最快，功能最全"""
+
+    def __init__(self):
+        self.bin = shutil.which('rg')
+
+    @property
+    def available(self) -> bool:
+        return self.bin is not None
+
+    def search(self, pattern: str, path: str, *,
+               is_regex: bool = False,
+               case_sensitive: bool = False,
+               invert: bool = False,
+               context_lines: int = 0,
+               max_matches_per_file: int = 0,
+               include_globs: Optional[List[str]] = None,
+               exclude_globs: Optional[List[str]] = None,
+               max_filesize: Optional[str] = None) -> Tuple[List[SearchResult], Set[str]]:
+        """
+        调用 rg 搜索，返回 (结果列表, rg已搜索的文件路径集合)
+        rg 跳过的非 UTF-8 文件不在结果中，需要回退搜索
+        """
+        cmd = [self.bin, '--json']
+
+        if not is_regex:
+            cmd.append('--fixed-strings')
+
+        if not case_sensitive:
+            cmd.append('--ignore-case')
+
+        if invert:
+            cmd.append('--files-without-match')
+
+        if context_lines > 0:
+            cmd.extend(['-C', str(context_lines)])
+
+        if max_matches_per_file > 0:
+            cmd.extend(['--max-count', str(max_matches_per_file)])
+
+        if max_filesize:
+            cmd.extend(['--max-filesize', max_filesize])
+
+        # 不跳过隐藏文件（取证场景需要）但跳过 .git
+        cmd.extend(['--hidden', '--glob', '!.git/'])
+
+        if include_globs:
+            for g in include_globs:
+                cmd.extend(['--glob', g])
+
+        if exclude_globs:
+            for g in exclude_globs:
+                cmd.extend(['--glob', f'!{g}'])
+
+        cmd.extend([pattern, path])
+
+        try:
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=300
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning("rg 搜索超时 (5分钟)")
+            return [], set()
+        except FileNotFoundError:
+            return [], set()
+
+        return self._parse_json_output(proc.stdout, invert)
+
+    def _parse_json_output(self, output: str, invert: bool) -> Tuple[List[SearchResult], Set[str]]:
+        """解析 rg --json 输出"""
+        results_by_path: Dict[str, SearchResult] = {}
+        searched_files: Set[str] = set()
+
+        for line in output.strip().split('\n'):
+            if not line:
+                continue
+            try:
+                msg = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            msg_type = msg.get('type')
+
+            if msg_type == 'match':
+                data = msg['data']
+                fpath = data['path']['text']
+                searched_files.add(fpath)
+                line_number = data['line_number']
+                line_text = data['lines']['text'].rstrip('\n\r')
+
+                if fpath not in results_by_path:
+                    results_by_path[fpath] = SearchResult(path=fpath)
+                results_by_path[fpath].matches.append({
+                    'line': line_number,
+                    'content': line_text,
+                })
+
+            elif msg_type == 'context':
+                # 上下文行 —— 附加到最近的匹配
+                data = msg['data']
+                fpath = data['path']['text']
+                searched_files.add(fpath)
+
+            elif msg_type == 'begin':
+                fpath = msg['data']['path']['text']
+                searched_files.add(fpath)
+
+            elif msg_type == 'end':
+                fpath = msg['data']['path']['text']
+                searched_files.add(fpath)
+
+            elif msg_type == 'summary':
+                pass
+
+        # 反查模式：rg --files-without-match 输出的是文件路径（非JSON match）
+        if invert and not results_by_path:
+            # 反查模式下 rg 输出格式不同，用非 JSON 模式重新处理
+            for line in output.strip().split('\n'):
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                    if msg.get('type') == 'begin':
+                        fpath = msg['data']['path']['text']
+                        results_by_path[fpath] = SearchResult(path=fpath)
+                        searched_files.add(fpath)
+                except json.JSONDecodeError:
+                    # 可能是纯路径输出
+                    if os.path.isfile(line.strip()):
+                        fpath = line.strip()
+                        results_by_path[fpath] = SearchResult(path=fpath)
+                        searched_files.add(fpath)
+
+        return list(results_by_path.values()), searched_files
+
+
+class GrepBackend:
+    """GNU/BSD grep 后备搜索后端（Linux + macOS）"""
+
+    def __init__(self):
+        self.bin = shutil.which('grep')
+        self._is_gnu = False
+        if self.bin:
+            try:
+                ver = subprocess.run(
+                    [self.bin, '--version'], capture_output=True, text=True, timeout=5
+                )
+                self._is_gnu = 'GNU' in ver.stdout
+            except Exception:
+                pass
+
+    @property
+    def available(self) -> bool:
+        return self.bin is not None
+
+    def search(self, pattern: str, path: str, *,
+               is_regex: bool = False,
+               case_sensitive: bool = False,
+               invert: bool = False,
+               context_lines: int = 0,
+               include_globs: Optional[List[str]] = None,
+               exclude_globs: Optional[List[str]] = None) -> List[SearchResult]:
+        """调用 grep 搜索（兼容 GNU grep 和 BSD grep）"""
+        cmd = [self.bin, '-rn']
+
+        # GNU grep 支持 --binary-files，BSD grep 不支持
+        if self._is_gnu:
+            cmd.append('--binary-files=without-match')
+
+        if not is_regex:
+            cmd.append('--fixed-strings')
+
+        if not case_sensitive:
+            cmd.append('--ignore-case')
+
+        if invert:
+            cmd.append('--files-without-match')
+
+        if context_lines > 0:
+            cmd.extend(['-C', str(context_lines)])
+
+        if include_globs:
+            for g in include_globs:
+                cmd.extend(['--include', g])
+
+        if exclude_globs:
+            for g in exclude_globs:
+                cmd.extend(['--exclude', g])
+
+        # --exclude-dir 在 GNU grep 和较新的 BSD grep 上都支持
+        cmd.append('--exclude-dir=.git')
+        cmd.extend([pattern, path])
+
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return []
+
+        return self._parse_output(proc.stdout, invert)
+
+    def _parse_output(self, output: str, invert: bool) -> List[SearchResult]:
+        results_by_path: Dict[str, SearchResult] = {}
+
+        if invert:
+            for line in output.strip().split('\n'):
+                fpath = line.strip()
+                if fpath and os.path.isfile(fpath):
+                    results_by_path[fpath] = SearchResult(path=fpath)
+            return list(results_by_path.values())
+
+        for line in output.strip().split('\n'):
+            if not line:
+                continue
+            # grep -n 输出: filepath:linenum:content
+            # Windows 路径可能含 C:\，所以从右边找第二个冒号
+            parts = line.split(':', 2)
+            if len(parts) >= 3:
+                fpath, line_num_str, content = parts[0], parts[1], parts[2]
+                try:
+                    line_num = int(line_num_str)
+                except ValueError:
+                    continue
+                if fpath not in results_by_path:
+                    results_by_path[fpath] = SearchResult(path=fpath)
+                results_by_path[fpath].matches.append({
+                    'line': line_num,
+                    'content': content.rstrip('\n\r'),
+                })
+
+        return list(results_by_path.values())
+
+
+class FindstrBackend:
+    """Windows findstr 后备搜索后端"""
+
+    def __init__(self):
+        self.bin = shutil.which('findstr') if sys.platform == 'win32' else None
+
+    @property
+    def available(self) -> bool:
+        return self.bin is not None
+
+    def search(self, pattern: str, path: str, *,
+               is_regex: bool = False,
+               case_sensitive: bool = False,
+               invert: bool = False) -> List[SearchResult]:
+        """调用 Windows findstr 搜索"""
+        cmd = [self.bin, '/S', '/N']  # /S=递归 /N=显示行号
+
+        if is_regex:
+            cmd.append('/R')  # 正则模式
+        else:
+            cmd.append('/C:' + pattern)  # 字面字符串（带空格也安全）
+
+        if not case_sensitive:
+            cmd.append('/I')
+
+        if invert:
+            cmd.append('/V')
+
+        if is_regex:
+            cmd.append(pattern)
+
+        # findstr 搜索路径用 path\*.*
+        search_target = os.path.join(path, '*.*')
+        cmd.append(search_target)
+
+        try:
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=300,
+                # Windows findstr 输出可能是系统编码
+                encoding='utf-8', errors='replace',
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return []
+
+        return self._parse_output(proc.stdout, invert)
+
+    def _parse_output(self, output: str, invert: bool) -> List[SearchResult]:
+        results_by_path: Dict[str, SearchResult] = {}
+
+        for line in output.strip().split('\n'):
+            if not line:
+                continue
+            # findstr /N 输出: filepath:linenum:content
+            # Windows 路径含 C:\，用正则解析
+            m = re.match(r'^(.+?):(\d+):(.*)', line)
+            if m:
+                fpath, line_num_str, content = m.group(1), m.group(2), m.group(3)
+                line_num = int(line_num_str)
+                fpath = fpath.strip()
+                if fpath not in results_by_path:
+                    results_by_path[fpath] = SearchResult(path=fpath)
+                if not invert:
+                    results_by_path[fpath].matches.append({
+                        'line': line_num,
+                        'content': content.rstrip('\n\r'),
+                    })
+
+        return list(results_by_path.values())
+
+
+class PythonBackend:
+    """Python 内置搜索 —— 最后的回退，专门处理非 UTF-8 文件"""
+
+    @staticmethod
+    def search_file(file_path: str, pattern: 're.Pattern',
+                    encoding: str, invert: bool = False,
+                    context_lines: int = 0,
+                    max_matches: int = 0) -> Optional[SearchResult]:
+        """对单个文件执行 Python 正则搜索"""
+        content = TextDetector.read_text_file(file_path, encoding)
+        if content is None:
+            return None
+
+        lines = content.split('\n')
+        result = SearchResult(path=file_path, encoding=encoding)
+        has_match = False
+
+        for idx, line in enumerate(lines):
+            if pattern.search(line):
+                has_match = True
+                if not invert:
+                    match_info: Dict[str, Any] = {
+                        'line': idx + 1,
+                        'content': line.rstrip('\n\r'),
+                    }
+                    if context_lines > 0:
+                        ctx_s = max(0, idx - context_lines)
+                        ctx_e = min(len(lines), idx + context_lines + 1)
+                        match_info['context_before'] = [
+                            l.rstrip('\n\r') for l in lines[ctx_s:idx]
+                        ]
+                        match_info['context_after'] = [
+                            l.rstrip('\n\r') for l in lines[idx + 1:ctx_e]
+                        ]
+                    result.matches.append(match_info)
+                    if max_matches > 0 and len(result.matches) >= max_matches:
+                        break
+
+        if invert:
+            return result if not has_match else None
+        return result if has_match else None
+
+
 # ============================================================
-# 主搜索器
+# 主搜索器（编排层，不重复造轮子）
 # ============================================================
 
 class DocSearcher:
     """
-    文档内容搜索器
+    文档内容搜索器 —— 编排 rg/grep + 编码检测 + 翻译
 
-    支持:
-    - 普通关键词搜索（精确匹配）
-    - 正则表达式搜索
-    - 反查模式（查找不包含关键词的文件）
-    - 多条件筛选与排序
-    - 中英文文件名翻译
+    搜索策略:
+    1. 用 rg（或 grep）搜索目录 → 得到 UTF-8 兼容文件的结果
+    2. 用 TextDetector 扫描 rg 跳过的文件 → 对非 UTF-8 文本用 Python 回退搜索
+    3. 合并结果，附加编码信息和翻译
     """
 
-    def __init__(self,
-                 target_path: str,
+    def __init__(self, target_path: str, *,
                  keyword: Optional[str] = None,
                  regex_pattern: Optional[str] = None,
                  case_sensitive: bool = False,
@@ -414,7 +661,6 @@ class DocSearcher:
                  context_lines: int = 0,
                  max_matches_per_file: int = 0,
                  recursive: bool = True,
-                 # 筛选
                  min_size: Optional[int] = None,
                  max_size: Optional[int] = None,
                  after: Optional[datetime] = None,
@@ -422,39 +668,16 @@ class DocSearcher:
                  include_patterns: Optional[List[str]] = None,
                  exclude_patterns: Optional[List[str]] = None,
                  exclude_dirs: Optional[List[str]] = None,
-                 # 排序
                  sort_by: str = 'path',
                  sort_reverse: bool = False,
-                 # 功能开关
                  translate: bool = False,
-                 max_results: int = 0,
-                 workers: int = 4):
-        """
-        Args:
-            target_path:   搜索的根目录或盘符
-            keyword:       搜索关键词（精确匹配）
-            regex_pattern: 正则表达式搜索模式（与 keyword 二选一，regex 优先）
-            case_sensitive: 是否区分大小写
-            invert:        反查模式 - True 时返回不包含关键词的文件
-            context_lines: 匹配行的上下文行数
-            max_matches_per_file: 每个文件最多记录匹配数（0=不限）
-            recursive:     是否递归搜索子目录
-            min_size:      最小文件大小(字节)
-            max_size:      最大文件大小(字节)
-            after:         只搜索此日期之后修改的文件
-            before:        只搜索此日期之前修改的文件
-            include_patterns: 文件名包含模式（glob），如 ["*.py", "*.txt"]
-            exclude_patterns: 文件名排除模式（glob），如 ["*.log"]
-            exclude_dirs:  排除的目录名，如 [".git", "node_modules", "__pycache__"]
-            sort_by:       排序字段: path | name | size | date | matches
-            sort_reverse:  是否降序排列
-            translate:     是否启用文件名翻译
-            max_results:   最大返回文件数（0=不限）
-            workers:       并行搜索线程数
-        """
+                 max_results: int = 0):
+
         self.target_path = os.path.abspath(target_path)
         self.keyword = keyword
         self.regex_pattern = regex_pattern
+        self.pattern_str = regex_pattern or keyword or ''
+        self.is_regex = regex_pattern is not None
         self.case_sensitive = case_sensitive
         self.invert = invert
         self.context_lines = context_lines
@@ -466,312 +689,259 @@ class DocSearcher:
         self.before = before
         self.include_patterns = include_patterns or []
         self.exclude_patterns = exclude_patterns or []
-        self.exclude_dirs = set(exclude_dirs or [
-            '.git', '__pycache__', 'node_modules', '.svn', '.hg',
-            '.tox', '.mypy_cache', '.pytest_cache', '.eggs',
-        ])
+        self.exclude_dirs = set(exclude_dirs or [])
         self.sort_by = sort_by
         self.sort_reverse = sort_reverse
-        self.translate = translate
         self.max_results = max_results
-        self.workers = workers
 
-        # 编译搜索模式
-        self._compiled_pattern: Optional[Pattern] = None
-        self._compile_pattern()
+        # 后端 (rg → grep → findstr → python)
+        self._rg = RipgrepBackend()
+        self._grep = GrepBackend()
+        self._findstr = FindstrBackend()
+
+        # 编译 Python 回退用的正则
+        flags = 0 if case_sensitive else re.IGNORECASE
+        if self.pattern_str:
+            pat = self.pattern_str if self.is_regex else re.escape(self.pattern_str)
+            self._py_pattern = re.compile(pat, flags)
+        else:
+            self._py_pattern = None
 
         # 翻译器
         self._translator: Optional[FilenameTranslator] = None
-        if self.translate:
+        if translate:
             self._translator = FilenameTranslator()
             if not self._translator.available:
                 logger.warning("翻译库不可用，请安装: pip install deep-translator")
 
-        # 统计
         self.stats = {
+            'backend': 'unknown',
             'files_scanned': 0,
             'files_matched': 0,
-            'files_skipped_binary': 0,
-            'files_skipped_filter': 0,
-            'files_skipped_error': 0,
+            'files_fallback_searched': 0,
             'total_matches': 0,
             'scan_time_seconds': 0.0,
         }
 
-    def _compile_pattern(self):
-        """编译搜索模式"""
-        flags = 0 if self.case_sensitive else re.IGNORECASE
+    def search(self) -> List[SearchResult]:
+        """执行搜索"""
+        if not self.pattern_str:
+            return self.scan_text_files()
 
-        if self.regex_pattern:
-            self._compiled_pattern = re.compile(self.regex_pattern, flags)
-        elif self.keyword:
-            # 关键词转为正则（转义特殊字符实现精确匹配）
-            self._compiled_pattern = re.compile(re.escape(self.keyword), flags)
+        start = time.time()
+        results: List[SearchResult] = []
 
-    def search(self) -> List[FileResult]:
-        """
-        执行搜索，返回匹配结果列表
-
-        Returns:
-            FileResult 列表，已按指定方式排序
-        """
-        start_time = time.time()
-        results: List[FileResult] = []
-
-        if not os.path.exists(self.target_path):
-            logger.error(f"路径不存在: {self.target_path}")
-            return results
-
-        # 收集候选文件
-        candidate_files = list(self._enumerate_files())
-
-        # 并行搜索
-        if self.workers > 1 and len(candidate_files) > 10:
-            results = self._search_parallel(candidate_files)
+        if self._rg.available:
+            results = self._search_with_rg()
+        elif self._grep.available:
+            results = self._search_with_grep()
+        elif self._findstr.available:
+            results = self._search_with_findstr()
         else:
-            results = self._search_sequential(candidate_files)
+            results = self._search_with_python()
+
+        # 应用 Python 层面的筛选（大小、日期等 rg 不直接支持的）
+        results = self._apply_filters(results)
+
+        # 编码检测（为每个结果附加编码信息）
+        for r in results:
+            if r.encoding is None:
+                _, enc = TextDetector.is_text_file(r.path)
+                r.encoding = enc or 'utf-8'
 
         # 排序
-        results = self._sort_results(results)
+        results = self._sort(results)
 
         # 限制结果数
         if self.max_results > 0:
             results = results[:self.max_results]
 
-        # 文件名翻译
+        # 翻译
         if self._translator and self._translator.available:
             for r in results:
-                filename = os.path.basename(r.path)
-                r.translated_name = self._translator.translate(filename)
+                r.translated_name = self._translator.translate(os.path.basename(r.path))
 
-        self.stats['scan_time_seconds'] = round(time.time() - start_time, 3)
         self.stats['files_matched'] = len(results)
+        self.stats['total_matches'] = sum(r.match_count for r in results)
+        self.stats['scan_time_seconds'] = round(time.time() - start, 3)
         return results
 
-    def scan_text_files(self) -> List[FileResult]:
-        """
-        仅扫描文本文件（不搜索内容），用于列出目录下所有文本文件
+    def scan_text_files(self) -> List[SearchResult]:
+        """扫描目录下所有文本文件（不搜索内容）"""
+        start = time.time()
+        self.stats['backend'] = 'scan'
+        results: List[SearchResult] = []
 
-        Returns:
-            FileResult 列表
-        """
-        start_time = time.time()
-        results: List[FileResult] = []
+        for root, dirs, files in os.walk(self.target_path, topdown=True):
+            dirs[:] = [d for d in dirs if d not in self.exclude_dirs and d != '.git']
+            if not self.recursive:
+                dirs.clear()
 
-        for file_path in self._enumerate_files():
-            is_text, encoding = TextDetector.is_text_file(file_path)
-            self.stats['files_scanned'] += 1
+            for fname in files:
+                fpath = os.path.join(root, fname)
+                is_text, enc = TextDetector.is_text_file(fpath)
+                self.stats['files_scanned'] += 1
+                if is_text:
+                    r = SearchResult(path=fpath, encoding=enc)
+                    results.append(r)
 
-            if not is_text:
-                self.stats['files_skipped_binary'] += 1
-                continue
-
-            try:
-                stat = os.stat(file_path)
-                result = FileResult(
-                    path=file_path,
-                    encoding=encoding or 'unknown',
-                    size=stat.st_size,
-                    modified=stat.st_mtime,
-                    created=stat.st_ctime,
-                )
-                results.append(result)
-            except OSError:
-                self.stats['files_skipped_error'] += 1
-
-        results = self._sort_results(results)
+        results = self._apply_filters(results)
+        results = self._sort(results)
 
         if self.max_results > 0:
             results = results[:self.max_results]
 
         if self._translator and self._translator.available:
             for r in results:
-                filename = os.path.basename(r.path)
-                r.translated_name = self._translator.translate(filename)
+                r.translated_name = self._translator.translate(os.path.basename(r.path))
 
-        self.stats['scan_time_seconds'] = round(time.time() - start_time, 3)
         self.stats['files_matched'] = len(results)
+        self.stats['scan_time_seconds'] = round(time.time() - start, 3)
         return results
 
-    def _enumerate_files(self) -> Generator[str, None, None]:
-        """遍历目录，应用文件级筛选条件，生成候选文件路径"""
-        target = self.target_path
+    def _search_with_rg(self) -> List[SearchResult]:
+        """rg 搜索 + Python 回退非 UTF-8 文件"""
+        self.stats['backend'] = 'ripgrep'
 
-        # 如果目标是单个文件
-        if os.path.isfile(target):
-            if self._file_passes_filter(target):
-                yield target
-            return
+        # rg 支持 --max-filesize 但不支持 min-size/日期筛选 → 后续 Python 过滤
+        max_fs = None
+        if self.max_size:
+            max_fs = format_size(self.max_size).replace(' ', '')
 
-        if self.recursive:
-            for root, dirs, files in os.walk(target, topdown=True):
-                # 排除目录
-                dirs[:] = [
-                    d for d in dirs
-                    if d not in self.exclude_dirs
-                    and not d.startswith('.')  # 默认跳过隐藏目录
-                    or d in ('.config', '.local')  # 但允许部分常见配置目录
-                ]
+        rg_results, searched_files = self._rg.search(
+            self.pattern_str, self.target_path,
+            is_regex=self.is_regex,
+            case_sensitive=self.case_sensitive,
+            invert=self.invert,
+            context_lines=self.context_lines,
+            max_matches_per_file=self.max_matches_per_file,
+            include_globs=self.include_patterns,
+            exclude_globs=self.exclude_patterns,
+            max_filesize=max_fs,
+        )
+        self.stats['files_scanned'] = len(searched_files)
 
-                for filename in files:
-                    file_path = os.path.join(root, filename)
-                    if self._file_passes_filter(file_path):
-                        yield file_path
-        else:
-            try:
-                for entry in os.scandir(target):
-                    if entry.is_file() and self._file_passes_filter(entry.path):
-                        yield entry.path
-            except PermissionError:
-                logger.warning(f"权限不足: {target}")
+        # 回退搜索：找出 rg 跳过的非 UTF-8 文本文件
+        if self._py_pattern:
+            fallback_results = self._fallback_search_non_utf8(searched_files)
+            rg_results.extend(fallback_results)
 
-    def _file_passes_filter(self, file_path: str) -> bool:
-        """检查文件是否通过筛选条件"""
-        filename = os.path.basename(file_path)
+        return rg_results
 
-        try:
-            stat = os.stat(file_path)
-        except OSError:
-            return False
-
-        # 大小筛选
-        if self.min_size is not None and stat.st_size < self.min_size:
-            self.stats['files_skipped_filter'] += 1
-            return False
-        if self.max_size is not None and stat.st_size > self.max_size:
-            self.stats['files_skipped_filter'] += 1
-            return False
-
-        # 日期筛选（基于修改时间）
-        if self.after is not None:
-            mtime = datetime.fromtimestamp(stat.st_mtime)
-            if mtime < self.after:
-                self.stats['files_skipped_filter'] += 1
-                return False
-        if self.before is not None:
-            mtime = datetime.fromtimestamp(stat.st_mtime)
-            if mtime > self.before:
-                self.stats['files_skipped_filter'] += 1
-                return False
-
-        # 包含模式（白名单，任一匹配即可）
-        if self.include_patterns:
-            if not any(fnmatch.fnmatch(filename, p) for p in self.include_patterns):
-                self.stats['files_skipped_filter'] += 1
-                return False
-
-        # 排除模式（黑名单，任一匹配就排除）
-        if self.exclude_patterns:
-            if any(fnmatch.fnmatch(filename, p) for p in self.exclude_patterns):
-                self.stats['files_skipped_filter'] += 1
-                return False
-
-        return True
-
-    def _search_single_file(self, file_path: str) -> Optional[FileResult]:
-        """搜索单个文件，返回结果或 None"""
-        try:
-            is_text, encoding = TextDetector.is_text_file(file_path)
-            self.stats['files_scanned'] += 1
-
-            if not is_text:
-                self.stats['files_skipped_binary'] += 1
-                return None
-
-            stat = os.stat(file_path)
-            result = FileResult(
-                path=file_path,
-                encoding=encoding or 'unknown',
-                size=stat.st_size,
-                modified=stat.st_mtime,
-                created=stat.st_ctime,
-            )
-
-            # 如果没有搜索模式，仅返回文件信息
-            if self._compiled_pattern is None:
-                return result
-
-            # 读取文件内容
-            content = TextDetector.read_text_file(file_path, encoding)
-            if content is None:
-                self.stats['files_skipped_error'] += 1
-                return None
-
-            lines = content.split('\n')
-            matches_found = False
-
-            for line_idx, line in enumerate(lines):
-                match = self._compiled_pattern.search(line)
-
-                if match:
-                    matches_found = True
-                    result.match_count += 1
-
-                    if not self.invert:
-                        # 构造上下文
-                        ctx_start = max(0, line_idx - self.context_lines)
-                        ctx_end = min(len(lines), line_idx + self.context_lines + 1)
-                        context_before = lines[ctx_start:line_idx]
-                        context_after = lines[line_idx + 1:ctx_end]
-
-                        sm = SearchMatch(
-                            line_number=line_idx + 1,
-                            line_content=line,
-                            match_start=match.start(),
-                            match_end=match.end(),
-                            context_before=context_before,
-                            context_after=context_after,
-                        )
-                        result.matches.append(sm)
-
-                        # 限制单文件匹配数
-                        if (self.max_matches_per_file > 0
-                                and len(result.matches) >= self.max_matches_per_file):
-                            break
-
-            # 反查模式：返回不含关键词的文件
-            if self.invert:
-                if not matches_found:
-                    result.match_count = 0
-                    return result
-                return None
-
-            # 正常模式：返回包含关键词的文件
-            if matches_found:
-                self.stats['total_matches'] += result.match_count
-                return result
-            return None
-
-        except Exception as e:
-            self.stats['files_skipped_error'] += 1
-            logger.debug(f"搜索文件出错 {file_path}: {e}")
-            return None
-
-    def _search_sequential(self, files: List[str]) -> List[FileResult]:
-        """顺序搜索"""
-        results = []
-        for fp in files:
-            r = self._search_single_file(fp)
-            if r is not None:
-                results.append(r)
+    def _search_with_grep(self) -> List[SearchResult]:
+        """grep 搜索"""
+        self.stats['backend'] = 'grep'
+        results = self._grep.search(
+            self.pattern_str, self.target_path,
+            is_regex=self.is_regex,
+            case_sensitive=self.case_sensitive,
+            invert=self.invert,
+            context_lines=self.context_lines,
+            include_globs=self.include_patterns,
+            exclude_globs=self.exclude_patterns,
+        )
+        self.stats['files_scanned'] = len(results)
         return results
 
-    def _search_parallel(self, files: List[str]) -> List[FileResult]:
-        """并行搜索"""
+    def _search_with_findstr(self) -> List[SearchResult]:
+        """Windows findstr 搜索"""
+        self.stats['backend'] = 'findstr'
+        results = self._findstr.search(
+            self.pattern_str, self.target_path,
+            is_regex=self.is_regex,
+            case_sensitive=self.case_sensitive,
+            invert=self.invert,
+        )
+        self.stats['files_scanned'] = len(results)
+        return results
+
+    def _search_with_python(self) -> List[SearchResult]:
+        """纯 Python 搜索（最后的回退）"""
+        self.stats['backend'] = 'python'
         results = []
-        with ThreadPoolExecutor(max_workers=self.workers) as executor:
-            future_to_file = {
-                executor.submit(self._search_single_file, fp): fp
-                for fp in files
-            }
-            for future in as_completed(future_to_file):
-                r = future.result()
-                if r is not None:
+
+        if not self._py_pattern:
+            return results
+
+        for root, dirs, files in os.walk(self.target_path, topdown=True):
+            dirs[:] = [d for d in dirs if d not in self.exclude_dirs and d != '.git']
+            if not self.recursive:
+                dirs.clear()
+
+            for fname in files:
+                fpath = os.path.join(root, fname)
+                is_text, enc = TextDetector.is_text_file(fpath)
+                self.stats['files_scanned'] += 1
+                if not is_text:
+                    continue
+
+                r = PythonBackend.search_file(
+                    fpath, self._py_pattern, enc,
+                    invert=self.invert,
+                    context_lines=self.context_lines,
+                    max_matches=self.max_matches_per_file,
+                )
+                if r:
                     results.append(r)
+
         return results
 
-    def _sort_results(self, results: List[FileResult]) -> List[FileResult]:
-        """按指定字段排序"""
+    def _fallback_search_non_utf8(self, already_searched: Set[str]) -> List[SearchResult]:
+        """对 rg 跳过的非 UTF-8 文本文件做 Python 回退搜索"""
+        results = []
+
+        for root, dirs, files in os.walk(self.target_path, topdown=True):
+            dirs[:] = [d for d in dirs if d not in self.exclude_dirs and d != '.git']
+            if not self.recursive:
+                dirs.clear()
+
+            for fname in files:
+                fpath = os.path.join(root, fname)
+                if fpath in already_searched:
+                    continue
+
+                # 应用 glob 筛选
+                if self.include_patterns:
+                    if not any(fnmatch.fnmatch(fname, p) for p in self.include_patterns):
+                        continue
+                if self.exclude_patterns:
+                    if any(fnmatch.fnmatch(fname, p) for p in self.exclude_patterns):
+                        continue
+
+                is_text, enc = TextDetector.is_text_file(fpath)
+                if not is_text:
+                    continue
+
+                self.stats['files_fallback_searched'] += 1
+                r = PythonBackend.search_file(
+                    fpath, self._py_pattern, enc,
+                    invert=self.invert,
+                    context_lines=self.context_lines,
+                    max_matches=self.max_matches_per_file,
+                )
+                if r:
+                    results.append(r)
+
+        return results
+
+    def _apply_filters(self, results: List[SearchResult]) -> List[SearchResult]:
+        """应用 rg/grep 不支持的筛选条件"""
+        filtered = []
+        for r in results:
+            if self.min_size is not None and r.size < self.min_size:
+                continue
+            if self.max_size is not None and r.size > self.max_size:
+                continue
+            if self.after is not None:
+                if datetime.fromtimestamp(r.modified) < self.after:
+                    continue
+            if self.before is not None:
+                if datetime.fromtimestamp(r.modified) > self.before:
+                    continue
+            filtered.append(r)
+        return filtered
+
+    def _sort(self, results: List[SearchResult]) -> List[SearchResult]:
         key_map = {
             'path': lambda r: r.path.lower(),
             'name': lambda r: os.path.basename(r.path).lower(),
@@ -783,7 +953,6 @@ class DocSearcher:
         return sorted(results, key=key_func, reverse=self.sort_reverse)
 
     def get_summary(self) -> Dict[str, Any]:
-        """返回搜索统计摘要"""
         return {
             'target_path': self.target_path,
             'keyword': self.keyword,
@@ -799,7 +968,6 @@ class DocSearcher:
 # ============================================================
 
 def format_size(size_bytes: int) -> str:
-    """格式化文件大小"""
     for unit in ('B', 'KB', 'MB', 'GB', 'TB'):
         if size_bytes < 1024.0:
             return f"{size_bytes:.1f}{unit}"
@@ -808,30 +976,21 @@ def format_size(size_bytes: int) -> str:
 
 
 def parse_size(size_str: str) -> int:
-    """解析大小字符串，如 '10KB', '5MB', '1GB'"""
     size_str = size_str.strip().upper()
     units = {'B': 1, 'KB': 1024, 'MB': 1024**2, 'GB': 1024**3, 'TB': 1024**4}
     for unit, multiplier in sorted(units.items(), key=lambda x: -len(x[0])):
         if size_str.endswith(unit):
-            num_str = size_str[:-len(unit)].strip()
-            return int(float(num_str) * multiplier)
+            return int(float(size_str[:-len(unit)].strip()) * multiplier)
     return int(size_str)
 
 
 def parse_date(date_str: str) -> datetime:
-    """解析日期字符串，支持多种格式"""
-    formats = [
-        '%Y-%m-%d',
-        '%Y-%m-%d %H:%M:%S',
-        '%Y/%m/%d',
-        '%Y%m%d',
-    ]
-    for fmt in formats:
+    for fmt in ('%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '%Y/%m/%d', '%Y%m%d'):
         try:
             return datetime.strptime(date_str, fmt)
         except ValueError:
             continue
-    raise ValueError(f"无法解析日期: {date_str}，支持格式: YYYY-MM-DD, YYYY/MM/DD, YYYYMMDD")
+    raise ValueError(f"无法解析日期: {date_str}，支持: YYYY-MM-DD, YYYY/MM/DD, YYYYMMDD")
 
 
 # ============================================================
@@ -839,21 +998,16 @@ def parse_date(date_str: str) -> datetime:
 # ============================================================
 
 class OutputFormatter:
-    """搜索结果格式化输出"""
 
     @staticmethod
-    def format_text(results: List[FileResult], summary: Dict[str, Any],
+    def format_text(results: List[SearchResult], summary: Dict[str, Any],
                     verbose: bool = False) -> str:
-        """人类可读的文本格式输出"""
         lines = []
         sep = '=' * 72
 
-        # 标题
         lines.append(sep)
-        lines.append('  HIDRS 文档内容搜索器 - 搜索报告')
+        lines.append('  HIDRS 文档内容搜索器')
         lines.append(sep)
-
-        # 搜索信息
         lines.append(f"  目标路径: {summary['target_path']}")
         if summary.get('keyword'):
             lines.append(f"  关键词:   {summary['keyword']}")
@@ -861,17 +1015,12 @@ class OutputFormatter:
             lines.append(f"  正则:     {summary['regex']}")
         if summary.get('invert_mode'):
             lines.append(f"  模式:     反查（不包含关键词的文件）")
-        lines.append(f"  区分大小写: {'是' if summary.get('case_sensitive') else '否'}")
-        lines.append('')
-
-        # 统计
-        lines.append(f"  扫描文件数:     {summary['files_scanned']}")
-        lines.append(f"  匹配文件数:     {summary['files_matched']}")
-        lines.append(f"  跳过(二进制):   {summary['files_skipped_binary']}")
-        lines.append(f"  跳过(筛选):     {summary['files_skipped_filter']}")
-        lines.append(f"  跳过(错误):     {summary['files_skipped_error']}")
-        lines.append(f"  总匹配次数:     {summary['total_matches']}")
-        lines.append(f"  扫描耗时:       {summary['scan_time_seconds']}s")
+        lines.append(f"  后端:     {summary.get('backend', 'unknown')}")
+        lines.append(f"  扫描: {summary['files_scanned']} | "
+                     f"匹配: {summary['files_matched']} | "
+                     f"总命中: {summary['total_matches']} | "
+                     f"回退搜索: {summary.get('files_fallback_searched', 0)} | "
+                     f"耗时: {summary['scan_time_seconds']}s")
         lines.append(sep)
 
         if not results:
@@ -879,45 +1028,33 @@ class OutputFormatter:
             lines.append(sep)
             return '\n'.join(lines)
 
-        # 结果列表
         for idx, r in enumerate(results, 1):
             lines.append('')
             lines.append(f"  [{idx}] {r.path}")
-            meta_parts = [
-                f"编码:{r.encoding}",
+            meta = [
+                f"编码:{r.encoding or '?'}",
                 f"大小:{format_size(r.size)}",
-                f"修改:{datetime.fromtimestamp(r.modified).strftime('%Y-%m-%d %H:%M')}",
+                f"修改:{datetime.fromtimestamp(r.modified).strftime('%Y-%m-%d %H:%M') if r.modified else '?'}",
             ]
             if r.match_count > 0:
-                meta_parts.append(f"匹配:{r.match_count}次")
+                meta.append(f"匹配:{r.match_count}次")
             if r.translated_name:
-                meta_parts.append(f"译名:{r.translated_name}")
-            lines.append(f"      {' | '.join(meta_parts)}")
+                meta.append(f"译名:{r.translated_name}")
+            lines.append(f"      {' | '.join(meta)}")
 
-            # 显示匹配详情
-            if r.matches and verbose:
-                lines.append('      ' + '-' * 50)
-                for m in r.matches:
-                    # 上文
-                    for cl in m.context_before:
-                        lines.append(f"        {cl.rstrip()}")
-                    # 匹配行高亮
-                    line_str = m.line_content.rstrip('\n\r')
-                    lines.append(f"   >>>  L{m.line_number}: {line_str}")
-                    # 下文
-                    for cl in m.context_after:
-                        lines.append(f"        {cl.rstrip()}")
-                    if m != r.matches[-1]:
-                        lines.append('        ...')
-            elif r.matches:
-                # 简略模式：只显示前3个匹配
-                shown = r.matches[:3]
+            if r.matches:
+                shown = r.matches if verbose else r.matches[:3]
                 for m in shown:
-                    snippet = m.line_content.rstrip('\n\r')
-                    if len(snippet) > 100:
-                        snippet = snippet[:100] + '...'
-                    lines.append(f"      L{m.line_number}: {snippet}")
-                if len(r.matches) > 3:
+                    content = m.get('content', '')
+                    if not verbose and len(content) > 100:
+                        content = content[:100] + '...'
+                    lines.append(f"      L{m.get('line', '?')}: {content}")
+                    if verbose:
+                        for cl in m.get('context_before', []):
+                            lines.append(f"        {cl}")
+                        for cl in m.get('context_after', []):
+                            lines.append(f"        {cl}")
+                if not verbose and len(r.matches) > 3:
                     lines.append(f"      ... 还有 {len(r.matches) - 3} 处匹配")
 
         lines.append('')
@@ -925,134 +1062,84 @@ class OutputFormatter:
         return '\n'.join(lines)
 
     @staticmethod
-    def format_json(results: List[FileResult], summary: Dict[str, Any]) -> str:
-        """Agent 可解析的 JSON 格式输出"""
-        data = {
+    def format_json(results: List[SearchResult], summary: Dict[str, Any]) -> str:
+        return json.dumps({
             'summary': summary,
             'results': [r.to_dict() for r in results],
-        }
-        return json.dumps(data, ensure_ascii=False, indent=2)
+        }, ensure_ascii=False, indent=2)
 
 
 # ============================================================
-# CLI 入口
+# CLI
 # ============================================================
 
 def build_parser() -> argparse.ArgumentParser:
-    """构建 CLI 参数解析器"""
     parser = argparse.ArgumentParser(
         prog='doc_searcher',
-        description='HIDRS 文档内容搜索器 - 类取证工具级别的全盘文本文件关键词搜索',
+        description='HIDRS 文档内容搜索器 (基于 rg/grep + chardet 编码检测 + 文件名翻译)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用示例:
-  # 在当前目录搜索关键词 "密码"
-  python doc_searcher.py search "密码" .
-
-  # 正则搜索邮箱地址
-  python doc_searcher.py search -r "[\\w.]+@[\\w.]+" /home/user
-
-  # 反查：找出不含 "copyright" 的文件
+  python doc_searcher.py search "密码" /home/user
+  python doc_searcher.py search -r "[\\w.]+@[\\w.]+" /project
   python doc_searcher.py search --invert "copyright" /project
-
-  # 按大小和日期筛选
-  python doc_searcher.py search "TODO" . --min-size 1KB --max-size 1MB --after 2025-01-01
-
-  # JSON 输出供 Agent 解析
-  python doc_searcher.py search "error" /var/log --json
-
-  # 扫描目录中的所有文本文件（不搜索内容）
+  python doc_searcher.py search "TODO" . --min-size 1KB --after 2025-01-01 --json
   python doc_searcher.py scan /home/user/docs
-
-  # 翻译文件名
-  python doc_searcher.py search "数据" . --translate
+  python doc_searcher.py translate /home/user/docs
         """)
 
-    subparsers = parser.add_subparsers(dest='command', help='子命令')
+    sub = parser.add_subparsers(dest='command', help='子命令')
 
-    # ---- search 子命令 ----
-    sp_search = subparsers.add_parser('search', help='搜索文件内容')
-    sp_search.add_argument('keyword', help='搜索关键词')
-    sp_search.add_argument('path', help='搜索路径（目录或盘符）')
+    # search
+    sp = sub.add_parser('search', help='搜索文件内容')
+    sp.add_argument('keyword', help='搜索关键词')
+    sp.add_argument('path', help='搜索路径')
+    sp.add_argument('-r', '--regex', action='store_true', help='关键词作为正则表达式')
+    sp.add_argument('--invert', action='store_true', help='反查：查找不包含关键词的文件')
+    sp.add_argument('-s', '--case-sensitive', action='store_true', help='区分大小写')
+    sp.add_argument('-C', '--context', type=int, default=0, metavar='N', help='上下文行数')
+    sp.add_argument('--max-matches', type=int, default=0, metavar='N', help='每文件最大匹配数')
+    sp.add_argument('--min-size', type=str, default=None, help='最小文件大小 (如 1KB, 5MB)')
+    sp.add_argument('--max-size', type=str, default=None, help='最大文件大小')
+    sp.add_argument('--after', type=str, default=None, help='修改日期下限 (YYYY-MM-DD)')
+    sp.add_argument('--before', type=str, default=None, help='修改日期上限')
+    sp.add_argument('-i', '--include', type=str, nargs='+', default=None, help='文件名 glob 白名单')
+    sp.add_argument('-e', '--exclude', type=str, nargs='+', default=None, help='文件名 glob 黑名单')
+    sp.add_argument('--exclude-dir', type=str, nargs='+', default=None, help='排除目录')
+    sp.add_argument('--no-recursive', action='store_true', help='不递归')
+    sp.add_argument('--sort', default='path', choices=['path', 'name', 'size', 'date', 'matches'])
+    sp.add_argument('--desc', action='store_true', help='降序')
+    sp.add_argument('--max-results', type=int, default=0, metavar='N')
+    sp.add_argument('--json', action='store_true', help='JSON 输出')
+    sp.add_argument('-v', '--verbose', action='store_true', help='详细输出')
+    sp.add_argument('--translate', action='store_true', help='文件名中英翻译')
 
-    # 搜索模式
-    mode_group = sp_search.add_argument_group('搜索模式')
-    mode_group.add_argument('-r', '--regex', action='store_true',
-                            help='将关键词作为正则表达式')
-    mode_group.add_argument('--invert', action='store_true',
-                            help='反查模式：查找不包含关键词的文件')
-    mode_group.add_argument('-s', '--case-sensitive', action='store_true',
-                            help='区分大小写')
-    mode_group.add_argument('-C', '--context', type=int, default=0, metavar='N',
-                            help='显示匹配行前后 N 行上下文')
-    mode_group.add_argument('--max-matches', type=int, default=0, metavar='N',
-                            help='每个文件最多记录 N 个匹配（0=不限）')
+    # scan
+    sp2 = sub.add_parser('scan', help='列出目录下所有文本文件')
+    sp2.add_argument('path', help='扫描路径')
+    sp2.add_argument('--min-size', type=str, default=None)
+    sp2.add_argument('--max-size', type=str, default=None)
+    sp2.add_argument('--after', type=str, default=None)
+    sp2.add_argument('--before', type=str, default=None)
+    sp2.add_argument('-i', '--include', type=str, nargs='+', default=None)
+    sp2.add_argument('-e', '--exclude', type=str, nargs='+', default=None)
+    sp2.add_argument('--exclude-dir', type=str, nargs='+', default=None)
+    sp2.add_argument('--no-recursive', action='store_true')
+    sp2.add_argument('--sort', default='path', choices=['path', 'name', 'size', 'date'])
+    sp2.add_argument('--desc', action='store_true')
+    sp2.add_argument('--max-results', type=int, default=0)
+    sp2.add_argument('--json', action='store_true')
+    sp2.add_argument('--translate', action='store_true')
 
-    # 筛选
-    filter_group = sp_search.add_argument_group('筛选条件')
-    filter_group.add_argument('--min-size', type=str, default=None,
-                              help='最小文件大小，如 1KB, 5MB')
-    filter_group.add_argument('--max-size', type=str, default=None,
-                              help='最大文件大小，如 100MB')
-    filter_group.add_argument('--after', type=str, default=None,
-                              help='只搜索此日期之后修改的文件 (YYYY-MM-DD)')
-    filter_group.add_argument('--before', type=str, default=None,
-                              help='只搜索此日期之前修改的文件 (YYYY-MM-DD)')
-    filter_group.add_argument('-i', '--include', type=str, nargs='+', default=None,
-                              help='文件名包含模式 (glob)，如 *.py *.txt')
-    filter_group.add_argument('-e', '--exclude', type=str, nargs='+', default=None,
-                              help='文件名排除模式 (glob)，如 *.log *.tmp')
-    filter_group.add_argument('--exclude-dir', type=str, nargs='+', default=None,
-                              help='排除目录名，如 .git node_modules')
-    filter_group.add_argument('--no-recursive', action='store_true',
-                              help='不递归搜索子目录')
-
-    # 排序与输出
-    output_group = sp_search.add_argument_group('排序与输出')
-    output_group.add_argument('--sort', type=str, default='path',
-                              choices=['path', 'name', 'size', 'date', 'matches'],
-                              help='排序字段 (默认: path)')
-    output_group.add_argument('--desc', action='store_true',
-                              help='降序排列')
-    output_group.add_argument('--max-results', type=int, default=0, metavar='N',
-                              help='最大返回文件数（0=不限）')
-    output_group.add_argument('--json', action='store_true',
-                              help='JSON 格式输出（供 Agent 解析）')
-    output_group.add_argument('-v', '--verbose', action='store_true',
-                              help='显示详细匹配上下文')
-    output_group.add_argument('--translate', action='store_true',
-                              help='启用中英文文件名自动翻译')
-    output_group.add_argument('-w', '--workers', type=int, default=4,
-                              help='并行搜索线程数 (默认: 4)')
-
-    # ---- scan 子命令 ----
-    sp_scan = subparsers.add_parser('scan', help='扫描目录中的所有文本文件（不搜索内容）')
-    sp_scan.add_argument('path', help='扫描路径')
-    sp_scan.add_argument('--min-size', type=str, default=None)
-    sp_scan.add_argument('--max-size', type=str, default=None)
-    sp_scan.add_argument('--after', type=str, default=None)
-    sp_scan.add_argument('--before', type=str, default=None)
-    sp_scan.add_argument('-i', '--include', type=str, nargs='+', default=None)
-    sp_scan.add_argument('-e', '--exclude', type=str, nargs='+', default=None)
-    sp_scan.add_argument('--exclude-dir', type=str, nargs='+', default=None)
-    sp_scan.add_argument('--no-recursive', action='store_true')
-    sp_scan.add_argument('--sort', type=str, default='path',
-                         choices=['path', 'name', 'size', 'date'])
-    sp_scan.add_argument('--desc', action='store_true')
-    sp_scan.add_argument('--max-results', type=int, default=0)
-    sp_scan.add_argument('--json', action='store_true')
-    sp_scan.add_argument('--translate', action='store_true')
-
-    # ---- translate 子命令 ----
-    sp_translate = subparsers.add_parser('translate', help='批量翻译文件名（中↔英）')
-    sp_translate.add_argument('path', help='目标目录')
-    sp_translate.add_argument('--json', action='store_true')
+    # translate
+    sp3 = sub.add_parser('translate', help='批量翻译文件名（中↔英）')
+    sp3.add_argument('path', help='目标目录')
+    sp3.add_argument('--json', action='store_true')
 
     return parser
 
 
 def cli_main(argv: Optional[List[str]] = None) -> int:
-    """CLI 主入口"""
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -1060,11 +1147,7 @@ def cli_main(argv: Optional[List[str]] = None) -> int:
         parser.print_help()
         return 0
 
-    # 配置日志
-    logging.basicConfig(
-        level=logging.WARNING,
-        format='%(levelname)s: %(message)s',
-    )
+    logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
 
     if args.command == 'search':
         return _cmd_search(args)
@@ -1072,14 +1155,10 @@ def cli_main(argv: Optional[List[str]] = None) -> int:
         return _cmd_scan(args)
     elif args.command == 'translate':
         return _cmd_translate(args)
-
-    parser.print_help()
     return 0
 
 
 def _cmd_search(args) -> int:
-    """执行 search 子命令"""
-    # 解析筛选参数
     min_size = parse_size(args.min_size) if args.min_size else None
     max_size = parse_size(args.max_size) if args.max_size else None
     after = parse_date(args.after) if args.after else None
@@ -1094,18 +1173,14 @@ def _cmd_search(args) -> int:
         context_lines=args.context,
         max_matches_per_file=args.max_matches,
         recursive=not args.no_recursive,
-        min_size=min_size,
-        max_size=max_size,
-        after=after,
-        before=before,
+        min_size=min_size, max_size=max_size,
+        after=after, before=before,
         include_patterns=args.include,
         exclude_patterns=args.exclude,
         exclude_dirs=args.exclude_dir,
-        sort_by=args.sort,
-        sort_reverse=args.desc,
+        sort_by=args.sort, sort_reverse=args.desc,
         translate=args.translate,
         max_results=args.max_results,
-        workers=args.workers,
     )
 
     results = searcher.search()
@@ -1115,12 +1190,10 @@ def _cmd_search(args) -> int:
         print(OutputFormatter.format_json(results, summary))
     else:
         print(OutputFormatter.format_text(results, summary, verbose=args.verbose))
-
     return 0
 
 
 def _cmd_scan(args) -> int:
-    """执行 scan 子命令"""
     min_size = parse_size(args.min_size) if args.min_size else None
     max_size = parse_size(args.max_size) if args.max_size else None
     after = parse_date(args.after) if args.after else None
@@ -1129,15 +1202,12 @@ def _cmd_scan(args) -> int:
     searcher = DocSearcher(
         target_path=args.path,
         recursive=not args.no_recursive,
-        min_size=min_size,
-        max_size=max_size,
-        after=after,
-        before=before,
+        min_size=min_size, max_size=max_size,
+        after=after, before=before,
         include_patterns=args.include,
         exclude_patterns=args.exclude,
         exclude_dirs=args.exclude_dir,
-        sort_by=args.sort,
-        sort_reverse=args.desc,
+        sort_by=args.sort, sort_reverse=args.desc,
         translate=args.translate,
         max_results=args.max_results,
     )
@@ -1149,30 +1219,25 @@ def _cmd_scan(args) -> int:
         print(OutputFormatter.format_json(results, summary))
     else:
         print(OutputFormatter.format_text(results, summary))
-
     return 0
 
 
 def _cmd_translate(args) -> int:
-    """执行 translate 子命令"""
     translator = FilenameTranslator()
     if not translator.available:
-        print("错误: 翻译库不可用，请安装: pip install deep-translator",
-              file=sys.stderr)
+        print("错误: 翻译库不可用，请安装: pip install deep-translator", file=sys.stderr)
         return 1
 
     target = os.path.abspath(args.path)
     results = []
-
     for entry in os.scandir(target):
         if entry.is_file():
-            original = entry.name
-            translated = translator.translate(original)
-            if translated and translated != original:
+            translated = translator.translate(entry.name)
+            if translated and translated != entry.name:
                 results.append({
-                    'original': original,
+                    'original': entry.name,
                     'translated': translated,
-                    'has_chinese': translator.contains_chinese(original),
+                    'has_chinese': translator.contains_chinese(entry.name),
                 })
 
     if args.json:
@@ -1181,12 +1246,11 @@ def _cmd_translate(args) -> int:
         if not results:
             print("无需翻译的文件名。")
         else:
-            max_orig = max(len(r['original']) for r in results)
+            w = max(len(r['original']) for r in results)
             for r in results:
-                direction = 'ZH→EN' if r['has_chinese'] else 'EN→ZH'
-                print(f"  [{direction}] {r['original']:<{max_orig}}  →  {r['translated']}")
+                d = 'ZH→EN' if r['has_chinese'] else 'EN→ZH'
+                print(f"  [{d}] {r['original']:<{w}}  →  {r['translated']}")
             print(f"\n  共 {len(results)} 个文件名可翻译。")
-
     return 0
 
 
