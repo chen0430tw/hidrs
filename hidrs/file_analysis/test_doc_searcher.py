@@ -341,6 +341,100 @@ def test_size_filter(tmp):
     check('min_size=100MB 无结果', len(results2) == 0)
 
 
+def test_windows_path_parsing():
+    print("\n[17] Windows 路径解析 (grep/findstr 输出)")
+    parse = ds.GrepBackend._parse_grep_line
+
+    # Linux 路径
+    r = parse('/home/user/file.py:10:import os')
+    check('Linux 路径解析', r == ('/home/user/file.py', 10, 'import os'))
+
+    # Windows 绝对路径
+    r = parse('C:\\Users\\test\\file.py:25:print("hello")')
+    check('Windows C:\\ 路径解析', r is not None and r[0] == 'C:\\Users\\test\\file.py' and r[1] == 25)
+
+    # Windows D 盘
+    r = parse('D:\\project\\src\\main.py:100:def foo():')
+    check('Windows D:\\ 路径解析', r is not None and r[0] == 'D:\\project\\src\\main.py' and r[1] == 100)
+
+    # 内容中含冒号
+    r = parse('/path/config.yaml:5:host: localhost:3306')
+    check('内容含冒号', r is not None and r[0] == '/path/config.yaml' and r[1] == 5
+          and r[2] == 'host: localhost:3306')
+
+    # 相对路径
+    r = parse('./src/app.js:1:const x = 1;')
+    check('相对路径', r is not None and r[0] == './src/app.js' and r[1] == 1)
+
+    # 无行号（异常行）
+    r = parse('just-a-path-no-line-number')
+    check('无行号返回 None', r is None)
+
+    # 空字符串
+    r = parse('')
+    check('空字符串返回 None', r is None)
+
+
+def test_python_backend_fallback(tmp):
+    print("\n[18] Python 后端回退 + include_patterns")
+    # 直接用 Python 后端（跳过 rg/grep）
+    searcher = ds.DocSearcher(
+        target_path=tmp, keyword='TODO',
+        include_patterns=['*.py'],
+    )
+    # 强制使用 Python 后端
+    results = searcher._search_with_python()
+    check('Python 后端 --type py 只返回 .py',
+          all(r.path.endswith('.py') for r in results),
+          f'got: {[os.path.basename(r.path) for r in results]}')
+    check('Python 后端找到 ≥1 个文件', len(results) >= 1)
+
+
+def test_grep_output_parse():
+    print("\n[19] GrepBackend._parse_output 空/异常输入")
+    grep = ds.GrepBackend()
+
+    # 空输出
+    check('parse_output 空字符串', grep._parse_output('', False) == [])
+    check('parse_output None', grep._parse_output(None, False) == [])
+    check('parse_output 全空白', grep._parse_output('  \n  \n', False) == [])
+
+    # 正常输出（Linux 路径）
+    results = grep._parse_output('/tmp/test.py:10:hello world\n/tmp/test.py:20:foo bar\n', False)
+    check('parse_output 2行同文件 → 1结果',
+          len(results) == 1 and len(results[0].matches) == 2)
+
+    # 多文件
+    results = grep._parse_output('/a.py:1:x\n/b.py:2:y\n', False)
+    check('parse_output 2文件 → 2结果', len(results) == 2)
+
+
+def test_auto_fallback(tmp):
+    print("\n[20] 搜索自动降级")
+    searcher = ds.DocSearcher(target_path=tmp, keyword='TODO')
+    # 禁用 rg 和 grep，强制走 Python
+    searcher._rg.bin = None
+    searcher._grep.bin = None
+    searcher._findstr.bin = None
+
+    results = searcher.search()
+    check('纯 Python 回退能搜到结果', len(results) >= 2,
+          f'got {len(results)}')
+    check('后端标记为 python', searcher.stats['backend'] == 'python')
+
+
+def test_scan_with_type(tmp):
+    print("\n[21] scan 命令也支持 --type")
+    searcher = ds.DocSearcher(
+        target_path=tmp,
+        include_patterns=['*.py'],
+    )
+    results = searcher.scan_text_files()
+    check('scan --type py 只返回 .py',
+          all(r.path.endswith('.py') for r in results),
+          f'got: {[os.path.basename(r.path) for r in results]}')
+
+
 def main():
     global PASS, FAIL
     print("=" * 60)
@@ -372,6 +466,11 @@ def main():
         test_cli_help()
         test_cli_search(tmp)
         test_size_filter(tmp)
+        test_windows_path_parsing()
+        test_python_backend_fallback(tmp)
+        test_grep_output_parse()
+        test_auto_fallback(tmp)
+        test_scan_with_type(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

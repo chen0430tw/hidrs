@@ -409,9 +409,12 @@ class RipgrepBackend:
 
         cmd.extend([pattern, path])
 
+        logger.debug(f"rg 命令: {cmd}")
+
         try:
             proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=300
+                cmd, capture_output=True, timeout=300,
+                encoding='utf-8', errors='replace',
             )
         except subprocess.TimeoutExpired:
             logger.warning("rg 搜索超时 (5分钟)")
@@ -425,6 +428,9 @@ class RipgrepBackend:
         """解析 rg --json 输出"""
         results_by_path: Dict[str, SearchResult] = {}
         searched_files: Set[str] = set()
+
+        if not output or not output.strip():
+            return [], set()
 
         for line in output.strip().split('\n'):
             if not line:
@@ -498,9 +504,10 @@ class GrepBackend:
         if self.bin:
             try:
                 ver = subprocess.run(
-                    [self.bin, '--version'], capture_output=True, text=True, timeout=5
+                    [self.bin, '--version'], capture_output=True,
+                    encoding='utf-8', errors='replace', timeout=5,
                 )
-                self._is_gnu = 'GNU' in ver.stdout
+                self._is_gnu = 'GNU' in (ver.stdout or '')
             except Exception:
                 pass
 
@@ -523,13 +530,14 @@ class GrepBackend:
             cmd.append('--binary-files=without-match')
 
         if not is_regex:
-            cmd.append('--fixed-strings')
+            # -F 是 POSIX 标准，比 --fixed-strings 兼容性更好
+            cmd.append('-F')
 
         if not case_sensitive:
-            cmd.append('--ignore-case')
+            cmd.append('-i')
 
         if invert:
-            cmd.append('--files-without-match')
+            cmd.append('-L')  # -L 比 --files-without-match 更兼容
 
         if context_lines > 0:
             cmd.extend(['-C', str(context_lines)])
@@ -544,16 +552,37 @@ class GrepBackend:
 
         # --exclude-dir 在 GNU grep 和较新的 BSD grep 上都支持
         cmd.append('--exclude-dir=.git')
-        cmd.extend([pattern, path])
+        cmd.extend(['--', pattern, path])
+
+        logger.debug(f"grep 命令: {cmd}")
 
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+            proc = subprocess.run(
+                cmd, capture_output=True, timeout=300,
+                # Windows: subprocess 默认用系统编码（cp936/cp1252），需显式指定
+                encoding='utf-8', errors='replace',
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+            logger.debug(f"grep 执行失败: {e}")
+            return []
+
+        if proc.returncode not in (0, 1):
+            # grep 返回 0=有匹配, 1=无匹配, 2=错误
+            logger.debug(f"grep 返回错误 (rc={proc.returncode}): {proc.stderr}")
             return []
 
         return self._parse_output(proc.stdout, invert)
 
+    # 正则匹配 grep -n 输出行: filepath:linenum:content
+    # 需要处理 Windows 绝对路径 C:\...:10:content
+    _LINE_PATTERN = re.compile(
+        r'^(.+?):(\d+)[:](.*)', re.DOTALL
+    )
+
     def _parse_output(self, output: str, invert: bool) -> List[SearchResult]:
+        if not output or not output.strip():
+            return []
+
         results_by_path: Dict[str, SearchResult] = {}
 
         if invert:
@@ -567,14 +596,10 @@ class GrepBackend:
             if not line:
                 continue
             # grep -n 输出: filepath:linenum:content
-            # Windows 路径可能含 C:\，所以从右边找第二个冒号
-            parts = line.split(':', 2)
-            if len(parts) >= 3:
-                fpath, line_num_str, content = parts[0], parts[1], parts[2]
-                try:
-                    line_num = int(line_num_str)
-                except ValueError:
-                    continue
+            # Windows 路径含 C:\path\file:10:content → 用正则而非 split
+            m = self._parse_grep_line(line)
+            if m:
+                fpath, line_num, content = m
                 if fpath not in results_by_path:
                     results_by_path[fpath] = SearchResult(path=fpath)
                 results_by_path[fpath].matches.append({
@@ -583,6 +608,37 @@ class GrepBackend:
                 })
 
         return list(results_by_path.values())
+
+    @staticmethod
+    def _parse_grep_line(line: str) -> Optional[Tuple[str, int, str]]:
+        """
+        解析 grep -n 的单行输出，正确处理 Windows 路径
+
+        格式: filepath:linenum:content
+        Windows: C:\path\file.py:10:import os
+        Linux:   /path/file.py:10:import os
+        """
+        # 策略: 从右向左找 :数字: 模式
+        # 因为文件路径可能含 C:\，行号一定是纯数字
+        idx = 0
+        while True:
+            # 找下一个 : 的位置
+            colon1 = line.find(':', idx)
+            if colon1 < 0:
+                break
+            # 跳过 Windows 盘符 (C:)
+            if colon1 == 1 and line[0].isalpha():
+                idx = colon1 + 1
+                continue
+            # colon1 后面应该是行号
+            colon2 = line.find(':', colon1 + 1)
+            if colon2 < 0:
+                break
+            num_str = line[colon1 + 1:colon2]
+            if num_str.isdigit():
+                return line[:colon1], int(num_str), line[colon2 + 1:]
+            idx = colon1 + 1
+        return None
 
 
 class FindstrBackend:
@@ -632,17 +688,19 @@ class FindstrBackend:
         return self._parse_output(proc.stdout, invert)
 
     def _parse_output(self, output: str, invert: bool) -> List[SearchResult]:
+        if not output or not output.strip():
+            return []
+
         results_by_path: Dict[str, SearchResult] = {}
 
         for line in output.strip().split('\n'):
             if not line:
                 continue
             # findstr /N 输出: filepath:linenum:content
-            # Windows 路径含 C:\，用正则解析
-            m = re.match(r'^(.+?):(\d+):(.*)', line)
+            # Windows 路径含 C:\，用与 grep 相同的解析策略
+            m = GrepBackend._parse_grep_line(line)
             if m:
-                fpath, line_num_str, content = m.group(1), m.group(2), m.group(3)
-                line_num = int(line_num_str)
+                fpath, line_num, content = m
                 fpath = fpath.strip()
                 if fpath not in results_by_path:
                     results_by_path[fpath] = SearchResult(path=fpath)
@@ -1006,20 +1064,33 @@ class DocSearcher:
         }
 
     def search(self) -> List[SearchResult]:
-        """执行搜索"""
+        """执行搜索 —— 自动降级: rg → grep → findstr → python"""
         if not self.pattern_str:
             return self.scan_text_files()
 
         start = time.time()
         results: List[SearchResult] = []
 
+        # 自动降级链：如果高优先级后端返回 0 结果但没有报错，
+        # 可能是后端兼容性问题，尝试下一个后端
         if self._rg.available:
             results = self._search_with_rg()
+            if results:
+                pass  # rg 成功
+            elif self._grep.available:
+                logger.debug("rg 返回 0 结果，降级到 grep")
+                results = self._search_with_grep()
         elif self._grep.available:
             results = self._search_with_grep()
-        elif self._findstr.available:
+
+        # grep 也没结果 → 尝试 findstr (Windows)
+        if not results and self._findstr.available:
+            logger.debug("降级到 findstr")
             results = self._search_with_findstr()
-        else:
+
+        # 所有外部工具都失败 → Python 兜底
+        if not results:
+            logger.debug("所有外部后端返回 0 结果，降级到 Python 搜索")
             results = self._search_with_python()
 
         # 应用 Python 层面的筛选（大小、日期等 rg 不直接支持的）
@@ -1060,6 +1131,14 @@ class DocSearcher:
                 dirs.clear()
 
             for fname in files:
+                # 应用 include/exclude glob 筛选（--type 和 -i/-e）
+                if self.include_patterns:
+                    if not any(fnmatch.fnmatch(fname, p) for p in self.include_patterns):
+                        continue
+                if self.exclude_patterns:
+                    if any(fnmatch.fnmatch(fname, p) for p in self.exclude_patterns):
+                        continue
+
                 fpath = os.path.join(root, fname)
                 is_text, enc = TextDetector.is_text_file(fpath)
                 self.stats['files_scanned'] += 1
@@ -1151,6 +1230,14 @@ class DocSearcher:
                 dirs.clear()
 
             for fname in files:
+                # 应用 include/exclude glob 筛选（--type 和 -i/-e）
+                if self.include_patterns:
+                    if not any(fnmatch.fnmatch(fname, p) for p in self.include_patterns):
+                        continue
+                if self.exclude_patterns:
+                    if any(fnmatch.fnmatch(fname, p) for p in self.exclude_patterns):
+                        continue
+
                 fpath = os.path.join(root, fname)
                 is_text, enc = TextDetector.is_text_file(fpath)
                 self.stats['files_scanned'] += 1
@@ -1680,6 +1767,9 @@ def build_parser() -> argparse.ArgumentParser:
 输出格式:  text grep path path0 csv json custom
         """)
 
+    parser.add_argument('-d', '--debug', action='store_true',
+                        help='调试模式（输出后端选择、命令参数等信息）')
+
     sub = parser.add_subparsers(dest='command', help='子命令')
 
     # search
@@ -1794,7 +1884,16 @@ def cli_main(argv: Optional[List[str]] = None) -> int:
         parser.print_help()
         return 0
 
-    logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
+    log_level = logging.DEBUG if args.debug else logging.WARNING
+    logging.basicConfig(level=log_level, format='%(levelname)s: %(message)s')
+
+    if args.debug:
+        rg = RipgrepBackend()
+        grep = GrepBackend()
+        fstr = FindstrBackend()
+        logger.debug(f"搜索后端: rg={rg.bin} grep={grep.bin} (GNU={grep._is_gnu}) findstr={fstr.bin}")
+        logger.debug(f"chardet={HAS_CHARDET} translator={HAS_TRANSLATOR}")
+        logger.debug(f"平台={sys.platform} 编码={sys.getdefaultencoding()}")
 
     if args.command == 'search':
         return _cmd_search(args)
