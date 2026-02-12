@@ -40,6 +40,10 @@ umap-learn==0.5.3
 # DNS安全与防御
 dnspython==2.4.2  # DNS查询和DNSSEC验证
 
+# 文档搜索器
+chardet==5.2.0  # 文件编码自动检测
+deep-translator==1.11.4  # 中英文文件名翻译（可选）
+
 # 其他工具
 joblib==1.2.0
 nltk==3.8.1
