@@ -23,7 +23,8 @@ HIDRS File Analysis Module
 """
 
 from .file_analyzer import FileAnalyzer, analyze_file
+from .doc_searcher import DocSearcher, TextDetector, FilenameTranslator
 
-__all__ = ['FileAnalyzer', 'analyze_file']
+__all__ = ['FileAnalyzer', 'analyze_file', 'DocSearcher', 'TextDetector', 'FilenameTranslator']
 __version__ = '1.0.0'
 __author__ = 'HIDRS Team (based on Xkeystroke)'
