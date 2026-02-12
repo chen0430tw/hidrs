@@ -12,7 +12,7 @@
   4. Agent 友好的结构化 JSON 输出
   5. 对 rg 跳过的非 UTF-8 文件做回退搜索
 
-搜索后端优先级: ripgrep → grep → Python 内置
+搜索后端优先级: ripgrep -> grep -> Python 内置
 
 作者: HIDRS Team
 日期: 2026-02-12
@@ -73,16 +73,21 @@ logger = logging.getLogger(__name__)
 # ============================================================
 
 def safe_print(*args, **kwargs):
-    """print() 的安全替代，自动处理 Windows 控制台编码问题"""
+    """print() 的安全替代，自动处理 Windows 控制台编码问题。
+
+    支持 file=sys.stderr 等参数，回退时使用目标流的 encoding。
+    """
     try:
         print(*args, **kwargs)
     except UnicodeEncodeError:
         # 回退：把不可编码的字符替换为 ?
-        import io
+        target = kwargs.get('file', sys.stdout)
+        enc = getattr(target, 'encoding', None) or 'utf-8'
         text = ' '.join(str(a) for a in args)
-        enc = sys.stdout.encoding or 'utf-8'
         safe_text = text.encode(enc, errors='replace').decode(enc, errors='replace')
-        print(safe_text, **{k: v for k, v in kwargs.items() if k != 'end'}, end=kwargs.get('end', '\n'))
+        # 保留原有 kwargs (file, end, sep, flush 等)
+        safe_kwargs = {k: v for k, v in kwargs.items() if k not in ('end',)}
+        print(safe_text, **safe_kwargs, end=kwargs.get('end', '\n'))
 
 
 def safe_write(text: str):
@@ -179,7 +184,7 @@ class TextDetector:
             if encoding:
                 return True, encoding
 
-            # 空字节 → 可能是二进制或 UTF-16 无 BOM
+            # 空字节 -> 可能是二进制或 UTF-16 无 BOM
             null_ratio = sample.count(b'\x00') / len(sample) if sample else 0
             if null_ratio > 0.1:
                 encoding = TextDetector._try_utf16_no_bom(sample)
@@ -187,7 +192,7 @@ class TextDetector:
                     return True, encoding
                 return False, None
 
-            # 控制字符过多 → 二进制
+            # 控制字符过多 -> 二进制
             non_text = sum(1 for b in sample if b < 0x20 and b not in TextDetector.ALLOWED_CONTROL_CHARS)
             if len(sample) > 0 and non_text / len(sample) > 0.05:
                 return False, None
@@ -325,7 +330,7 @@ class FilenameTranslator:
         return bool(self._CJK_PATTERN.search(text))
 
     def translate(self, filename: str) -> Optional[str]:
-        """自动翻译文件名（保留扩展名），中→英 / 英→中"""
+        """自动翻译文件名（保留扩展名），中->英 / 英->中"""
         if not self._available:
             return None
         if filename in self._cache:
@@ -486,11 +491,16 @@ class RipgrepBackend:
             msg_type = msg.get('type')
 
             if msg_type == 'match':
-                data = msg['data']
-                fpath = data['path']['text']
+                data = msg.get('data')
+                if not data:
+                    continue
+                try:
+                    fpath = data['path']['text']
+                    line_number = data['line_number']
+                    line_text = data['lines']['text'].rstrip('\n\r')
+                except (KeyError, TypeError):
+                    continue
                 searched_files.add(fpath)
-                line_number = data['line_number']
-                line_text = data['lines']['text'].rstrip('\n\r')
 
                 if fpath not in results_by_path:
                     results_by_path[fpath] = SearchResult(path=fpath)
@@ -639,7 +649,7 @@ class GrepBackend:
             if not line:
                 continue
             # grep -n 输出: filepath:linenum:content
-            # Windows 路径含 C:\path\file:10:content → 用正则而非 split
+            # Windows 路径含 C:\path\file:10:content -> 用正则而非 split
             m = self._parse_grep_line(line)
             if m:
                 fpath, line_num, content = m
@@ -773,12 +783,12 @@ class PythonBackend:
         except OSError:
             return None
 
-        # 大文件 + 不需要上下文 → 流式搜索（节省内存，不卡）
+        # 大文件 + 不需要上下文 -> 流式搜索（节省内存，不卡）
         if file_size > PythonBackend.STREAM_THRESHOLD and context_lines == 0:
             return PythonBackend._search_file_stream(
                 file_path, pattern, encoding, invert, max_matches)
 
-        # 小文件 或 需要上下文 → 整体读取（上下文需要前后行）
+        # 小文件 或 需要上下文 -> 整体读取（上下文需要前后行）
         return PythonBackend._search_file_full(
             file_path, pattern, encoding, invert, context_lines, max_matches)
 
@@ -916,14 +926,14 @@ class HashMatcher:
         # 原文
         search_terms.add(query)
 
-        # query → base64 编码
+        # query -> base64 编码
         try:
             encoded = base64.b64encode(query.encode('utf-8')).decode('ascii')
             search_terms.add(encoded)
         except Exception:
             pass
 
-        # query 作为 base64 → 解码为原文
+        # query 作为 base64 -> 解码为原文
         try:
             decoded = base64.b64decode(query, validate=True).decode('utf-8')
             search_terms.add(decoded)
@@ -1225,8 +1235,8 @@ class DocSearcher:
     文档内容搜索器 —— 编排 rg/grep + 编码检测 + 翻译
 
     搜索策略:
-    1. 用 rg（或 grep）搜索目录 → 得到 UTF-8 兼容文件的结果
-    2. 用 TextDetector 扫描 rg 跳过的文件 → 对非 UTF-8 文本用 Python 回退搜索
+    1. 用 rg（或 grep）搜索目录 -> 得到 UTF-8 兼容文件的结果
+    2. 用 TextDetector 扫描 rg 跳过的文件 -> 对非 UTF-8 文本用 Python 回退搜索
     3. 合并结果，附加编码信息和翻译
     """
 
@@ -1279,10 +1289,21 @@ class DocSearcher:
         self.sort_reverse = sort_reverse
         self.max_results = max_results
 
-        # 后端 (rg → grep → findstr → python)
+        # 后端 (rg -> grep -> findstr -> python)
         self._rg = RipgrepBackend()
         self._grep = GrepBackend()
         self._findstr = FindstrBackend()
+
+        # 提示安装 ripgrep（性能最佳的后端）
+        if not self._rg.available:
+            if self._grep.available:
+                logger.info("提示: 未检测到 ripgrep (rg)，当前使用 grep。"
+                            "安装 ripgrep 可大幅提升搜索速度: "
+                            "https://github.com/BurntSushi/ripgrep#installation")
+            else:
+                logger.warning("未检测到 ripgrep 和 grep，将使用 Python 内置搜索（较慢）。"
+                               "强烈建议安装 ripgrep: "
+                               "https://github.com/BurntSushi/ripgrep#installation")
 
         # 编译 Python 回退用的正则
         flags = 0 if case_sensitive else re.IGNORECASE
@@ -1315,7 +1336,7 @@ class DocSearcher:
         logger.debug(f"快速JSON: {_json_lib_name}")
 
     def search(self) -> List[SearchResult]:
-        """执行搜索 —— 自动降级: rg → grep → findstr → python"""
+        """执行搜索 —— 自动降级: rg -> grep -> findstr -> python"""
         if not self.pattern_str:
             return self.scan_text_files()
 
@@ -1367,12 +1388,12 @@ class DocSearcher:
         # 恢复原始 exclude 列表
         self.exclude_patterns = original_excludes
 
-        # grep 也没结果 → 尝试 findstr (Windows)
+        # grep 也没结果 -> 尝试 findstr (Windows)
         if not results and self._findstr.available:
             logger.debug("降级到 findstr")
             results = self._search_with_findstr()
 
-        # 所有外部工具都失败 → Python 兜底
+        # 所有外部工具都失败 -> Python 兜底
         if not results:
             logger.debug("所有外部后端返回 0 结果，降级到 Python 搜索")
             results = self._search_with_python()
@@ -1453,7 +1474,7 @@ class DocSearcher:
         """rg 搜索 + Python 回退非 UTF-8 文件"""
         self.stats['backend'] = 'ripgrep'
 
-        # rg 支持 --max-filesize 但不支持 min-size/日期筛选 → 后续 Python 过滤
+        # rg 支持 --max-filesize 但不支持 min-size/日期筛选 -> 后续 Python 过滤
         max_fs = None
         if self.max_size:
             max_fs = format_size(self.max_size).replace(' ', '')
@@ -1729,18 +1750,18 @@ def parse_date(date_str: str) -> datetime:
     解析日期字符串，支持:
     1. 标准格式: YYYY-MM-DD, YYYY/MM/DD, YYYYMMDD, YYYY-MM-DD HH:MM:SS
     2. 快捷符号 (缩写优先):
-         td / today       → 今天 00:00
-         yd / yesterday   → 昨天 00:00
-         tw / thisweek    → 本周一 00:00
-         lw / lastweek    → 上周一 00:00
-         tm / thismonth   → 本月1日 00:00
-         lm / lastmonth   → 上月1日 00:00
-         ty / thisyear    → 今年1月1日 00:00
-         ly / lastyear    → 去年1月1日 00:00
+         td / today       -> 今天 00:00
+         yd / yesterday   -> 昨天 00:00
+         tw / thisweek    -> 本周一 00:00
+         lw / lastweek    -> 上周一 00:00
+         tm / thismonth   -> 本月1日 00:00
+         lm / lastmonth   -> 上月1日 00:00
+         ty / thisyear    -> 今年1月1日 00:00
+         ly / lastyear    -> 去年1月1日 00:00
     3. 相对偏移:
-         Nd  → N 天前  (如 3d = 3天前, 7d = 一周前, 30d = 一个月前)
-         Nh  → N 小时前 (如 1h, 6h, 24h)
-         Nw  → N 周前   (如 1w, 2w)
+         Nd  -> N 天前  (如 3d = 3天前, 7d = 一周前, 30d = 一个月前)
+         Nh  -> N 小时前 (如 1h, 6h, 24h)
+         Nw  -> N 周前   (如 1w, 2w)
     4. Unix 时间戳: @1700000000 (以 @ 开头的纯数字)
     """
     s = date_str.strip().lower()
@@ -2136,7 +2157,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp2.add_argument('-v', '--verbose', action='store_true', help='详细输出')
 
     # translate
-    sp3 = sub.add_parser('translate', help='批量翻译文件名（中↔英）')
+    sp3 = sub.add_parser('translate', help='批量翻译文件名 (中<->英)')
     sp3.add_argument('path', help='目标目录')
     sp3.add_argument('--json', action='store_true')
 
@@ -2232,13 +2253,13 @@ def _cmd_search(args) -> int:
     created_after = parse_date(args.created_after) if args.created_after else None
     created_before = parse_date(args.created_before) if args.created_before else None
 
-    # --type 预设 → include_patterns
+    # --type 预设 -> include_patterns
     include_patterns = args.include or []
     if args.type:
         type_key = args.type.lower()
         if type_key not in FILE_TYPE_PRESETS:
-            print(f"未知文件类型: {type_key}", file=sys.stderr)
-            print(f"可选: {', '.join(sorted(FILE_TYPE_PRESETS.keys()))}", file=sys.stderr)
+            safe_print(f"未知文件类型: {type_key}", file=sys.stderr)
+            safe_print(f"可选: {', '.join(sorted(FILE_TYPE_PRESETS.keys()))}", file=sys.stderr)
             return 1
         include_patterns = FILE_TYPE_PRESETS[type_key] + include_patterns
 
@@ -2248,7 +2269,7 @@ def _cmd_search(args) -> int:
     if args.path == '-' or (args.path == '.' and not sys.stdin.isatty()):
         stdin_files = _read_stdin_file_list()
         if not stdin_files:
-            print("stdin 中无有效文件路径", file=sys.stderr)
+            safe_print("stdin 中无有效文件路径", file=sys.stderr)
             return 1
         search_path = os.path.dirname(stdin_files[0]) or '.'
 
@@ -2441,7 +2462,7 @@ def _cmd_scan(args) -> int:
 def _cmd_translate(args) -> int:
     translator = FilenameTranslator()
     if not translator.available:
-        print("错误: 翻译库不可用，请安装: pip install deep-translator", file=sys.stderr)
+        safe_print("错误: 翻译库不可用，请安装: pip install deep-translator", file=sys.stderr)
         return 1
 
     target = os.path.abspath(args.path)
@@ -2474,7 +2495,7 @@ def _cmd_hash(args) -> int:
     """hash 子命令：通过文件 hash 查找匹配文件"""
     target = os.path.abspath(args.path)
     if not os.path.isdir(target):
-        print(f"路径不存在: {target}", file=sys.stderr)
+        safe_print(f"路径不存在: {target}", file=sys.stderr)
         return 1
 
     results = HashMatcher.find_by_hash(target, args.hash_value, algorithm=args.algo)
@@ -2501,7 +2522,7 @@ def _cmd_base64(args) -> int:
     """base64 子命令：Base64 双向搜索"""
     target = os.path.abspath(args.path)
     if not os.path.isdir(target):
-        print(f"路径不存在: {target}", file=sys.stderr)
+        safe_print(f"路径不存在: {target}", file=sys.stderr)
         return 1
 
     results = HashMatcher.find_by_base64(target, args.query)
@@ -2793,15 +2814,27 @@ def _cmd_help(args) -> int:
     parallel   并行加速
     version    版本号筛选
 
+  参数顺序 (重要):
+    doc_searcher [全局选项] <子命令> [子命令选项] [参数]
+
+    全局选项必须写在子命令之前:
+      -d, --debug     调试模式 (显示后端选择、缓存命中等)
+
+    正确:  doc_searcher -d search "key" .
+    错误:  doc_searcher search "key" . -d    # -d 不是 search 的选项
+
   快速上手:
     doc_searcher search "关键词" /路径          基本搜索
     doc_searcher search "key" . --type py       按类型搜
     doc_searcher search "key" . --after 7d      最近7天
     doc_searcher search "key" . --format json   JSON输出
+    doc_searcher -d search "key" .              调试模式
     doc_searcher hash <sha256> /dir             hash对比
     doc_searcher base64 "secret" /dir           base64搜索
 
-  搜索后端: ripgrep -> grep -> findstr(Win) -> Python (自动选择)
+  搜索后端 (自动降级):
+    ripgrep (rg) -> grep -> findstr (Win) -> Python
+    推荐安装 ripgrep 获得最佳性能: https://github.com/BurntSushi/ripgrep
   编码检测: UTF-8, GBK, Big5, Shift_JIS, EUC-KR 等自动识别
 """)
         return 0
