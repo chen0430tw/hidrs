@@ -25,12 +25,15 @@ import json
 import time
 import shutil
 import fnmatch
+import hashlib
+import base64
 import argparse
 import logging
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple, Set
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # 编码检测
 try:
@@ -76,6 +79,29 @@ FALLBACK_ENCODINGS = [
     'latin-1', 'iso-8859-1', 'ascii',
     'cp1252', 'cp1251', 'cp936',
 ]
+
+# 文件类型预设 —— --type 快捷选择
+FILE_TYPE_PRESETS: Dict[str, List[str]] = {
+    'py':       ['*.py', '*.pyw', '*.pyi'],
+    'js':       ['*.js', '*.jsx', '*.mjs', '*.cjs'],
+    'ts':       ['*.ts', '*.tsx'],
+    'web':      ['*.html', '*.htm', '*.css', '*.scss', '*.js', '*.jsx', '*.ts', '*.tsx', '*.vue', '*.svelte'],
+    'java':     ['*.java', '*.kt', '*.scala', '*.gradle'],
+    'c':        ['*.c', '*.h', '*.cpp', '*.hpp', '*.cc', '*.cxx'],
+    'go':       ['*.go'],
+    'rust':     ['*.rs'],
+    'ruby':     ['*.rb', '*.erb', '*.gemspec'],
+    'php':      ['*.php'],
+    'shell':    ['*.sh', '*.bash', '*.zsh', '*.fish', '*.bat', '*.cmd', '*.ps1'],
+    'config':   ['*.json', '*.yaml', '*.yml', '*.toml', '*.ini', '*.cfg', '*.conf', '*.env', '*.properties'],
+    'xml':      ['*.xml', '*.xsl', '*.xsd', '*.svg', '*.plist'],
+    'doc':      ['*.md', '*.rst', '*.txt', '*.tex', '*.adoc', '*.org'],
+    'data':     ['*.csv', '*.tsv', '*.jsonl', '*.ndjson'],
+    'sql':      ['*.sql'],
+    'proto':    ['*.proto', '*.graphql'],
+    'log':      ['*.log', '*.out', '*.err'],
+    'all-text': ['*'],  # 不筛选扩展名，靠 TextDetector 判定
+}
 
 
 # ============================================================
@@ -175,10 +201,11 @@ class TextDetector:
     @staticmethod
     def read_text_file(file_path: str, encoding: str,
                        max_bytes: int = MAX_FILE_READ_BYTES) -> Optional[str]:
-        """以检测到的编码读取文件内容"""
+        """以检测到的编码读取文件内容（小文件一次性读取）"""
         try:
+            file_size = os.path.getsize(file_path)
             with open(file_path, 'rb') as f:
-                raw = f.read(min(os.path.getsize(file_path), max_bytes))
+                raw = f.read(min(file_size, max_bytes))
             try:
                 return raw.decode(encoding)
             except (UnicodeDecodeError, LookupError):
@@ -191,6 +218,38 @@ class TextDetector:
             return raw.decode('utf-8', errors='replace')
         except (OSError, PermissionError):
             return None
+
+    @staticmethod
+    def iter_lines(file_path: str, encoding: str,
+                   max_bytes: int = MAX_FILE_READ_BYTES):
+        """
+        流式逐行读取文件（大文件优化，不一次性载入内存）
+
+        Yields: (line_number, line_text)  line_number 从 1 开始
+        """
+        try:
+            effective_enc = encoding
+            bytes_read = 0
+            # 先尝试指定编码，失败则逐个回退
+            for try_enc in [encoding] + FALLBACK_ENCODINGS:
+                try:
+                    with open(file_path, 'r', encoding=try_enc, errors='strict',
+                              buffering=8192) as f:
+                        for line_num, line in enumerate(f, 1):
+                            bytes_read += len(line.encode(try_enc, errors='replace'))
+                            if bytes_read > max_bytes:
+                                return
+                            yield line_num, line.rstrip('\n\r')
+                    return  # 成功读完
+                except (UnicodeDecodeError, LookupError):
+                    continue
+            # 最后用 replace 模式兜底
+            with open(file_path, 'r', encoding='utf-8', errors='replace',
+                      buffering=8192) as f:
+                for line_num, line in enumerate(f, 1):
+                    yield line_num, line.rstrip('\n\r')
+        except (OSError, PermissionError):
+            return
 
 
 # ============================================================
@@ -599,12 +658,58 @@ class FindstrBackend:
 class PythonBackend:
     """Python 内置搜索 —— 最后的回退，专门处理非 UTF-8 文件"""
 
+    # 超过此大小的文件使用流式搜索，避免一次性载入内存卡顿
+    STREAM_THRESHOLD = 10 * 1024 * 1024  # 10MB
+
     @staticmethod
     def search_file(file_path: str, pattern: 're.Pattern',
                     encoding: str, invert: bool = False,
                     context_lines: int = 0,
                     max_matches: int = 0) -> Optional[SearchResult]:
-        """对单个文件执行 Python 正则搜索"""
+        """对单个文件执行 Python 正则搜索（大文件自动切换流式模式）"""
+        try:
+            file_size = os.path.getsize(file_path)
+        except OSError:
+            return None
+
+        # 大文件 + 不需要上下文 → 流式搜索（节省内存，不卡）
+        if file_size > PythonBackend.STREAM_THRESHOLD and context_lines == 0:
+            return PythonBackend._search_file_stream(
+                file_path, pattern, encoding, invert, max_matches)
+
+        # 小文件 或 需要上下文 → 整体读取（上下文需要前后行）
+        return PythonBackend._search_file_full(
+            file_path, pattern, encoding, invert, context_lines, max_matches)
+
+    @staticmethod
+    def _search_file_stream(file_path: str, pattern: 're.Pattern',
+                            encoding: str, invert: bool,
+                            max_matches: int) -> Optional[SearchResult]:
+        """流式搜索：逐行读取不载入整个文件，适合大文件"""
+        result = SearchResult(path=file_path, encoding=encoding)
+        has_match = False
+
+        for line_num, line in TextDetector.iter_lines(file_path, encoding):
+            if pattern.search(line):
+                has_match = True
+                if not invert:
+                    result.matches.append({
+                        'line': line_num,
+                        'content': line,
+                    })
+                    if max_matches > 0 and len(result.matches) >= max_matches:
+                        break
+
+        if invert:
+            return result if not has_match else None
+        return result if has_match else None
+
+    @staticmethod
+    def _search_file_full(file_path: str, pattern: 're.Pattern',
+                          encoding: str, invert: bool,
+                          context_lines: int,
+                          max_matches: int) -> Optional[SearchResult]:
+        """整体读取搜索：支持上下文行，适合中小文件"""
         content = TextDetector.read_text_file(file_path, encoding)
         if content is None:
             return None
@@ -640,6 +745,175 @@ class PythonBackend:
 
 
 # ============================================================
+# Hash / Base64 对比搜索
+# ============================================================
+
+class HashMatcher:
+    """
+    文件指纹对比：通过 MD5/SHA1/SHA256 或 Base64 内容查找文件
+
+    用途（取证场景）:
+    - 已知一个文件的 hash，在目录中找出所有副本
+    - 已知 base64 编码的内容，搜索原文或编码形式
+    """
+
+    ALGORITHMS = ('md5', 'sha1', 'sha256', 'sha512')
+
+    @staticmethod
+    def compute_file_hash(file_path: str, algorithm: str = 'sha256') -> Optional[str]:
+        """计算文件 hash"""
+        try:
+            h = hashlib.new(algorithm)
+            with open(file_path, 'rb') as f:
+                while True:
+                    chunk = f.read(65536)
+                    if not chunk:
+                        break
+                    h.update(chunk)
+            return h.hexdigest()
+        except (OSError, ValueError):
+            return None
+
+    @staticmethod
+    def find_by_hash(target_path: str, target_hash: str,
+                     algorithm: str = 'sha256',
+                     exclude_dirs: Optional[Set[str]] = None) -> List[SearchResult]:
+        """在目录中查找与给定 hash 匹配的文件"""
+        exclude = exclude_dirs or {'.git'}
+        target_hash = target_hash.lower().strip()
+        results = []
+
+        # 自动检测 hash 算法（按长度）
+        if algorithm == 'auto':
+            hash_len = len(target_hash)
+            algo_by_len = {32: 'md5', 40: 'sha1', 64: 'sha256', 128: 'sha512'}
+            algorithm = algo_by_len.get(hash_len, 'sha256')
+
+        for root, dirs, files in os.walk(target_path, topdown=True):
+            dirs[:] = [d for d in dirs if d not in exclude]
+            for fname in files:
+                fpath = os.path.join(root, fname)
+                file_hash = HashMatcher.compute_file_hash(fpath, algorithm)
+                if file_hash and file_hash == target_hash:
+                    r = SearchResult(path=fpath)
+                    r.encoding = algorithm
+                    r.matches = [{'line': 0, 'content': f'{algorithm}:{file_hash}'}]
+                    results.append(r)
+        return results
+
+    @staticmethod
+    def find_by_base64(target_path: str, query: str,
+                       exclude_dirs: Optional[Set[str]] = None) -> List[SearchResult]:
+        """
+        Base64 双向搜索:
+        - 将 query 编码为 base64，在文件中搜索编码后的字符串
+        - 将 query 作为 base64 尝试解码，搜索解码后的原文
+        """
+        exclude = exclude_dirs or {'.git'}
+        search_terms = set()
+
+        # 原文
+        search_terms.add(query)
+
+        # query → base64 编码
+        try:
+            encoded = base64.b64encode(query.encode('utf-8')).decode('ascii')
+            search_terms.add(encoded)
+        except Exception:
+            pass
+
+        # query 作为 base64 → 解码为原文
+        try:
+            decoded = base64.b64decode(query, validate=True).decode('utf-8')
+            search_terms.add(decoded)
+        except Exception:
+            pass
+
+        # 用所有 search_terms 搜索
+        pattern = re.compile('|'.join(re.escape(t) for t in search_terms), re.IGNORECASE)
+        results = []
+
+        for root, dirs, files in os.walk(target_path, topdown=True):
+            dirs[:] = [d for d in dirs if d not in exclude]
+            for fname in files:
+                fpath = os.path.join(root, fname)
+                is_text, enc = TextDetector.is_text_file(fpath)
+                if not is_text:
+                    continue
+
+                # 流式逐行搜索，不一次性载入大文件
+                file_matches = []
+                for line_num, line in TextDetector.iter_lines(fpath, enc):
+                    m = pattern.search(line)
+                    if m:
+                        matched_term = m.group()
+                        form = 'original'
+                        if matched_term != query:
+                            try:
+                                base64.b64decode(matched_term, validate=True)
+                                form = 'base64'
+                            except Exception:
+                                form = 'decoded'
+                        file_matches.append({
+                            'line': line_num,
+                            'content': line,
+                            'match_form': form,
+                        })
+
+                if file_matches:
+                    r = SearchResult(path=fpath, matches=file_matches, encoding=enc)
+                    results.append(r)
+
+        return results
+
+
+# ============================================================
+# 并行分群搜索加速
+# ============================================================
+
+def parallel_chunk_search(target_path: str, searcher_factory,
+                          max_workers: int = 8) -> List[SearchResult]:
+    """
+    并行分群搜索：将目录按子目录分 chunk，每个 chunk 并行搜索
+
+    比单线程 os.walk + 逐文件搜索快，因为:
+    1. I/O 密集型任务天然适合多线程
+    2. 每个子目录独立搜索，无锁竞争
+    3. rg 已经内部并行，这里主要加速 Python 回退路径
+    """
+    # 收集一级子目录作为并行 chunk
+    chunks = []
+    try:
+        for entry in os.scandir(target_path):
+            if entry.is_dir() and entry.name != '.git':
+                chunks.append(entry.path)
+            elif entry.is_file():
+                chunks.append(entry.path)  # 根目录下的文件单独一组
+    except PermissionError:
+        return []
+
+    if not chunks:
+        return []
+
+    all_results: List[SearchResult] = []
+
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(chunks))) as executor:
+        futures = {}
+        for chunk in chunks:
+            searcher = searcher_factory(chunk)
+            futures[executor.submit(searcher.search)] = chunk
+
+        for future in as_completed(futures):
+            try:
+                results = future.result()
+                all_results.extend(results)
+            except Exception as e:
+                logger.debug(f"分群搜索出错 {futures[future]}: {e}")
+
+    return all_results
+
+
+# ============================================================
 # 主搜索器（编排层，不重复造轮子）
 # ============================================================
 
@@ -665,6 +939,10 @@ class DocSearcher:
                  max_size: Optional[int] = None,
                  after: Optional[datetime] = None,
                  before: Optional[datetime] = None,
+                 created_after: Optional[datetime] = None,
+                 created_before: Optional[datetime] = None,
+                 date_field: str = 'mtime',
+                 version_filter: Optional[str] = None,
                  include_patterns: Optional[List[str]] = None,
                  exclude_patterns: Optional[List[str]] = None,
                  exclude_dirs: Optional[List[str]] = None,
@@ -687,6 +965,10 @@ class DocSearcher:
         self.max_size = max_size
         self.after = after
         self.before = before
+        self.created_after = created_after
+        self.created_before = created_before
+        self.date_field = date_field  # 'mtime', 'ctime', 'both'
+        self.version_filter = version_filter
         self.include_patterns = include_patterns or []
         self.exclude_patterns = exclude_patterns or []
         self.exclude_dirs = set(exclude_dirs or [])
@@ -932,14 +1214,91 @@ class DocSearcher:
                 continue
             if self.max_size is not None and r.size > self.max_size:
                 continue
+
+            # 修改日期筛选 (--after / --before)
             if self.after is not None:
                 if datetime.fromtimestamp(r.modified) < self.after:
                     continue
             if self.before is not None:
                 if datetime.fromtimestamp(r.modified) > self.before:
                     continue
+
+            # 创建日期筛选 (--created-after / --created-before)
+            if self.created_after is not None:
+                if datetime.fromtimestamp(r.created) < self.created_after:
+                    continue
+            if self.created_before is not None:
+                if datetime.fromtimestamp(r.created) > self.created_before:
+                    continue
+
+            # 版本号筛选 (--version)
+            if self.version_filter is not None:
+                if not self._match_version(r.path, self.version_filter):
+                    continue
+
             filtered.append(r)
         return filtered
+
+    @staticmethod
+    def _match_version(file_path: str, version_spec: str) -> bool:
+        """
+        检查文件路径或内容是否匹配版本号规格
+
+        version_spec 格式:
+          "1.2.3"   精确匹配
+          ">1.0"    大于
+          ">=2.0"   大于等于
+          "<3.0"    小于
+          "1.x"     1.开头的任意版本
+          "1.2.*"   通配
+        """
+        # 从路径中提取版本号
+        m = VERSION_PATTERN.search(file_path)
+        if not m:
+            return False
+        file_ver = m.group(1)
+
+        spec = version_spec.strip()
+
+        # 通配: 1.x, 1.2.*, 2.x.x — 允许后续有更多子版本号
+        if 'x' in spec.lower() or '*' in spec:
+            pat = spec.lower().replace('.', r'\.').replace('x', r'\d+').replace('*', r'\d+')
+            return bool(re.match(pat + r'(\.\d+)*$', file_ver))
+
+        # 比较运算: >=, >, <=, <
+        cmp_m = re.match(r'^(>=|<=|>|<)\s*(.+)$', spec)
+        if cmp_m:
+            op, ver = cmp_m.group(1), cmp_m.group(2)
+            cmp = DocSearcher._compare_versions(file_ver, ver)
+            if op == '>' and cmp <= 0:
+                return False
+            if op == '>=' and cmp < 0:
+                return False
+            if op == '<' and cmp >= 0:
+                return False
+            if op == '<=' and cmp > 0:
+                return False
+            return True
+
+        # 精确匹配（前缀）
+        return file_ver == spec or file_ver.startswith(spec + '.')
+
+    @staticmethod
+    def _compare_versions(a: str, b: str) -> int:
+        """比较两个版本号，返回 -1, 0, 1"""
+        # 去掉 pre-release 后缀先比数字部分
+        a_parts = [int(x) for x in re.split(r'[-+]', a)[0].split('.') if x.isdigit()]
+        b_parts = [int(x) for x in re.split(r'[-+]', b)[0].split('.') if x.isdigit()]
+        # 补齐长度
+        max_len = max(len(a_parts), len(b_parts))
+        a_parts.extend([0] * (max_len - len(a_parts)))
+        b_parts.extend([0] * (max_len - len(b_parts)))
+        for av, bv in zip(a_parts, b_parts):
+            if av < bv:
+                return -1
+            if av > bv:
+                return 1
+        return 0
 
     def _sort(self, results: List[SearchResult]) -> List[SearchResult]:
         key_map = {
@@ -947,13 +1306,15 @@ class DocSearcher:
             'name': lambda r: os.path.basename(r.path).lower(),
             'size': lambda r: r.size,
             'date': lambda r: r.modified,
+            'mtime': lambda r: r.modified,
+            'ctime': lambda r: r.created,
             'matches': lambda r: r.match_count,
         }
         key_func = key_map.get(self.sort_by, key_map['path'])
         return sorted(results, key=key_func, reverse=self.sort_reverse)
 
     def get_summary(self) -> Dict[str, Any]:
-        return {
+        summary = {
             'target_path': self.target_path,
             'keyword': self.keyword,
             'regex': self.regex_pattern,
@@ -961,6 +1322,9 @@ class DocSearcher:
             'case_sensitive': self.case_sensitive,
             **self.stats,
         }
+        if self.version_filter:
+            summary['version_filter'] = self.version_filter
+        return summary
 
 
 # ============================================================
@@ -985,12 +1349,94 @@ def parse_size(size_str: str) -> int:
 
 
 def parse_date(date_str: str) -> datetime:
+    """
+    解析日期字符串，支持:
+    1. 标准格式: YYYY-MM-DD, YYYY/MM/DD, YYYYMMDD, YYYY-MM-DD HH:MM:SS
+    2. 快捷符号 (缩写优先):
+         td / today       → 今天 00:00
+         yd / yesterday   → 昨天 00:00
+         tw / thisweek    → 本周一 00:00
+         lw / lastweek    → 上周一 00:00
+         tm / thismonth   → 本月1日 00:00
+         lm / lastmonth   → 上月1日 00:00
+         ty / thisyear    → 今年1月1日 00:00
+         ly / lastyear    → 去年1月1日 00:00
+    3. 相对偏移:
+         Nd  → N 天前  (如 3d = 3天前, 7d = 一周前, 30d = 一个月前)
+         Nh  → N 小时前 (如 1h, 6h, 24h)
+         Nw  → N 周前   (如 1w, 2w)
+    4. Unix 时间戳: @1700000000 (以 @ 开头的纯数字)
+    """
+    s = date_str.strip().lower()
+    now = datetime.now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # 快捷符号表
+    shortcuts = {
+        'td':        today_start,
+        'today':     today_start,
+        'yd':        today_start - timedelta(days=1),
+        'yesterday': today_start - timedelta(days=1),
+        'tw':        today_start - timedelta(days=today_start.weekday()),
+        'thisweek':  today_start - timedelta(days=today_start.weekday()),
+        'lw':        today_start - timedelta(days=today_start.weekday() + 7),
+        'lastweek':  today_start - timedelta(days=today_start.weekday() + 7),
+        'tm':        today_start.replace(day=1),
+        'thismonth': today_start.replace(day=1),
+        'ty':        today_start.replace(month=1, day=1),
+        'thisyear':  today_start.replace(month=1, day=1),
+    }
+
+    # lm / lastmonth
+    if s in ('lm', 'lastmonth'):
+        if now.month == 1:
+            return today_start.replace(year=now.year - 1, month=12, day=1)
+        return today_start.replace(month=now.month - 1, day=1)
+
+    # ly / lastyear
+    if s in ('ly', 'lastyear'):
+        return today_start.replace(year=now.year - 1, month=1, day=1)
+
+    if s in shortcuts:
+        return shortcuts[s]
+
+    # 相对偏移: Nd, Nh, Nw
+    rel = re.match(r'^(\d+)\s*(d|h|w)$', s)
+    if rel:
+        n = int(rel.group(1))
+        unit = rel.group(2)
+        if unit == 'd':
+            return now - timedelta(days=n)
+        elif unit == 'h':
+            return now - timedelta(hours=n)
+        elif unit == 'w':
+            return now - timedelta(weeks=n)
+
+    # Unix 时间戳: @1700000000
+    if s.startswith('@') and s[1:].isdigit():
+        return datetime.fromtimestamp(int(s[1:]))
+
+    # 标准日期格式
     for fmt in ('%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '%Y/%m/%d', '%Y%m%d'):
         try:
-            return datetime.strptime(date_str, fmt)
+            return datetime.strptime(date_str.strip(), fmt)
         except ValueError:
             continue
-    raise ValueError(f"无法解析日期: {date_str}，支持: YYYY-MM-DD, YYYY/MM/DD, YYYYMMDD")
+
+    # 列出所有快捷符号帮助
+    raise ValueError(
+        f"无法解析日期: {date_str}\n"
+        f"支持格式: YYYY-MM-DD | YYYY/MM/DD | YYYYMMDD | @timestamp\n"
+        f"快捷符号: td(今天) yd(昨天) tw(本周) lw(上周) tm(本月) lm(上月) "
+        f"ty(今年) ly(去年)\n"
+        f"相对偏移: 3d(3天前) 7d 30d 1h 6h 24h 1w 2w"
+    )
+
+
+# 版本号正则: v1.2.3, 1.0.0-beta, 2.3.4.5 等
+VERSION_PATTERN = re.compile(
+    r'(?:^|[/\\])v?(\d+\.\d+(?:\.\d+){0,3}(?:-[\w.]+)?)'
+)
 
 
 # ============================================================
@@ -1199,29 +1645,39 @@ def build_parser() -> argparse.ArgumentParser:
   python doc_searcher.py search -r "[\\w.]+@[\\w.]+" /project
   python doc_searcher.py search --invert "copyright" /project
 
+  # 按文件类型搜索
+  python doc_searcher.py search "TODO" . --type py
+  python doc_searcher.py search "password" . --type config
+
+  # 日期筛选 (支持快捷符号)
+  python doc_searcher.py search "key" . --after td          # 今天修改的
+  python doc_searcher.py search "key" . --after 7d          # 最近7天修改的
+  python doc_searcher.py search "key" . --after lw --before tw  # 上周修改的
+  python doc_searcher.py search "key" . --created-after tm  # 本月创建的
+  python doc_searcher.py search "key" . --after @1700000000 # Unix时间戳
+
+  # 版本号筛选
+  python doc_searcher.py search "bug" . --version ">1.0"
+  python doc_searcher.py search "fix" . --version "2.x"
+
   # 管道组合
   python doc_searcher.py search "TODO" . --format path | xargs wc -l
-  python doc_searcher.py search "error" . --format grep | sort -t: -k1
-  python doc_searcher.py search "key" . -0 | xargs -0 ls -la
   find . -name "*.conf" | python doc_searcher.py search "password" -
 
-  # 自定义输出格式
-  python doc_searcher.py search "def " . --format custom --format-str "{filename}:{line} {content}"
+  # Hash 对比
+  python doc_searcher.py hash abc123def456... /target/dir
+  python doc_searcher.py hash abc123def456... /target/dir --algo md5
 
-  # 格式化输出
-  python doc_searcher.py search "TODO" . --format csv > results.csv
-  python doc_searcher.py search "error" /var/log --json | jq '.results[].path'
+  # Base64 双向搜索
+  python doc_searcher.py base64 "secret_key" /project
 
-输出格式 (--format):
-  text     人类可读（默认，终端交互）
-  grep     path:line:content（兼容 grep，管道友好）
-  path     仅路径，每行一个
-  path0    路径以 \\0 分隔（配合 xargs -0）
-  csv      CSV 格式
-  json     JSON 格式
-  custom   自定义模板（需配合 --format-str）
+  # 并行加速
+  python doc_searcher.py search "keyword" /large/dir --parallel 8
 
-注: stdout 被管道/重定向时自动切换为 grep 格式
+日期快捷: td(今天) yd(昨天) tw(本周) lw(上周) tm(本月) lm(上月) ty(今年) ly(去年)
+          3d(3天前) 7d 30d 1h 6h 24h 1w 2w @timestamp
+文件类型:  py js ts web java c go rust ruby php shell config xml doc data sql log
+输出格式:  text grep path path0 csv json custom
         """)
 
     sub = parser.add_subparsers(dest='command', help='子命令')
@@ -1238,13 +1694,22 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument('--max-matches', type=int, default=0, metavar='N', help='每文件最大匹配数')
     sp.add_argument('--min-size', type=str, default=None, help='最小文件大小 (如 1KB, 5MB)')
     sp.add_argument('--max-size', type=str, default=None, help='最大文件大小')
-    sp.add_argument('--after', type=str, default=None, help='修改日期下限 (YYYY-MM-DD)')
-    sp.add_argument('--before', type=str, default=None, help='修改日期上限')
+    sp.add_argument('--after', type=str, default=None,
+                    help='修改日期下限 (YYYY-MM-DD 或快捷: td yd tw lw tm lm ty ly 3d 7d 1h @ts)')
+    sp.add_argument('--before', type=str, default=None,
+                    help='修改日期上限')
+    sp.add_argument('--created-after', type=str, default=None,
+                    help='创建日期下限 (同 --after 格式)')
+    sp.add_argument('--created-before', type=str, default=None,
+                    help='创建日期上限')
+    sp.add_argument('--version', type=str, default=None, metavar='SPEC',
+                    help='版本号筛选 (如 1.2.3, >1.0, >=2.0, 1.x, 1.2.*)')
     sp.add_argument('-i', '--include', type=str, nargs='+', default=None, help='文件名 glob 白名单')
     sp.add_argument('-e', '--exclude', type=str, nargs='+', default=None, help='文件名 glob 黑名单')
     sp.add_argument('--exclude-dir', type=str, nargs='+', default=None, help='排除目录')
     sp.add_argument('--no-recursive', action='store_true', help='不递归')
-    sp.add_argument('--sort', default='path', choices=['path', 'name', 'size', 'date', 'matches'])
+    sp.add_argument('--sort', default='path',
+                    choices=['path', 'name', 'size', 'date', 'mtime', 'ctime', 'matches'])
     sp.add_argument('--desc', action='store_true', help='降序')
     sp.add_argument('--max-results', type=int, default=0, metavar='N')
     sp.add_argument('-v', '--verbose', action='store_true', help='详细输出')
@@ -1259,14 +1724,23 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument('--format-str', default=None, metavar='TEMPLATE',
                     help='自定义格式模板，占位符: {path} {filename} {line} {content} '
                          '{encoding} {size} {date} {matches}')
+    # 文件类型
+    type_names = ', '.join(sorted(FILE_TYPE_PRESETS.keys()))
+    sp.add_argument('-t', '--type', default=None, metavar='TYPE',
+                    help=f'文件类型预设: {type_names}')
+    # 并行加速
+    sp.add_argument('--parallel', type=int, default=0, metavar='N',
+                    help='并行分群搜索线程数（0=不启用，建议 4-16）')
 
     # scan
     sp2 = sub.add_parser('scan', help='列出目录下所有文本文件')
     sp2.add_argument('path', help='扫描路径')
     sp2.add_argument('--min-size', type=str, default=None)
     sp2.add_argument('--max-size', type=str, default=None)
-    sp2.add_argument('--after', type=str, default=None)
+    sp2.add_argument('--after', type=str, default=None, help='修改日期下限 (支持快捷: td yd 3d 7d 等)')
     sp2.add_argument('--before', type=str, default=None)
+    sp2.add_argument('--created-after', type=str, default=None)
+    sp2.add_argument('--created-before', type=str, default=None)
     sp2.add_argument('-i', '--include', type=str, nargs='+', default=None)
     sp2.add_argument('-e', '--exclude', type=str, nargs='+', default=None)
     sp2.add_argument('--exclude-dir', type=str, nargs='+', default=None)
@@ -1287,6 +1761,28 @@ def build_parser() -> argparse.ArgumentParser:
     sp3.add_argument('path', help='目标目录')
     sp3.add_argument('--json', action='store_true')
 
+    # hash
+    sp4 = sub.add_parser('hash', help='通过文件 hash 查找匹配文件（取证用）')
+    sp4.add_argument('hash_value', help='目标 hash 值 (MD5/SHA1/SHA256/SHA512)')
+    sp4.add_argument('path', help='搜索目录')
+    sp4.add_argument('-a', '--algo', default='auto',
+                     choices=['auto', 'md5', 'sha1', 'sha256', 'sha512'],
+                     help='hash 算法 (auto=按长度自动检测)')
+    sp4.add_argument('--json', action='store_true', help='JSON 输出')
+    sp4.add_argument('-v', '--verbose', action='store_true')
+
+    # base64
+    sp5 = sub.add_parser('base64', help='Base64 双向搜索（同时搜原文和编码形式）')
+    sp5.add_argument('query', help='搜索内容（会同时搜索其 base64 编码/解码形式）')
+    sp5.add_argument('path', help='搜索目录')
+    sp5.add_argument('--json', action='store_true', help='JSON 输出')
+    sp5.add_argument('-v', '--verbose', action='store_true')
+
+    # help (详细帮助)
+    sp6 = sub.add_parser('help', help='查看详细帮助')
+    sp6.add_argument('topic', nargs='?', default='all',
+                     help='帮助主题: search date type hash base64 format pipe parallel version all')
+
     return parser
 
 
@@ -1306,6 +1802,12 @@ def cli_main(argv: Optional[List[str]] = None) -> int:
         return _cmd_scan(args)
     elif args.command == 'translate':
         return _cmd_translate(args)
+    elif args.command == 'hash':
+        return _cmd_hash(args)
+    elif args.command == 'base64':
+        return _cmd_base64(args)
+    elif args.command == 'help':
+        return _cmd_help(args)
     return 0
 
 
@@ -1339,6 +1841,18 @@ def _cmd_search(args) -> int:
     max_size = parse_size(args.max_size) if args.max_size else None
     after = parse_date(args.after) if args.after else None
     before = parse_date(args.before) if args.before else None
+    created_after = parse_date(args.created_after) if args.created_after else None
+    created_before = parse_date(args.created_before) if args.created_before else None
+
+    # --type 预设 → include_patterns
+    include_patterns = args.include or []
+    if args.type:
+        type_key = args.type.lower()
+        if type_key not in FILE_TYPE_PRESETS:
+            print(f"未知文件类型: {type_key}", file=sys.stderr)
+            print(f"可选: {', '.join(sorted(FILE_TYPE_PRESETS.keys()))}", file=sys.stderr)
+            return 1
+        include_patterns = FILE_TYPE_PRESETS[type_key] + include_patterns
 
     # 管道输入模式：path 为 - 或 stdin 非终端
     stdin_files = None
@@ -1348,7 +1862,6 @@ def _cmd_search(args) -> int:
         if not stdin_files:
             print("stdin 中无有效文件路径", file=sys.stderr)
             return 1
-        # 用第一个文件的目录做 target，后续用文件列表覆盖
         search_path = os.path.dirname(stdin_files[0]) or '.'
 
     searcher = DocSearcher(
@@ -1362,7 +1875,9 @@ def _cmd_search(args) -> int:
         recursive=not args.no_recursive,
         min_size=min_size, max_size=max_size,
         after=after, before=before,
-        include_patterns=args.include,
+        created_after=created_after, created_before=created_before,
+        version_filter=args.version,
+        include_patterns=include_patterns or None,
         exclude_patterns=args.exclude,
         exclude_dirs=args.exclude_dir,
         sort_by=args.sort, sort_reverse=args.desc,
@@ -1370,11 +1885,14 @@ def _cmd_search(args) -> int:
         max_results=args.max_results,
     )
 
-    # stdin 文件列表模式：直接搜索指定文件
+    # stdin 文件列表模式
     if stdin_files:
         results = _search_file_list(searcher, stdin_files)
         searcher.stats['files_matched'] = len(results)
         searcher.stats['total_matches'] = sum(r.match_count for r in results)
+    # 并行分群搜索模式
+    elif args.parallel > 0:
+        results = _parallel_search(searcher, args)
     else:
         results = searcher.search()
 
@@ -1386,12 +1904,90 @@ def _cmd_search(args) -> int:
         fmt=fmt, verbose=args.verbose,
         custom_template=args.format_str,
     )
-    # path0 格式不要加末尾换行
     if fmt == 'path0':
         sys.stdout.write(output)
     else:
         print(output)
     return 0
+
+
+def _parallel_search(searcher: DocSearcher, args) -> List[SearchResult]:
+    """并行分群搜索：将目录按子目录分 chunk，每个 chunk 独立搜索"""
+    target = searcher.target_path
+    max_workers = args.parallel
+
+    # 收集一级子目录
+    chunks = []
+    root_files = []
+    try:
+        for entry in os.scandir(target):
+            if entry.is_dir() and entry.name != '.git' and entry.name not in searcher.exclude_dirs:
+                chunks.append(entry.path)
+            elif entry.is_file():
+                root_files.append(entry.path)
+    except PermissionError:
+        return []
+
+    if not chunks and not root_files:
+        return []
+
+    all_results: List[SearchResult] = []
+
+    def search_chunk(chunk_path: str) -> List[SearchResult]:
+        """创建子搜索器搜索一个子目录"""
+        sub = DocSearcher(
+            target_path=chunk_path,
+            keyword=searcher.keyword,
+            regex_pattern=searcher.regex_pattern,
+            case_sensitive=searcher.case_sensitive,
+            invert=searcher.invert,
+            context_lines=searcher.context_lines,
+            max_matches_per_file=searcher.max_matches_per_file,
+            recursive=searcher.recursive,
+            min_size=searcher.min_size, max_size=searcher.max_size,
+            after=searcher.after, before=searcher.before,
+            created_after=searcher.created_after, created_before=searcher.created_before,
+            version_filter=searcher.version_filter,
+            include_patterns=searcher.include_patterns or None,
+            exclude_patterns=list(searcher.exclude_patterns) if searcher.exclude_patterns else None,
+            exclude_dirs=list(searcher.exclude_dirs) if searcher.exclude_dirs else None,
+            sort_by='path', sort_reverse=False,
+        )
+        return sub.search()
+
+    with ThreadPoolExecutor(max_workers=min(max_workers, max(len(chunks), 1))) as executor:
+        futures = {executor.submit(search_chunk, c): c for c in chunks}
+        for future in as_completed(futures):
+            try:
+                all_results.extend(future.result())
+            except Exception as e:
+                logger.debug(f"并行搜索出错 {futures[future]}: {e}")
+
+    # 搜索根目录下的文件
+    if root_files and searcher._py_pattern:
+        for fpath in root_files:
+            is_text, enc = TextDetector.is_text_file(fpath)
+            if not is_text:
+                continue
+            r = PythonBackend.search_file(
+                fpath, searcher._py_pattern, enc,
+                invert=searcher.invert,
+                context_lines=searcher.context_lines,
+                max_matches=searcher.max_matches_per_file,
+            )
+            if r:
+                all_results.append(r)
+
+    # 统计合并
+    searcher.stats['backend'] = f'parallel({max_workers})'
+    searcher.stats['files_matched'] = len(all_results)
+    searcher.stats['total_matches'] = sum(r.match_count for r in all_results)
+
+    # 应用排序
+    all_results = searcher._sort(all_results)
+    if searcher.max_results > 0:
+        all_results = all_results[:searcher.max_results]
+    return all_results
 
 
 def _search_file_list(searcher: DocSearcher, files: List[str]) -> List[SearchResult]:
@@ -1421,12 +2017,15 @@ def _cmd_scan(args) -> int:
     max_size = parse_size(args.max_size) if args.max_size else None
     after = parse_date(args.after) if args.after else None
     before = parse_date(args.before) if args.before else None
+    created_after = parse_date(args.created_after) if args.created_after else None
+    created_before = parse_date(args.created_before) if args.created_before else None
 
     searcher = DocSearcher(
         target_path=args.path,
         recursive=not args.no_recursive,
         min_size=min_size, max_size=max_size,
         after=after, before=before,
+        created_after=created_after, created_before=created_before,
         include_patterns=args.include,
         exclude_patterns=args.exclude,
         exclude_dirs=args.exclude_dir,
@@ -1480,6 +2079,378 @@ def _cmd_translate(args) -> int:
                 d = 'ZH→EN' if r['has_chinese'] else 'EN→ZH'
                 print(f"  [{d}] {r['original']:<{w}}  →  {r['translated']}")
             print(f"\n  共 {len(results)} 个文件名可翻译。")
+    return 0
+
+
+def _cmd_hash(args) -> int:
+    """hash 子命令：通过文件 hash 查找匹配文件"""
+    target = os.path.abspath(args.path)
+    if not os.path.isdir(target):
+        print(f"路径不存在: {target}", file=sys.stderr)
+        return 1
+
+    results = HashMatcher.find_by_hash(target, args.hash_value, algorithm=args.algo)
+
+    if args.json:
+        out = {
+            'hash': args.hash_value,
+            'algorithm': args.algo,
+            'matches': [r.to_dict() for r in results],
+        }
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+    else:
+        if not results:
+            print(f"未找到 hash 匹配的文件: {args.hash_value}")
+        else:
+            print(f"找到 {len(results)} 个匹配文件:")
+            for r in results:
+                size_str = format_size(r.size)
+                print(f"  {r.path}  ({size_str})")
+    return 0
+
+
+def _cmd_base64(args) -> int:
+    """base64 子命令：Base64 双向搜索"""
+    target = os.path.abspath(args.path)
+    if not os.path.isdir(target):
+        print(f"路径不存在: {target}", file=sys.stderr)
+        return 1
+
+    results = HashMatcher.find_by_base64(target, args.query)
+
+    if args.json:
+        out = {
+            'query': args.query,
+            'matches': [r.to_dict() for r in results],
+        }
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+    else:
+        if not results:
+            print(f"未找到 base64 相关匹配: {args.query}")
+        else:
+            print(f"找到 {len(results)} 个文件包含匹配:")
+            for r in results:
+                print(f"  {r.path}")
+                shown = r.matches[:3] if not args.verbose else r.matches
+                for m in shown:
+                    form_tag = f" [{m.get('match_form', '')}]" if m.get('match_form') else ''
+                    print(f"    L{m.get('line', '?')}: {m.get('content', '')[:80]}{form_tag}")
+                if not args.verbose and len(r.matches) > 3:
+                    print(f"    ... 还有 {len(r.matches) - 3} 处匹配")
+    return 0
+
+
+def _cmd_help(args) -> int:
+    """详细帮助 —— 按主题输出使用说明"""
+    topics = {
+        'search': """
+╔══════════════════════════════════════════════════════════════╗
+║  search — 搜索文件内容                                      ║
+╚══════════════════════════════════════════════════════════════╝
+
+  基本用法:
+    doc_searcher search "关键词" [路径]
+
+  参数:
+    关键词          要搜索的文本
+    路径            搜索目录（默认当前目录，用 - 从 stdin 读文件列表）
+    -r, --regex     关键词作为正则表达式
+    --invert        反查：找不包含关键词的文件
+    -s              区分大小写
+    -C N            显示匹配行前后 N 行上下文
+    --max-matches N 每文件最多匹配 N 次
+    --max-results N 最多返回 N 个文件
+    -v, --verbose   显示完整匹配内容
+
+  示例:
+    doc_searcher search "TODO" /project
+    doc_searcher search -r "\\bpassw(or)?d\\b" /etc --type config
+    doc_searcher search --invert "license" /src --type py
+""",
+
+        'date': """
+╔══════════════════════════════════════════════════════════════╗
+║  日期筛选 — --after / --before / --created-after/before     ║
+╚══════════════════════════════════════════════════════════════╝
+
+  --after  DATE    仅保留修改日期 >= DATE 的文件
+  --before DATE    仅保留修改日期 <= DATE 的文件
+  --created-after  仅保留创建日期 >= DATE 的文件
+  --created-before 仅保留创建日期 <= DATE 的文件
+
+  DATE 支持以下格式:
+
+  ┌────────────┬──────────────────────────────┐
+  │ 格式        │ 说明                          │
+  ├────────────┼──────────────────────────────┤
+  │ 2026-02-12 │ 标准日期 YYYY-MM-DD          │
+  │ 2026/02/12 │ 斜线分隔                      │
+  │ 20260212   │ 紧凑格式                      │
+  │ @170000000 │ Unix 时间戳 (秒)              │
+  ├────────────┼──────────────────────────────┤
+  │ td         │ 今天 00:00 (today)           │
+  │ yd         │ 昨天 00:00 (yesterday)       │
+  │ tw         │ 本周一 00:00 (this week)     │
+  │ lw         │ 上周一 00:00 (last week)     │
+  │ tm         │ 本月 1 日 (this month)       │
+  │ lm         │ 上月 1 日 (last month)       │
+  │ ty         │ 今年 1/1 (this year)         │
+  │ ly         │ 去年 1/1 (last year)         │
+  ├────────────┼──────────────────────────────┤
+  │ 3d         │ 3 天前                        │
+  │ 7d         │ 7 天前                        │
+  │ 30d        │ 30 天前                       │
+  │ 1h         │ 1 小时前                      │
+  │ 6h         │ 6 小时前                      │
+  │ 1w         │ 1 周前                        │
+  │ 2w         │ 2 周前                        │
+  └────────────┴──────────────────────────────┘
+
+  示例:
+    doc_searcher search "key" . --after td               # 今天修改的
+    doc_searcher search "key" . --after 7d               # 最近 7 天
+    doc_searcher search "key" . --after lw --before tw   # 上周修改的
+    doc_searcher search "key" . --created-after tm       # 本月创建的
+    doc_searcher scan . --after 30d --sort mtime --desc  # 近 30 天按修改时间倒序
+
+  排序: --sort mtime (按修改时间), --sort ctime (按创建时间)
+""",
+
+        'type': """
+╔══════════════════════════════════════════════════════════════╗
+║  --type — 文件类型预设                                      ║
+╚══════════════════════════════════════════════════════════════╝
+
+  -t TYPE, --type TYPE    按预设类型筛选文件
+
+  ┌──────────┬──────────────────────────────────────────────┐
+  │ 类型      │ 包含扩展名                                    │
+  ├──────────┼──────────────────────────────────────────────┤
+  │ py       │ .py .pyw .pyi                                │
+  │ js       │ .js .jsx .mjs .cjs                           │
+  │ ts       │ .ts .tsx                                      │
+  │ web      │ .html .htm .css .scss .js .ts .vue .svelte   │
+  │ java     │ .java .kt .scala .gradle                     │
+  │ c        │ .c .h .cpp .hpp .cc .cxx                     │
+  │ go       │ .go                                           │
+  │ rust     │ .rs                                           │
+  │ ruby     │ .rb .erb .gemspec                             │
+  │ php      │ .php                                          │
+  │ shell    │ .sh .bash .zsh .fish .bat .cmd .ps1           │
+  │ config   │ .json .yaml .yml .toml .ini .cfg .conf .env  │
+  │ xml      │ .xml .xsl .xsd .svg .plist                   │
+  │ doc      │ .md .rst .txt .tex .adoc .org                │
+  │ data     │ .csv .tsv .jsonl .ndjson                     │
+  │ sql      │ .sql                                          │
+  │ proto    │ .proto .graphql                               │
+  │ log      │ .log .out .err                                │
+  │ all-text │ * (不筛选扩展名，靠内容判定)                    │
+  └──────────┴──────────────────────────────────────────────┘
+
+  --type 可与 -i (include) 叠加使用。
+
+  示例:
+    doc_searcher search "TODO" . --type py
+    doc_searcher search "password" . --type config
+    doc_searcher search "SELECT" . --type sql
+""",
+
+        'hash': """
+╔══════════════════════════════════════════════════════════════╗
+║  hash — 文件 hash 指纹对比 (取证用)                         ║
+╚══════════════════════════════════════════════════════════════╝
+
+  用法: doc_searcher hash <hash值> <搜索目录> [选项]
+
+  根据文件的 MD5/SHA1/SHA256/SHA512 查找目录中所有副本。
+  算法默认按 hash 长度自动检测:
+    32字符 → MD5 | 40字符 → SHA1 | 64字符 → SHA256 | 128字符 → SHA512
+
+  选项:
+    -a, --algo ALGO   指定算法 (auto/md5/sha1/sha256/sha512)
+    --json            JSON 输出
+    -v                详细模式
+
+  示例:
+    doc_searcher hash d41d8cd98f00b204e9800998ecf8427e /target     # auto=MD5
+    doc_searcher hash abc123... /dir --algo sha256 --json
+""",
+
+        'base64': """
+╔══════════════════════════════════════════════════════════════╗
+║  base64 — Base64 双向搜索                                   ║
+╚══════════════════════════════════════════════════════════════╝
+
+  用法: doc_searcher base64 <内容> <搜索目录>
+
+  同时搜索三种形式:
+    1. 原文           → "secret_key"
+    2. 原文的 base64  → "c2VjcmV0X2tleQ=="
+    3. 若输入本身是 base64，解码后的原文
+
+  适合取证场景: 在代码中搜索被 base64 编码隐藏的敏感信息。
+
+  示例:
+    doc_searcher base64 "admin:password" /project
+    doc_searcher base64 "YWRtaW46cGFzc3dvcmQ=" /project --json
+""",
+
+        'format': """
+╔══════════════════════════════════════════════════════════════╗
+║  --format — 输出格式                                        ║
+╚══════════════════════════════════════════════════════════════╝
+
+  --format FORMAT   指定输出格式
+
+  ┌────────┬──────────────────────────────────────────────┐
+  │ 格式    │ 说明                                          │
+  ├────────┼──────────────────────────────────────────────┤
+  │ text   │ 人类可读（默认终端格式，带统计和装饰）        │
+  │ grep   │ path:line:content（grep 兼容，管道自动切换） │
+  │ path   │ 仅文件路径，每行一个                          │
+  │ path0  │ 路径以 \\0 分隔（配合 xargs -0）              │
+  │ csv    │ CSV 格式 path,line,encoding,size,content      │
+  │ json   │ JSON 结构化输出（含统计信息）                 │
+  │ custom │ 自定义模板（需配合 --format-str）             │
+  └────────┴──────────────────────────────────────────────┘
+
+  --format-str 占位符: {path} {filename} {line} {content}
+                       {encoding} {size} {date} {matches}
+
+  快捷标志:
+    --json   等同 --format json
+    -0       等同 --format path0
+
+  自动检测: stdout 被管道重定向时自动切换为 grep 格式。
+
+  示例:
+    doc_searcher search "TODO" . --format path | wc -l
+    doc_searcher search "key" . --format csv > results.csv
+    doc_searcher search "key" . --format custom --format-str "{filename}:{line} {content}"
+""",
+
+        'pipe': """
+╔══════════════════════════════════════════════════════════════╗
+║  管道组合                                                    ║
+╚══════════════════════════════════════════════════════════════╝
+
+  输入管道 (stdin → doc_searcher):
+    将其他命令的文件列表输入给 doc_searcher 搜索:
+    find /var/log -name "*.log" | doc_searcher search "error" -
+    fd ".conf" | doc_searcher search "password" -
+
+  输出管道 (doc_searcher → 其他命令):
+    doc_searcher search "TODO" . --format path | xargs wc -l
+    doc_searcher search "key" . -0 | xargs -0 rm
+    doc_searcher scan . --format path | head -20
+
+  组合示例:
+    # 找所有含 TODO 的 Python 文件并统计行数
+    doc_searcher search "TODO" . --type py --format path | xargs wc -l
+
+    # 找最近 7 天修改的配置文件中的密码
+    doc_searcher search "password" . --type config --after 7d --format grep
+
+    # 用 fzf 交互选择搜索结果
+    doc_searcher search "class" . --type py --format path | fzf | xargs code
+""",
+
+        'parallel': """
+╔══════════════════════════════════════════════════════════════╗
+║  --parallel — 并行加速搜索                                   ║
+╚══════════════════════════════════════════════════════════════╝
+
+  --parallel N   使用 N 个线程并行搜索（将目录按子目录分 chunk）
+
+  原理: 将搜索目标的一级子目录拆分为 N 个独立任务，并行执行。
+  适用场景: 大目录 + Python 回退搜索（rg 本身已内置并行）。
+
+  建议线程数:
+    SSD     →  8-16
+    HDD     →  4-8
+    网络盘  →  2-4
+
+  示例:
+    doc_searcher search "keyword" /large/dir --parallel 8
+    doc_searcher search "TODO" . --type py --parallel 4
+""",
+
+        'version': """
+╔══════════════════════════════════════════════════════════════╗
+║  --version — 版本号筛选                                      ║
+╚══════════════════════════════════════════════════════════════╝
+
+  --version SPEC   仅保留路径中含匹配版本号的文件
+
+  从文件路径中提取版本号（如 v1.2.3, 1.0.0-beta），然后匹配。
+
+  ┌──────────┬──────────────────────────────────────────┐
+  │ 规格      │ 含义                                      │
+  ├──────────┼──────────────────────────────────────────┤
+  │ 1.2.3    │ 精确匹配 1.2.3                            │
+  │ 1.2      │ 匹配 1.2 或 1.2.x                        │
+  │ >1.0     │ 版本 > 1.0                                │
+  │ >=2.0    │ 版本 >= 2.0                               │
+  │ <3.0     │ 版本 < 3.0                                │
+  │ <=1.5    │ 版本 <= 1.5                               │
+  │ 1.x      │ 1.开头的任意版本                           │
+  │ 2.3.*    │ 2.3.开头的任意版本                         │
+  └──────────┴──────────────────────────────────────────┘
+
+  示例:
+    doc_searcher search "bug" /releases --version ">1.0"
+    doc_searcher search "fix" /packages --version "2.x"
+    doc_searcher scan /node_modules --version ">=3.0"
+""",
+    }
+
+    topic = args.topic.lower() if args.topic else 'all'
+
+    if topic == 'all':
+        # 输出概览
+        print("""
+╔══════════════════════════════════════════════════════════════╗
+║          HIDRS 文档内容搜索器 — 完整帮助                     ║
+╚══════════════════════════════════════════════════════════════╝
+
+  子命令:
+    search     搜索文件内容（关键词/正则/反查）
+    scan       列出目录下所有文本文件
+    hash       通过 MD5/SHA 查找文件副本
+    base64     Base64 双向搜索
+    translate  批量翻译文件名（中↔英）
+    help       查看详细帮助
+
+  帮助主题 (doc_searcher help <主题>):
+    search     搜索功能详解
+    date       日期筛选 + 快捷符号
+    type       文件类型预设
+    hash       Hash 指纹对比
+    base64     Base64 搜索
+    format     输出格式
+    pipe       管道组合
+    parallel   并行加速
+    version    版本号筛选
+
+  快速上手:
+    doc_searcher search "关键词" /路径          基本搜索
+    doc_searcher search "key" . --type py       按类型搜
+    doc_searcher search "key" . --after 7d      最近7天
+    doc_searcher search "key" . --format json   JSON输出
+    doc_searcher hash <sha256> /dir             hash对比
+    doc_searcher base64 "secret" /dir           base64搜索
+
+  搜索后端: ripgrep → grep → findstr(Win) → Python (自动选择)
+  编码检测: UTF-8, GBK, Big5, Shift_JIS, EUC-KR 等自动识别
+""")
+        return 0
+
+    if topic in topics:
+        print(topics[topic])
+    else:
+        print(f"未知帮助主题: {topic}")
+        print(f"可用主题: {', '.join(sorted(topics.keys()))}")
+        return 1
     return 0
 
 
