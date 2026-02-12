@@ -12,7 +12,7 @@
   4. Agent 友好的结构化 JSON 输出
   5. 对 rg 跳过的非 UTF-8 文件做回退搜索
 
-搜索后端优先级: ripgrep → grep → Python 内置
+搜索后端优先级: ripgrep -> grep -> Python 内置
 
 作者: HIDRS Team
 日期: 2026-02-12
@@ -49,7 +49,55 @@ try:
 except ImportError:
     HAS_TRANSLATOR = False
 
+# 快速 JSON 解析: orjson > ujson > 标准库 json
+_json_lib_name = 'json'  # 用于 debug 输出
+try:
+    import orjson as _fast_json
+    _json_lib_name = 'orjson'
+except ImportError:
+    try:
+        import ujson as _fast_json
+        _json_lib_name = 'ujson'
+    except ImportError:
+        _fast_json = json  # type: ignore[assignment]
+
+# 内存映射
+import mmap
+import atexit
+
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# 安全输出（Windows GBK 控制台不支持 emoji/box-drawing 等 Unicode）
+# ============================================================
+
+def safe_print(*args, **kwargs):
+    """print() 的安全替代，自动处理 Windows 控制台编码问题。
+
+    支持 file=sys.stderr 等参数，回退时使用目标流的 encoding。
+    """
+    try:
+        print(*args, **kwargs)
+    except UnicodeEncodeError:
+        # 回退：把不可编码的字符替换为 ?
+        target = kwargs.get('file', sys.stdout)
+        enc = getattr(target, 'encoding', None) or 'utf-8'
+        text = ' '.join(str(a) for a in args)
+        safe_text = text.encode(enc, errors='replace').decode(enc, errors='replace')
+        # 保留原有 kwargs (file, end, sep, flush 等)
+        safe_kwargs = {k: v for k, v in kwargs.items() if k not in ('end',)}
+        print(safe_text, **safe_kwargs, end=kwargs.get('end', '\n'))
+
+
+def safe_write(text: str):
+    """sys.stdout.write 的安全替代"""
+    try:
+        sys.stdout.write(text)
+    except UnicodeEncodeError:
+        enc = sys.stdout.encoding or 'utf-8'
+        sys.stdout.write(text.encode(enc, errors='replace').decode(enc, errors='replace'))
+
 
 # ============================================================
 # 常量
@@ -136,7 +184,7 @@ class TextDetector:
             if encoding:
                 return True, encoding
 
-            # 空字节 → 可能是二进制或 UTF-16 无 BOM
+            # 空字节 -> 可能是二进制或 UTF-16 无 BOM
             null_ratio = sample.count(b'\x00') / len(sample) if sample else 0
             if null_ratio > 0.1:
                 encoding = TextDetector._try_utf16_no_bom(sample)
@@ -144,7 +192,7 @@ class TextDetector:
                     return True, encoding
                 return False, None
 
-            # 控制字符过多 → 二进制
+            # 控制字符过多 -> 二进制
             non_text = sum(1 for b in sample if b < 0x20 and b not in TextDetector.ALLOWED_CONTROL_CHARS)
             if len(sample) > 0 and non_text / len(sample) > 0.05:
                 return False, None
@@ -282,7 +330,7 @@ class FilenameTranslator:
         return bool(self._CJK_PATTERN.search(text))
 
     def translate(self, filename: str) -> Optional[str]:
-        """自动翻译文件名（保留扩展名），中→英 / 英→中"""
+        """自动翻译文件名（保留扩展名），中->英 / 英->中"""
         if not self._available:
             return None
         if filename in self._cache:
@@ -314,10 +362,11 @@ class SearchResult:
     """统一的搜索结果结构"""
 
     def __init__(self, path: str, matches: Optional[List[Dict]] = None,
-                 encoding: Optional[str] = None):
+                 encoding: Optional[str] = None, source: Optional[str] = None):
         self.path = path
         self.matches = matches or []  # [{'line': int, 'content': str}]
         self.encoding = encoding
+        self.source = source  # 'jsonl' = JSONL 大文件搜索结果, None = 普通
         self.size = 0
         self.modified = 0.0
         self.created = 0.0
@@ -443,11 +492,16 @@ class RipgrepBackend:
             msg_type = msg.get('type')
 
             if msg_type == 'match':
-                data = msg['data']
-                fpath = data['path']['text']
+                data = msg.get('data')
+                if not data:
+                    continue
+                try:
+                    fpath = data['path']['text']
+                    line_number = data['line_number']
+                    line_text = data['lines']['text'].rstrip('\n\r')
+                except (KeyError, TypeError):
+                    continue
                 searched_files.add(fpath)
-                line_number = data['line_number']
-                line_text = data['lines']['text'].rstrip('\n\r')
 
                 if fpath not in results_by_path:
                     results_by_path[fpath] = SearchResult(path=fpath)
@@ -596,7 +650,7 @@ class GrepBackend:
             if not line:
                 continue
             # grep -n 输出: filepath:linenum:content
-            # Windows 路径含 C:\path\file:10:content → 用正则而非 split
+            # Windows 路径含 C:\path\file:10:content -> 用正则而非 split
             m = self._parse_grep_line(line)
             if m:
                 fpath, line_num, content = m
@@ -611,7 +665,7 @@ class GrepBackend:
 
     @staticmethod
     def _parse_grep_line(line: str) -> Optional[Tuple[str, int, str]]:
-        """
+        r"""
         解析 grep -n 的单行输出，正确处理 Windows 路径
 
         格式: filepath:linenum:content
@@ -730,12 +784,12 @@ class PythonBackend:
         except OSError:
             return None
 
-        # 大文件 + 不需要上下文 → 流式搜索（节省内存，不卡）
+        # 大文件 + 不需要上下文 -> 流式搜索（节省内存，不卡）
         if file_size > PythonBackend.STREAM_THRESHOLD and context_lines == 0:
             return PythonBackend._search_file_stream(
                 file_path, pattern, encoding, invert, max_matches)
 
-        # 小文件 或 需要上下文 → 整体读取（上下文需要前后行）
+        # 小文件 或 需要上下文 -> 整体读取（上下文需要前后行）
         return PythonBackend._search_file_full(
             file_path, pattern, encoding, invert, context_lines, max_matches)
 
@@ -873,14 +927,14 @@ class HashMatcher:
         # 原文
         search_terms.add(query)
 
-        # query → base64 编码
+        # query -> base64 编码
         try:
             encoded = base64.b64encode(query.encode('utf-8')).decode('ascii')
             search_terms.add(encoded)
         except Exception:
             pass
 
-        # query 作为 base64 → 解码为原文
+        # query 作为 base64 -> 解码为原文
         try:
             decoded = base64.b64decode(query, validate=True).decode('utf-8')
             search_terms.add(decoded)
@@ -972,6 +1026,208 @@ def parallel_chunk_search(target_path: str, searcher_factory,
 
 
 # ============================================================
+# JSONL 大文件优化
+# ============================================================
+
+# 大 JSONL 文件阈值 (10MB)
+_JSONL_LARGE_THRESHOLD = 10 * 1024 * 1024
+# JSONL 流式读取最大行数
+_JSONL_MAX_LINES = 1000
+# mmap 阈值 (50MB)
+_MMAP_THRESHOLD = 50 * 1024 * 1024
+# 缓存有效期 (7 天)
+_JSONL_CACHE_TTL = 7 * 24 * 3600
+
+# 全局 JSONL 缓存
+_jsonl_cache: Dict[str, Any] = {}
+_jsonl_cache_path: Optional[str] = None
+_jsonl_cache_dirty = False
+
+
+def _load_jsonl_cache(search_dir: str) -> None:
+    """加载 JSONL 索引缓存"""
+    global _jsonl_cache, _jsonl_cache_path, _jsonl_cache_dirty
+    cache_file = os.path.join(search_dir, '.doc_searcher_jsonl_cache.json')
+    _jsonl_cache_path = cache_file
+    if os.path.isfile(cache_file):
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            # 清除过期条目
+            now = time.time()
+            _jsonl_cache = {
+                k: v for k, v in data.items()
+                if now - v.get('cached_at', 0) < _JSONL_CACHE_TTL
+            }
+            logger.debug(f"加载 JSONL 缓存: {len(_jsonl_cache)} 条记录")
+        except (json.JSONDecodeError, OSError) as e:
+            logger.debug(f"JSONL 缓存加载失败: {e}")
+            _jsonl_cache = {}
+    else:
+        _jsonl_cache = {}
+
+
+def _save_jsonl_cache() -> None:
+    """保存 JSONL 索引缓存到磁盘"""
+    global _jsonl_cache_dirty
+    if not _jsonl_cache_dirty or not _jsonl_cache_path:
+        return
+    try:
+        with open(_jsonl_cache_path, 'w', encoding='utf-8') as f:
+            json.dump(_jsonl_cache, f, ensure_ascii=False, indent=2)
+        logger.debug(f"保存 JSONL 缓存: {len(_jsonl_cache)} 条记录")
+        _jsonl_cache_dirty = False
+    except OSError as e:
+        logger.debug(f"JSONL 缓存保存失败: {e}")
+
+
+# 程序退出时自动保存缓存
+atexit.register(_save_jsonl_cache)
+
+
+def _find_large_jsonl_files(search_dir: str) -> List[str]:
+    """扫描目录，找出所有大于阈值的 .jsonl/.ndjson 文件"""
+    large_files = []
+    for root, dirs, files in os.walk(search_dir):
+        # 跳过隐藏目录和 .git
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        for fname in files:
+            if fname.endswith(('.jsonl', '.ndjson')):
+                fpath = os.path.join(root, fname)
+                try:
+                    if os.path.getsize(fpath) > _JSONL_LARGE_THRESHOLD:
+                        large_files.append(fpath)
+                except OSError:
+                    pass
+    return large_files
+
+
+def _search_in_json_value(obj: Any, pattern: 're.Pattern') -> bool:
+    """递归搜索 JSON 对象中的所有字符串值"""
+    if isinstance(obj, str):
+        return pattern.search(obj) is not None
+    elif isinstance(obj, dict):
+        return any(_search_in_json_value(v, pattern) for v in obj.values())
+    elif isinstance(obj, (list, tuple)):
+        return any(_search_in_json_value(item, pattern) for item in obj)
+    return False
+
+
+def _search_jsonl_file(fpath: str, pattern: 're.Pattern',
+                       max_lines: int = _JSONL_MAX_LINES) -> Optional[SearchResult]:
+    """流式读取 JSONL 文件，逐行解析 JSON 并在字符串值中搜索
+
+    对大文件使用 mmap 读取以减少内存占用。
+    """
+    global _jsonl_cache, _jsonl_cache_dirty
+
+    file_size = os.path.getsize(fpath)
+    file_mtime = os.path.getmtime(fpath)
+
+    # 检查缓存: 如果 mtime 没变且上次搜索无命中，跳过
+    cache_key = fpath
+    if cache_key in _jsonl_cache:
+        cached = _jsonl_cache[cache_key]
+        if cached.get('mtime') == file_mtime and not cached.get('had_matches', True):
+            logger.debug(f"JSONL 缓存命中 (无匹配): {fpath}")
+            return None
+
+    matches = []
+    lines_read = 0
+
+    try:
+        use_mmap = file_size > _MMAP_THRESHOLD
+        if use_mmap:
+            try:
+                with open(fpath, 'rb') as f:
+                    mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+                    try:
+                        for line_bytes in iter(mm.readline, b''):
+                            lines_read += 1
+                            if lines_read > max_lines:
+                                break
+                            line = line_bytes.decode('utf-8', errors='replace').strip()
+                            if not line:
+                                continue
+                            try:
+                                obj = _fast_json.loads(line)
+                                if isinstance(obj, bytes):
+                                    # orjson.loads returns bytes for strings
+                                    obj = json.loads(line)
+                            except (ValueError, TypeError):
+                                # 非 JSON 行，用纯文本搜索
+                                if pattern.search(line):
+                                    matches.append({
+                                        'line': lines_read,
+                                        'content': line[:200],
+                                    })
+                                continue
+                            if _search_in_json_value(obj, pattern):
+                                matches.append({
+                                    'line': lines_read,
+                                    'content': line[:200],
+                                })
+                    finally:
+                        mm.close()
+            except (mmap.error, OSError):
+                # mmap 失败，回退到普通读取
+                use_mmap = False
+
+        if not use_mmap:
+            with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
+                for line in f:
+                    lines_read += 1
+                    if lines_read > max_lines:
+                        break
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = _fast_json.loads(line)
+                        if isinstance(obj, bytes):
+                            obj = json.loads(line)
+                    except (ValueError, TypeError):
+                        if pattern.search(line):
+                            matches.append({
+                                'line': lines_read,
+                                'content': line[:200],
+                            })
+                        continue
+                    if _search_in_json_value(obj, pattern):
+                        matches.append({
+                            'line': lines_read,
+                            'content': line[:200],
+                        })
+    except OSError as e:
+        logger.debug(f"JSONL 文件读取失败: {fpath}: {e}")
+        return None
+
+    # 更新缓存
+    _jsonl_cache[cache_key] = {
+        'mtime': file_mtime,
+        'size': file_size,
+        'had_matches': len(matches) > 0,
+        'cached_at': time.time(),
+    }
+    _jsonl_cache_dirty = True
+
+    if matches:
+        r = SearchResult(path=fpath, source='jsonl')
+        r.matches = matches
+        r.encoding = 'utf-8'
+        return r
+    return None
+
+
+def _has_chinese(text: str) -> bool:
+    """检测文本是否包含中文字符 (CJK Unified Ideographs: U+4E00-U+9FFF)"""
+    for c in text:
+        if 0x4E00 <= ord(c) <= 0x9FFF:
+            return True
+    return False
+
+
+# ============================================================
 # 主搜索器（编排层，不重复造轮子）
 # ============================================================
 
@@ -980,8 +1236,8 @@ class DocSearcher:
     文档内容搜索器 —— 编排 rg/grep + 编码检测 + 翻译
 
     搜索策略:
-    1. 用 rg（或 grep）搜索目录 → 得到 UTF-8 兼容文件的结果
-    2. 用 TextDetector 扫描 rg 跳过的文件 → 对非 UTF-8 文本用 Python 回退搜索
+    1. 用 rg（或 grep）搜索目录 -> 得到 UTF-8 兼容文件的结果
+    2. 用 TextDetector 扫描 rg 跳过的文件 -> 对非 UTF-8 文本用 Python 回退搜索
     3. 合并结果，附加编码信息和翻译
     """
 
@@ -1034,10 +1290,21 @@ class DocSearcher:
         self.sort_reverse = sort_reverse
         self.max_results = max_results
 
-        # 后端 (rg → grep → findstr → python)
+        # 后端 (rg -> grep -> findstr -> python)
         self._rg = RipgrepBackend()
         self._grep = GrepBackend()
         self._findstr = FindstrBackend()
+
+        # 提示安装 ripgrep（性能最佳的后端）
+        if not self._rg.available:
+            if self._grep.available:
+                logger.info("提示: 未检测到 ripgrep (rg)，当前使用 grep。"
+                            "安装 ripgrep 可大幅提升搜索速度: "
+                            "https://github.com/BurntSushi/ripgrep#installation")
+            else:
+                logger.warning("未检测到 ripgrep 和 grep，将使用 Python 内置搜索（较慢）。"
+                               "强烈建议安装 ripgrep: "
+                               "https://github.com/BurntSushi/ripgrep#installation")
 
         # 编译 Python 回退用的正则
         flags = 0 if case_sensitive else re.IGNORECASE
@@ -1059,21 +1326,57 @@ class DocSearcher:
             'files_scanned': 0,
             'files_matched': 0,
             'files_fallback_searched': 0,
+            'files_jsonl_searched': 0,
             'total_matches': 0,
             'scan_time_seconds': 0.0,
         }
 
+        # 初始化 JSONL 缓存
+        _load_jsonl_cache(self.target_path)
+
+        logger.debug(f"快速JSON: {_json_lib_name}")
+
     def search(self) -> List[SearchResult]:
-        """执行搜索 —— 自动降级: rg → grep → findstr → python"""
+        """执行搜索 —— 自动降级: rg -> grep -> findstr -> python"""
         if not self.pattern_str:
             return self.scan_text_files()
 
         start = time.time()
         results: List[SearchResult] = []
 
+        # 检测大 JSONL 文件，从外部搜索工具中排除
+        large_jsonl = _find_large_jsonl_files(self.target_path)
+        jsonl_results: List[SearchResult] = []
+        extra_exclude_globs: List[str] = []
+
+        if large_jsonl and self._py_pattern:
+            for fpath in large_jsonl:
+                fname = os.path.basename(fpath)
+                extra_exclude_globs.append(fname)
+                logger.debug(f"JSONL 大文件排除: {fname} "
+                             f"({os.path.getsize(fpath) / 1024 / 1024:.1f}MB)")
+            # 单独用 Python 流式搜索这些大 JSONL
+            for fpath in large_jsonl:
+                r = _search_jsonl_file(fpath, self._py_pattern)
+                if r:
+                    jsonl_results.append(r)
+                self.stats['files_jsonl_searched'] += 1
+
+        # 临时合并 exclude globs
+        original_excludes = self.exclude_patterns
+        if extra_exclude_globs:
+            self.exclude_patterns = list(self.exclude_patterns) + extra_exclude_globs
+
+        # 中文检测: rg 在某些 Windows 环境下处理中文不稳定，
+        # 如果搜索词含中文且 grep 可用，优先使用 grep
+        pattern_has_chinese = _has_chinese(self.pattern_str)
+        prefer_grep = pattern_has_chinese and self._grep.available
+        if prefer_grep:
+            logger.debug(f"搜索包含中文，优先使用 grep")
+
         # 自动降级链：如果高优先级后端返回 0 结果但没有报错，
         # 可能是后端兼容性问题，尝试下一个后端
-        if self._rg.available:
+        if self._rg.available and not prefer_grep:
             results = self._search_with_rg()
             if results:
                 pass  # rg 成功
@@ -1083,15 +1386,23 @@ class DocSearcher:
         elif self._grep.available:
             results = self._search_with_grep()
 
-        # grep 也没结果 → 尝试 findstr (Windows)
+        # 恢复原始 exclude 列表
+        self.exclude_patterns = original_excludes
+
+        # grep 也没结果 -> 尝试 findstr (Windows)
         if not results and self._findstr.available:
             logger.debug("降级到 findstr")
             results = self._search_with_findstr()
 
-        # 所有外部工具都失败 → Python 兜底
+        # 所有外部工具都失败 -> Python 兜底
         if not results:
             logger.debug("所有外部后端返回 0 结果，降级到 Python 搜索")
             results = self._search_with_python()
+
+        # 合并 JSONL 大文件搜索结果
+        if jsonl_results:
+            logger.debug(f"JSONL 大文件命中: {len(jsonl_results)} 个文件")
+            results.extend(jsonl_results)
 
         # 应用 Python 层面的筛选（大小、日期等 rg 不直接支持的）
         results = self._apply_filters(results)
@@ -1164,7 +1475,7 @@ class DocSearcher:
         """rg 搜索 + Python 回退非 UTF-8 文件"""
         self.stats['backend'] = 'ripgrep'
 
-        # rg 支持 --max-filesize 但不支持 min-size/日期筛选 → 后续 Python 过滤
+        # rg 支持 --max-filesize 但不支持 min-size/日期筛选 -> 后续 Python 过滤
         max_fs = None
         if self.max_size:
             max_fs = format_size(self.max_size).replace(' ', '')
@@ -1440,18 +1751,18 @@ def parse_date(date_str: str) -> datetime:
     解析日期字符串，支持:
     1. 标准格式: YYYY-MM-DD, YYYY/MM/DD, YYYYMMDD, YYYY-MM-DD HH:MM:SS
     2. 快捷符号 (缩写优先):
-         td / today       → 今天 00:00
-         yd / yesterday   → 昨天 00:00
-         tw / thisweek    → 本周一 00:00
-         lw / lastweek    → 上周一 00:00
-         tm / thismonth   → 本月1日 00:00
-         lm / lastmonth   → 上月1日 00:00
-         ty / thisyear    → 今年1月1日 00:00
-         ly / lastyear    → 去年1月1日 00:00
+         td / today       -> 今天 00:00
+         yd / yesterday   -> 昨天 00:00
+         tw / thisweek    -> 本周一 00:00
+         lw / lastweek    -> 上周一 00:00
+         tm / thismonth   -> 本月1日 00:00
+         lm / lastmonth   -> 上月1日 00:00
+         ty / thisyear    -> 今年1月1日 00:00
+         ly / lastyear    -> 去年1月1日 00:00
     3. 相对偏移:
-         Nd  → N 天前  (如 3d = 3天前, 7d = 一周前, 30d = 一个月前)
-         Nh  → N 小时前 (如 1h, 6h, 24h)
-         Nw  → N 周前   (如 1w, 2w)
+         Nd  -> N 天前  (如 3d = 3天前, 7d = 一周前, 30d = 一个月前)
+         Nh  -> N 小时前 (如 1h, 6h, 24h)
+         Nw  -> N 周前   (如 1w, 2w)
     4. Unix 时间戳: @1700000000 (以 @ 开头的纯数字)
     """
     s = date_str.strip().lower()
@@ -1821,6 +2132,9 @@ def build_parser() -> argparse.ArgumentParser:
     # 并行加速
     sp.add_argument('--parallel', type=int, default=0, metavar='N',
                     help='并行分群搜索线程数（0=不启用，建议 4-16）')
+    # JSONL 大文件结果导出阈值
+    sp.add_argument('--jsonl-dump', type=int, default=50, metavar='N',
+                    help='JSONL 大文件匹配超过 N 条时导出到 txt（默认50，0=全显示不存文件）')
 
     # scan
     sp2 = sub.add_parser('scan', help='列出目录下所有文本文件')
@@ -1847,7 +2161,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp2.add_argument('-v', '--verbose', action='store_true', help='详细输出')
 
     # translate
-    sp3 = sub.add_parser('translate', help='批量翻译文件名（中↔英）')
+    sp3 = sub.add_parser('translate', help='批量翻译文件名 (中<->英)')
     sp3.add_argument('path', help='目标目录')
     sp3.add_argument('--json', action='store_true')
 
@@ -1943,13 +2257,13 @@ def _cmd_search(args) -> int:
     created_after = parse_date(args.created_after) if args.created_after else None
     created_before = parse_date(args.created_before) if args.created_before else None
 
-    # --type 预设 → include_patterns
+    # --type 预设 -> include_patterns
     include_patterns = args.include or []
     if args.type:
         type_key = args.type.lower()
         if type_key not in FILE_TYPE_PRESETS:
-            print(f"未知文件类型: {type_key}", file=sys.stderr)
-            print(f"可选: {', '.join(sorted(FILE_TYPE_PRESETS.keys()))}", file=sys.stderr)
+            safe_print(f"未知文件类型: {type_key}", file=sys.stderr)
+            safe_print(f"可选: {', '.join(sorted(FILE_TYPE_PRESETS.keys()))}", file=sys.stderr)
             return 1
         include_patterns = FILE_TYPE_PRESETS[type_key] + include_patterns
 
@@ -1959,7 +2273,7 @@ def _cmd_search(args) -> int:
     if args.path == '-' or (args.path == '.' and not sys.stdin.isatty()):
         stdin_files = _read_stdin_file_list()
         if not stdin_files:
-            print("stdin 中无有效文件路径", file=sys.stderr)
+            safe_print("stdin 中无有效文件路径", file=sys.stderr)
             return 1
         search_path = os.path.dirname(stdin_files[0]) or '.'
 
@@ -1995,6 +2309,49 @@ def _cmd_search(args) -> int:
     else:
         results = searcher.search()
 
+    # JSONL 大文件结果分流: 超过阈值时导出到 txt，屏幕只显示摘要
+    jsonl_dump_threshold = getattr(args, 'jsonl_dump', 50)
+    jsonl_results = [r for r in results if r.source == 'jsonl']
+    jsonl_total_matches = sum(r.match_count for r in jsonl_results)
+    dump_file = None
+
+    if jsonl_results and jsonl_dump_threshold > 0 and jsonl_total_matches > jsonl_dump_threshold:
+        # 导出详细结果到 txt
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        kw_safe = re.sub(r'[^\w\-]', '_', searcher.pattern_str[:30])
+        dump_file = os.path.join(
+            searcher.target_path,
+            f'.doc_searcher_jsonl_{kw_safe}_{ts}.txt'
+        )
+        try:
+            with open(dump_file, 'w', encoding='utf-8') as f:
+                f.write(f"# JSONL 大文件搜索结果\n")
+                f.write(f"# 关键词: {searcher.pattern_str}\n")
+                f.write(f"# 时间: {datetime.now().isoformat()}\n")
+                f.write(f"# 匹配: {jsonl_total_matches} 条 / {len(jsonl_results)} 个文件\n")
+                f.write(f"# 阈值: {jsonl_dump_threshold} (--jsonl-dump)\n\n")
+                for r in jsonl_results:
+                    f.write(f"=== {r.path} ({format_size(r.size)}) ===\n")
+                    for m in r.matches:
+                        f.write(f"  L{m.get('line', '?')}: {m.get('content', '')}\n")
+                    f.write('\n')
+            logger.debug(f"JSONL 结果导出到: {dump_file}")
+        except OSError as e:
+            logger.warning(f"JSONL 结果导出失败: {e}")
+            dump_file = None
+
+        # 屏幕上只保留 JSONL 的摘要（截断匹配列表，只留前几条）
+        _JSONL_SCREEN_PREVIEW = 5
+        for r in jsonl_results:
+            original_count = r.match_count
+            if original_count > _JSONL_SCREEN_PREVIEW:
+                r.matches = r.matches[:_JSONL_SCREEN_PREVIEW]
+                r.matches.append({
+                    'line': 0,
+                    'content': f'... 还有 {original_count - _JSONL_SCREEN_PREVIEW} 条匹配，'
+                               f'详见: {dump_file}',
+                })
+
     summary = searcher.get_summary()
     fmt = _resolve_format(args)
 
@@ -2004,9 +2361,15 @@ def _cmd_search(args) -> int:
         custom_template=args.format_str,
     )
     if fmt == 'path0':
-        sys.stdout.write(output)
+        safe_write(output)
     else:
-        print(output)
+        safe_print(output)
+
+    # 提示用户导出文件位置
+    if dump_file:
+        safe_print(f"\n[JSONL] {jsonl_total_matches} 条匹配已导出到: {dump_file}",
+                   file=sys.stderr)
+
     return 0
 
 
@@ -2143,16 +2506,16 @@ def _cmd_scan(args) -> int:
         verbose=getattr(args, 'verbose', False),
     )
     if fmt == 'path0':
-        sys.stdout.write(output)
+        safe_write(output)
     else:
-        print(output)
+        safe_print(output)
     return 0
 
 
 def _cmd_translate(args) -> int:
     translator = FilenameTranslator()
     if not translator.available:
-        print("错误: 翻译库不可用，请安装: pip install deep-translator", file=sys.stderr)
+        safe_print("错误: 翻译库不可用，请安装: pip install deep-translator", file=sys.stderr)
         return 1
 
     target = os.path.abspath(args.path)
@@ -2168,16 +2531,16 @@ def _cmd_translate(args) -> int:
                 })
 
     if args.json:
-        print(json.dumps(results, ensure_ascii=False, indent=2))
+        safe_print(json.dumps(results, ensure_ascii=False, indent=2))
     else:
         if not results:
-            print("无需翻译的文件名。")
+            safe_print("无需翻译的文件名。")
         else:
             w = max(len(r['original']) for r in results)
             for r in results:
-                d = 'ZH→EN' if r['has_chinese'] else 'EN→ZH'
-                print(f"  [{d}] {r['original']:<{w}}  →  {r['translated']}")
-            print(f"\n  共 {len(results)} 个文件名可翻译。")
+                d = 'ZH->EN' if r['has_chinese'] else 'EN->ZH'
+                safe_print(f"  [{d}] {r['original']:<{w}}  ->  {r['translated']}")
+            safe_print(f"\n  共 {len(results)} 个文件名可翻译。")
     return 0
 
 
@@ -2185,7 +2548,7 @@ def _cmd_hash(args) -> int:
     """hash 子命令：通过文件 hash 查找匹配文件"""
     target = os.path.abspath(args.path)
     if not os.path.isdir(target):
-        print(f"路径不存在: {target}", file=sys.stderr)
+        safe_print(f"路径不存在: {target}", file=sys.stderr)
         return 1
 
     results = HashMatcher.find_by_hash(target, args.hash_value, algorithm=args.algo)
@@ -2196,15 +2559,15 @@ def _cmd_hash(args) -> int:
             'algorithm': args.algo,
             'matches': [r.to_dict() for r in results],
         }
-        print(json.dumps(out, ensure_ascii=False, indent=2))
+        safe_print(json.dumps(out, ensure_ascii=False, indent=2))
     else:
         if not results:
-            print(f"未找到 hash 匹配的文件: {args.hash_value}")
+            safe_print(f"未找到 hash 匹配的文件: {args.hash_value}")
         else:
-            print(f"找到 {len(results)} 个匹配文件:")
+            safe_print(f"找到 {len(results)} 个匹配文件:")
             for r in results:
                 size_str = format_size(r.size)
-                print(f"  {r.path}  ({size_str})")
+                safe_print(f"  {r.path}  ({size_str})")
     return 0
 
 
@@ -2212,7 +2575,7 @@ def _cmd_base64(args) -> int:
     """base64 子命令：Base64 双向搜索"""
     target = os.path.abspath(args.path)
     if not os.path.isdir(target):
-        print(f"路径不存在: {target}", file=sys.stderr)
+        safe_print(f"路径不存在: {target}", file=sys.stderr)
         return 1
 
     results = HashMatcher.find_by_base64(target, args.query)
@@ -2222,55 +2585,58 @@ def _cmd_base64(args) -> int:
             'query': args.query,
             'matches': [r.to_dict() for r in results],
         }
-        print(json.dumps(out, ensure_ascii=False, indent=2))
+        safe_print(json.dumps(out, ensure_ascii=False, indent=2))
     else:
         if not results:
-            print(f"未找到 base64 相关匹配: {args.query}")
+            safe_print(f"未找到 base64 相关匹配: {args.query}")
         else:
-            print(f"找到 {len(results)} 个文件包含匹配:")
+            safe_print(f"找到 {len(results)} 个文件包含匹配:")
             for r in results:
-                print(f"  {r.path}")
+                safe_print(f"  {r.path}")
                 shown = r.matches[:3] if not args.verbose else r.matches
                 for m in shown:
                     form_tag = f" [{m.get('match_form', '')}]" if m.get('match_form') else ''
-                    print(f"    L{m.get('line', '?')}: {m.get('content', '')[:80]}{form_tag}")
+                    safe_print(f"    L{m.get('line', '?')}: {m.get('content', '')[:80]}{form_tag}")
                 if not args.verbose and len(r.matches) > 3:
-                    print(f"    ... 还有 {len(r.matches) - 3} 处匹配")
+                    safe_print(f"    ... 还有 {len(r.matches) - 3} 处匹配")
     return 0
 
 
 def _cmd_help(args) -> int:
-    """详细帮助 —— 按主题输出使用说明"""
+    """详细帮助 -- 按主题输出使用说明 (纯 ASCII，兼容 Windows GBK 控制台)"""
     topics = {
         'search': """
-╔══════════════════════════════════════════════════════════════╗
-║  search — 搜索文件内容                                      ║
-╚══════════════════════════════════════════════════════════════╝
+=== search -- 搜索文件内容 ===
 
   基本用法:
     doc_searcher search "关键词" [路径]
 
   参数:
     关键词          要搜索的文本
-    路径            搜索目录（默认当前目录，用 - 从 stdin 读文件列表）
+    路径            搜索目录 (默认当前目录, 用 - 从 stdin 读文件列表)
     -r, --regex     关键词作为正则表达式
-    --invert        反查：找不包含关键词的文件
+    --invert        反查: 查找不包含关键词的文件
     -s              区分大小写
     -C N            显示匹配行前后 N 行上下文
     --max-matches N 每文件最多匹配 N 次
     --max-results N 最多返回 N 个文件
     -v, --verbose   显示完整匹配内容
 
+  JSONL 大文件:
+    >10MB 的 .jsonl/.ndjson 文件会自动用 Python 流式搜索
+    (递归搜索 JSON 所有字符串值, 最多读取 1000 行)
+    --jsonl-dump N  匹配超过 N 条时导出到 .txt (默认 50, 0=全显示)
+
   示例:
     doc_searcher search "TODO" /project
     doc_searcher search -r "\\bpassw(or)?d\\b" /etc --type config
     doc_searcher search --invert "license" /src --type py
+    doc_searcher search "key" /data --jsonl-dump 100  # JSONL超100条存文件
+    doc_searcher search "key" /data --jsonl-dump 0    # JSONL全部显示
 """,
 
         'date': """
-╔══════════════════════════════════════════════════════════════╗
-║  日期筛选 — --after / --before / --created-after/before     ║
-╚══════════════════════════════════════════════════════════════╝
+=== 日期筛选 -- --after / --before / --created-after/before ===
 
   --after  DATE    仅保留修改日期 >= DATE 的文件
   --before DATE    仅保留修改日期 <= DATE 的文件
@@ -2279,31 +2645,29 @@ def _cmd_help(args) -> int:
 
   DATE 支持以下格式:
 
-  ┌────────────┬──────────────────────────────┐
-  │ 格式        │ 说明                          │
-  ├────────────┼──────────────────────────────┤
-  │ 2026-02-12 │ 标准日期 YYYY-MM-DD          │
-  │ 2026/02/12 │ 斜线分隔                      │
-  │ 20260212   │ 紧凑格式                      │
-  │ @170000000 │ Unix 时间戳 (秒)              │
-  ├────────────┼──────────────────────────────┤
-  │ td         │ 今天 00:00 (today)           │
-  │ yd         │ 昨天 00:00 (yesterday)       │
-  │ tw         │ 本周一 00:00 (this week)     │
-  │ lw         │ 上周一 00:00 (last week)     │
-  │ tm         │ 本月 1 日 (this month)       │
-  │ lm         │ 上月 1 日 (last month)       │
-  │ ty         │ 今年 1/1 (this year)         │
-  │ ly         │ 去年 1/1 (last year)         │
-  ├────────────┼──────────────────────────────┤
-  │ 3d         │ 3 天前                        │
-  │ 7d         │ 7 天前                        │
-  │ 30d        │ 30 天前                       │
-  │ 1h         │ 1 小时前                      │
-  │ 6h         │ 6 小时前                      │
-  │ 1w         │ 1 周前                        │
-  │ 2w         │ 2 周前                        │
-  └────────────┴──────────────────────────────┘
+    格式            说明
+    ----------      --------------------------------
+    2026-02-12      标准日期 YYYY-MM-DD
+    2026/02/12      斜线分隔
+    20260212        紧凑格式
+    @170000000      Unix 时间戳 (秒)
+    ----------      --------------------------------
+    td              今天 00:00 (today)
+    yd              昨天 00:00 (yesterday)
+    tw              本周一 00:00 (this week)
+    lw              上周一 00:00 (last week)
+    tm              本月 1 日 (this month)
+    lm              上月 1 日 (last month)
+    ty              今年 1/1 (this year)
+    ly              去年 1/1 (last year)
+    ----------      --------------------------------
+    3d              3 天前
+    7d              7 天前
+    30d             30 天前
+    1h              1 小时前
+    6h              6 小时前
+    1w              1 周前
+    2w              2 周前
 
   示例:
     doc_searcher search "key" . --after td               # 今天修改的
@@ -2316,35 +2680,31 @@ def _cmd_help(args) -> int:
 """,
 
         'type': """
-╔══════════════════════════════════════════════════════════════╗
-║  --type — 文件类型预设                                      ║
-╚══════════════════════════════════════════════════════════════╝
+=== --type -- 文件类型预设 ===
 
   -t TYPE, --type TYPE    按预设类型筛选文件
 
-  ┌──────────┬──────────────────────────────────────────────┐
-  │ 类型      │ 包含扩展名                                    │
-  ├──────────┼──────────────────────────────────────────────┤
-  │ py       │ .py .pyw .pyi                                │
-  │ js       │ .js .jsx .mjs .cjs                           │
-  │ ts       │ .ts .tsx                                      │
-  │ web      │ .html .htm .css .scss .js .ts .vue .svelte   │
-  │ java     │ .java .kt .scala .gradle                     │
-  │ c        │ .c .h .cpp .hpp .cc .cxx                     │
-  │ go       │ .go                                           │
-  │ rust     │ .rs                                           │
-  │ ruby     │ .rb .erb .gemspec                             │
-  │ php      │ .php                                          │
-  │ shell    │ .sh .bash .zsh .fish .bat .cmd .ps1           │
-  │ config   │ .json .yaml .yml .toml .ini .cfg .conf .env  │
-  │ xml      │ .xml .xsl .xsd .svg .plist                   │
-  │ doc      │ .md .rst .txt .tex .adoc .org                │
-  │ data     │ .csv .tsv .jsonl .ndjson                     │
-  │ sql      │ .sql                                          │
-  │ proto    │ .proto .graphql                               │
-  │ log      │ .log .out .err                                │
-  │ all-text │ * (不筛选扩展名，靠内容判定)                    │
-  └──────────┴──────────────────────────────────────────────┘
+    类型        包含扩展名
+    --------    ------------------------------------------
+    py          .py .pyw .pyi
+    js          .js .jsx .mjs .cjs
+    ts          .ts .tsx
+    web         .html .htm .css .scss .js .ts .vue .svelte
+    java        .java .kt .scala .gradle
+    c           .c .h .cpp .hpp .cc .cxx
+    go          .go
+    rust        .rs
+    ruby        .rb .erb .gemspec
+    php         .php
+    shell       .sh .bash .zsh .fish .bat .cmd .ps1
+    config      .json .yaml .yml .toml .ini .cfg .conf .env
+    xml         .xml .xsl .xsd .svg .plist
+    doc         .md .rst .txt .tex .adoc .org
+    data        .csv .tsv .jsonl .ndjson
+    sql         .sql
+    proto       .proto .graphql
+    log         .log .out .err
+    all-text    * (不筛选扩展名, 靠内容判定)
 
   --type 可与 -i (include) 叠加使用。
 
@@ -2355,15 +2715,13 @@ def _cmd_help(args) -> int:
 """,
 
         'hash': """
-╔══════════════════════════════════════════════════════════════╗
-║  hash — 文件 hash 指纹对比 (取证用)                         ║
-╚══════════════════════════════════════════════════════════════╝
+=== hash -- 文件 hash 指纹对比 (取证用) ===
 
   用法: doc_searcher hash <hash值> <搜索目录> [选项]
 
   根据文件的 MD5/SHA1/SHA256/SHA512 查找目录中所有副本。
   算法默认按 hash 长度自动检测:
-    32字符 → MD5 | 40字符 → SHA1 | 64字符 → SHA256 | 128字符 → SHA512
+    32字符 = MD5 | 40字符 = SHA1 | 64字符 = SHA256 | 128字符 = SHA512
 
   选项:
     -a, --algo ALGO   指定算法 (auto/md5/sha1/sha256/sha512)
@@ -2376,16 +2734,14 @@ def _cmd_help(args) -> int:
 """,
 
         'base64': """
-╔══════════════════════════════════════════════════════════════╗
-║  base64 — Base64 双向搜索                                   ║
-╚══════════════════════════════════════════════════════════════╝
+=== base64 -- Base64 双向搜索 ===
 
   用法: doc_searcher base64 <内容> <搜索目录>
 
   同时搜索三种形式:
-    1. 原文           → "secret_key"
-    2. 原文的 base64  → "c2VjcmV0X2tleQ=="
-    3. 若输入本身是 base64，解码后的原文
+    1. 原文           "secret_key"
+    2. 原文的 base64  "c2VjcmV0X2tleQ=="
+    3. 若输入本身是 base64, 解码后的原文
 
   适合取证场景: 在代码中搜索被 base64 编码隐藏的敏感信息。
 
@@ -2395,23 +2751,19 @@ def _cmd_help(args) -> int:
 """,
 
         'format': """
-╔══════════════════════════════════════════════════════════════╗
-║  --format — 输出格式                                        ║
-╚══════════════════════════════════════════════════════════════╝
+=== --format -- 输出格式 ===
 
   --format FORMAT   指定输出格式
 
-  ┌────────┬──────────────────────────────────────────────┐
-  │ 格式    │ 说明                                          │
-  ├────────┼──────────────────────────────────────────────┤
-  │ text   │ 人类可读（默认终端格式，带统计和装饰）        │
-  │ grep   │ path:line:content（grep 兼容，管道自动切换） │
-  │ path   │ 仅文件路径，每行一个                          │
-  │ path0  │ 路径以 \\0 分隔（配合 xargs -0）              │
-  │ csv    │ CSV 格式 path,line,encoding,size,content      │
-  │ json   │ JSON 结构化输出（含统计信息）                 │
-  │ custom │ 自定义模板（需配合 --format-str）             │
-  └────────┴──────────────────────────────────────────────┘
+    格式      说明
+    ------    ------------------------------------------
+    text      人类可读 (默认终端格式, 带统计和装饰)
+    grep      path:line:content (grep 兼容, 管道自动切换)
+    path      仅文件路径, 每行一个
+    path0     路径以 \\0 分隔 (配合 xargs -0)
+    csv       CSV 格式 path,line,encoding,size,content
+    json      JSON 结构化输出 (含统计信息)
+    custom    自定义模板 (需配合 --format-str)
 
   --format-str 占位符: {path} {filename} {line} {content}
                        {encoding} {size} {date} {matches}
@@ -2429,16 +2781,14 @@ def _cmd_help(args) -> int:
 """,
 
         'pipe': """
-╔══════════════════════════════════════════════════════════════╗
-║  管道组合                                                    ║
-╚══════════════════════════════════════════════════════════════╝
+=== 管道组合 ===
 
-  输入管道 (stdin → doc_searcher):
+  输入管道 (stdin -> doc_searcher):
     将其他命令的文件列表输入给 doc_searcher 搜索:
     find /var/log -name "*.log" | doc_searcher search "error" -
     fd ".conf" | doc_searcher search "password" -
 
-  输出管道 (doc_searcher → 其他命令):
+  输出管道 (doc_searcher -> 其他命令):
     doc_searcher search "TODO" . --format path | xargs wc -l
     doc_searcher search "key" . -0 | xargs -0 rm
     doc_searcher scan . --format path | head -20
@@ -2455,19 +2805,17 @@ def _cmd_help(args) -> int:
 """,
 
         'parallel': """
-╔══════════════════════════════════════════════════════════════╗
-║  --parallel — 并行加速搜索                                   ║
-╚══════════════════════════════════════════════════════════════╝
+=== --parallel -- 并行加速搜索 ===
 
-  --parallel N   使用 N 个线程并行搜索（将目录按子目录分 chunk）
+  --parallel N   使用 N 个线程并行搜索 (将目录按子目录分 chunk)
 
-  原理: 将搜索目标的一级子目录拆分为 N 个独立任务，并行执行。
-  适用场景: 大目录 + Python 回退搜索（rg 本身已内置并行）。
+  原理: 将搜索目标的一级子目录拆分为 N 个独立任务, 并行执行。
+  适用场景: 大目录 + Python 回退搜索 (rg 本身已内置并行)。
 
   建议线程数:
-    SSD     →  8-16
-    HDD     →  4-8
-    网络盘  →  2-4
+    SSD      8-16
+    HDD      4-8
+    网络盘   2-4
 
   示例:
     doc_searcher search "keyword" /large/dir --parallel 8
@@ -2475,26 +2823,22 @@ def _cmd_help(args) -> int:
 """,
 
         'version': """
-╔══════════════════════════════════════════════════════════════╗
-║  --version — 版本号筛选                                      ║
-╚══════════════════════════════════════════════════════════════╝
+=== --version -- 版本号筛选 ===
 
   --version SPEC   仅保留路径中含匹配版本号的文件
 
-  从文件路径中提取版本号（如 v1.2.3, 1.0.0-beta），然后匹配。
+  从文件路径中提取版本号 (如 v1.2.3, 1.0.0-beta), 然后匹配。
 
-  ┌──────────┬──────────────────────────────────────────┐
-  │ 规格      │ 含义                                      │
-  ├──────────┼──────────────────────────────────────────┤
-  │ 1.2.3    │ 精确匹配 1.2.3                            │
-  │ 1.2      │ 匹配 1.2 或 1.2.x                        │
-  │ >1.0     │ 版本 > 1.0                                │
-  │ >=2.0    │ 版本 >= 2.0                               │
-  │ <3.0     │ 版本 < 3.0                                │
-  │ <=1.5    │ 版本 <= 1.5                               │
-  │ 1.x      │ 1.开头的任意版本                           │
-  │ 2.3.*    │ 2.3.开头的任意版本                         │
-  └──────────┴──────────────────────────────────────────┘
+    规格        含义
+    --------    --------------------------------
+    1.2.3       精确匹配 1.2.3
+    1.2         匹配 1.2 或 1.2.x
+    >1.0        版本 > 1.0
+    >=2.0       版本 >= 2.0
+    <3.0        版本 < 3.0
+    <=1.5       版本 <= 1.5
+    1.x         1.开头的任意版本
+    2.3.*       2.3.开头的任意版本
 
   示例:
     doc_searcher search "bug" /releases --version ">1.0"
@@ -2506,18 +2850,17 @@ def _cmd_help(args) -> int:
     topic = args.topic.lower() if args.topic else 'all'
 
     if topic == 'all':
-        # 输出概览
-        print("""
-╔══════════════════════════════════════════════════════════════╗
-║          HIDRS 文档内容搜索器 — 完整帮助                     ║
-╚══════════════════════════════════════════════════════════════╝
+        safe_print("""
+============================================================
+    HIDRS 文档内容搜索器 -- 完整帮助
+============================================================
 
   子命令:
-    search     搜索文件内容（关键词/正则/反查）
+    search     搜索文件内容 (关键词/正则/反查)
     scan       列出目录下所有文本文件
     hash       通过 MD5/SHA 查找文件副本
     base64     Base64 双向搜索
-    translate  批量翻译文件名（中↔英）
+    translate  批量翻译文件名 (中<->英)
     help       查看详细帮助
 
   帮助主题 (doc_searcher help <主题>):
@@ -2531,24 +2874,36 @@ def _cmd_help(args) -> int:
     parallel   并行加速
     version    版本号筛选
 
+  参数顺序 (重要):
+    doc_searcher [全局选项] <子命令> [子命令选项] [参数]
+
+    全局选项必须写在子命令之前:
+      -d, --debug     调试模式 (显示后端选择、缓存命中等)
+
+    正确:  doc_searcher -d search "key" .
+    错误:  doc_searcher search "key" . -d    # -d 不是 search 的选项
+
   快速上手:
     doc_searcher search "关键词" /路径          基本搜索
     doc_searcher search "key" . --type py       按类型搜
     doc_searcher search "key" . --after 7d      最近7天
     doc_searcher search "key" . --format json   JSON输出
+    doc_searcher -d search "key" .              调试模式
     doc_searcher hash <sha256> /dir             hash对比
     doc_searcher base64 "secret" /dir           base64搜索
 
-  搜索后端: ripgrep → grep → findstr(Win) → Python (自动选择)
+  搜索后端 (自动降级):
+    ripgrep (rg) -> grep -> findstr (Win) -> Python
+    推荐安装 ripgrep 获得最佳性能: https://github.com/BurntSushi/ripgrep
   编码检测: UTF-8, GBK, Big5, Shift_JIS, EUC-KR 等自动识别
 """)
         return 0
 
     if topic in topics:
-        print(topics[topic])
+        safe_print(topics[topic])
     else:
-        print(f"未知帮助主题: {topic}")
-        print(f"可用主题: {', '.join(sorted(topics.keys()))}")
+        safe_print(f"未知帮助主题: {topic}")
+        safe_print(f"可用主题: {', '.join(sorted(topics.keys()))}")
         return 1
     return 0
 
