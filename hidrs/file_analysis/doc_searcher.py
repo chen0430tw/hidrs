@@ -49,6 +49,22 @@ try:
 except ImportError:
     HAS_TRANSLATOR = False
 
+# 快速 JSON 解析: orjson > ujson > 标准库 json
+_json_lib_name = 'json'  # 用于 debug 输出
+try:
+    import orjson as _fast_json
+    _json_lib_name = 'orjson'
+except ImportError:
+    try:
+        import ujson as _fast_json
+        _json_lib_name = 'ujson'
+    except ImportError:
+        _fast_json = json  # type: ignore[assignment]
+
+# 内存映射
+import mmap
+import atexit
+
 logger = logging.getLogger(__name__)
 
 
@@ -999,6 +1015,208 @@ def parallel_chunk_search(target_path: str, searcher_factory,
 
 
 # ============================================================
+# JSONL 大文件优化
+# ============================================================
+
+# 大 JSONL 文件阈值 (10MB)
+_JSONL_LARGE_THRESHOLD = 10 * 1024 * 1024
+# JSONL 流式读取最大行数
+_JSONL_MAX_LINES = 1000
+# mmap 阈值 (50MB)
+_MMAP_THRESHOLD = 50 * 1024 * 1024
+# 缓存有效期 (7 天)
+_JSONL_CACHE_TTL = 7 * 24 * 3600
+
+# 全局 JSONL 缓存
+_jsonl_cache: Dict[str, Any] = {}
+_jsonl_cache_path: Optional[str] = None
+_jsonl_cache_dirty = False
+
+
+def _load_jsonl_cache(search_dir: str) -> None:
+    """加载 JSONL 索引缓存"""
+    global _jsonl_cache, _jsonl_cache_path, _jsonl_cache_dirty
+    cache_file = os.path.join(search_dir, '.doc_searcher_jsonl_cache.json')
+    _jsonl_cache_path = cache_file
+    if os.path.isfile(cache_file):
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            # 清除过期条目
+            now = time.time()
+            _jsonl_cache = {
+                k: v for k, v in data.items()
+                if now - v.get('cached_at', 0) < _JSONL_CACHE_TTL
+            }
+            logger.debug(f"加载 JSONL 缓存: {len(_jsonl_cache)} 条记录")
+        except (json.JSONDecodeError, OSError) as e:
+            logger.debug(f"JSONL 缓存加载失败: {e}")
+            _jsonl_cache = {}
+    else:
+        _jsonl_cache = {}
+
+
+def _save_jsonl_cache() -> None:
+    """保存 JSONL 索引缓存到磁盘"""
+    global _jsonl_cache_dirty
+    if not _jsonl_cache_dirty or not _jsonl_cache_path:
+        return
+    try:
+        with open(_jsonl_cache_path, 'w', encoding='utf-8') as f:
+            json.dump(_jsonl_cache, f, ensure_ascii=False, indent=2)
+        logger.debug(f"保存 JSONL 缓存: {len(_jsonl_cache)} 条记录")
+        _jsonl_cache_dirty = False
+    except OSError as e:
+        logger.debug(f"JSONL 缓存保存失败: {e}")
+
+
+# 程序退出时自动保存缓存
+atexit.register(_save_jsonl_cache)
+
+
+def _find_large_jsonl_files(search_dir: str) -> List[str]:
+    """扫描目录，找出所有大于阈值的 .jsonl/.ndjson 文件"""
+    large_files = []
+    for root, dirs, files in os.walk(search_dir):
+        # 跳过隐藏目录和 .git
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        for fname in files:
+            if fname.endswith(('.jsonl', '.ndjson')):
+                fpath = os.path.join(root, fname)
+                try:
+                    if os.path.getsize(fpath) > _JSONL_LARGE_THRESHOLD:
+                        large_files.append(fpath)
+                except OSError:
+                    pass
+    return large_files
+
+
+def _search_in_json_value(obj: Any, pattern: 're.Pattern') -> bool:
+    """递归搜索 JSON 对象中的所有字符串值"""
+    if isinstance(obj, str):
+        return pattern.search(obj) is not None
+    elif isinstance(obj, dict):
+        return any(_search_in_json_value(v, pattern) for v in obj.values())
+    elif isinstance(obj, (list, tuple)):
+        return any(_search_in_json_value(item, pattern) for item in obj)
+    return False
+
+
+def _search_jsonl_file(fpath: str, pattern: 're.Pattern',
+                       max_lines: int = _JSONL_MAX_LINES) -> Optional[SearchResult]:
+    """流式读取 JSONL 文件，逐行解析 JSON 并在字符串值中搜索
+
+    对大文件使用 mmap 读取以减少内存占用。
+    """
+    global _jsonl_cache, _jsonl_cache_dirty
+
+    file_size = os.path.getsize(fpath)
+    file_mtime = os.path.getmtime(fpath)
+
+    # 检查缓存: 如果 mtime 没变且上次搜索无命中，跳过
+    cache_key = fpath
+    if cache_key in _jsonl_cache:
+        cached = _jsonl_cache[cache_key]
+        if cached.get('mtime') == file_mtime and not cached.get('had_matches', True):
+            logger.debug(f"JSONL 缓存命中 (无匹配): {fpath}")
+            return None
+
+    matches = []
+    lines_read = 0
+
+    try:
+        use_mmap = file_size > _MMAP_THRESHOLD
+        if use_mmap:
+            try:
+                with open(fpath, 'rb') as f:
+                    mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+                    try:
+                        for line_bytes in iter(mm.readline, b''):
+                            lines_read += 1
+                            if lines_read > max_lines:
+                                break
+                            line = line_bytes.decode('utf-8', errors='replace').strip()
+                            if not line:
+                                continue
+                            try:
+                                obj = _fast_json.loads(line)
+                                if isinstance(obj, bytes):
+                                    # orjson.loads returns bytes for strings
+                                    obj = json.loads(line)
+                            except (ValueError, TypeError):
+                                # 非 JSON 行，用纯文本搜索
+                                if pattern.search(line):
+                                    matches.append({
+                                        'line': lines_read,
+                                        'content': line[:200],
+                                    })
+                                continue
+                            if _search_in_json_value(obj, pattern):
+                                matches.append({
+                                    'line': lines_read,
+                                    'content': line[:200],
+                                })
+                    finally:
+                        mm.close()
+            except (mmap.error, OSError):
+                # mmap 失败，回退到普通读取
+                use_mmap = False
+
+        if not use_mmap:
+            with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
+                for line in f:
+                    lines_read += 1
+                    if lines_read > max_lines:
+                        break
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = _fast_json.loads(line)
+                        if isinstance(obj, bytes):
+                            obj = json.loads(line)
+                    except (ValueError, TypeError):
+                        if pattern.search(line):
+                            matches.append({
+                                'line': lines_read,
+                                'content': line[:200],
+                            })
+                        continue
+                    if _search_in_json_value(obj, pattern):
+                        matches.append({
+                            'line': lines_read,
+                            'content': line[:200],
+                        })
+    except OSError as e:
+        logger.debug(f"JSONL 文件读取失败: {fpath}: {e}")
+        return None
+
+    # 更新缓存
+    _jsonl_cache[cache_key] = {
+        'mtime': file_mtime,
+        'size': file_size,
+        'had_matches': len(matches) > 0,
+        'cached_at': time.time(),
+    }
+    _jsonl_cache_dirty = True
+
+    if matches:
+        r = SearchResult(path=fpath)
+        r.matches = matches
+        r.encoding = 'utf-8'
+        return r
+    return None
+
+
+def _has_chinese(text: str) -> bool:
+    """检测文本是否包含中文字符 (CJK Unified Ideographs: U+4E00-U+9FFF)"""
+    for c in text:
+        if 0x4E00 <= ord(c) <= 0x9FFF:
+            return True
+    return False
+
+
+# ============================================================
 # 主搜索器（编排层，不重复造轮子）
 # ============================================================
 
@@ -1086,9 +1304,15 @@ class DocSearcher:
             'files_scanned': 0,
             'files_matched': 0,
             'files_fallback_searched': 0,
+            'files_jsonl_searched': 0,
             'total_matches': 0,
             'scan_time_seconds': 0.0,
         }
+
+        # 初始化 JSONL 缓存
+        _load_jsonl_cache(self.target_path)
+
+        logger.debug(f"快速JSON: {_json_lib_name}")
 
     def search(self) -> List[SearchResult]:
         """执行搜索 —— 自动降级: rg → grep → findstr → python"""
@@ -1098,9 +1322,39 @@ class DocSearcher:
         start = time.time()
         results: List[SearchResult] = []
 
+        # 检测大 JSONL 文件，从外部搜索工具中排除
+        large_jsonl = _find_large_jsonl_files(self.target_path)
+        jsonl_results: List[SearchResult] = []
+        extra_exclude_globs: List[str] = []
+
+        if large_jsonl and self._py_pattern:
+            for fpath in large_jsonl:
+                fname = os.path.basename(fpath)
+                extra_exclude_globs.append(fname)
+                logger.debug(f"JSONL 大文件排除: {fname} "
+                             f"({os.path.getsize(fpath) / 1024 / 1024:.1f}MB)")
+            # 单独用 Python 流式搜索这些大 JSONL
+            for fpath in large_jsonl:
+                r = _search_jsonl_file(fpath, self._py_pattern)
+                if r:
+                    jsonl_results.append(r)
+                self.stats['files_jsonl_searched'] += 1
+
+        # 临时合并 exclude globs
+        original_excludes = self.exclude_patterns
+        if extra_exclude_globs:
+            self.exclude_patterns = list(self.exclude_patterns) + extra_exclude_globs
+
+        # 中文检测: rg 在某些 Windows 环境下处理中文不稳定，
+        # 如果搜索词含中文且 grep 可用，优先使用 grep
+        pattern_has_chinese = _has_chinese(self.pattern_str)
+        prefer_grep = pattern_has_chinese and self._grep.available
+        if prefer_grep:
+            logger.debug(f"搜索包含中文，优先使用 grep")
+
         # 自动降级链：如果高优先级后端返回 0 结果但没有报错，
         # 可能是后端兼容性问题，尝试下一个后端
-        if self._rg.available:
+        if self._rg.available and not prefer_grep:
             results = self._search_with_rg()
             if results:
                 pass  # rg 成功
@@ -1109,6 +1363,9 @@ class DocSearcher:
                 results = self._search_with_grep()
         elif self._grep.available:
             results = self._search_with_grep()
+
+        # 恢复原始 exclude 列表
+        self.exclude_patterns = original_excludes
 
         # grep 也没结果 → 尝试 findstr (Windows)
         if not results and self._findstr.available:
@@ -1119,6 +1376,11 @@ class DocSearcher:
         if not results:
             logger.debug("所有外部后端返回 0 结果，降级到 Python 搜索")
             results = self._search_with_python()
+
+        # 合并 JSONL 大文件搜索结果
+        if jsonl_results:
+            logger.debug(f"JSONL 大文件命中: {len(jsonl_results)} 个文件")
+            results.extend(jsonl_results)
 
         # 应用 Python 层面的筛选（大小、日期等 rg 不直接支持的）
         results = self._apply_filters(results)
