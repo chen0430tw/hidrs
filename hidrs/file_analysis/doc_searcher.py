@@ -362,10 +362,11 @@ class SearchResult:
     """统一的搜索结果结构"""
 
     def __init__(self, path: str, matches: Optional[List[Dict]] = None,
-                 encoding: Optional[str] = None):
+                 encoding: Optional[str] = None, source: Optional[str] = None):
         self.path = path
         self.matches = matches or []  # [{'line': int, 'content': str}]
         self.encoding = encoding
+        self.source = source  # 'jsonl' = JSONL 大文件搜索结果, None = 普通
         self.size = 0
         self.modified = 0.0
         self.created = 0.0
@@ -1211,7 +1212,7 @@ def _search_jsonl_file(fpath: str, pattern: 're.Pattern',
     _jsonl_cache_dirty = True
 
     if matches:
-        r = SearchResult(path=fpath)
+        r = SearchResult(path=fpath, source='jsonl')
         r.matches = matches
         r.encoding = 'utf-8'
         return r
@@ -2131,6 +2132,9 @@ def build_parser() -> argparse.ArgumentParser:
     # 并行加速
     sp.add_argument('--parallel', type=int, default=0, metavar='N',
                     help='并行分群搜索线程数（0=不启用，建议 4-16）')
+    # JSONL 大文件结果导出阈值
+    sp.add_argument('--jsonl-dump', type=int, default=50, metavar='N',
+                    help='JSONL 大文件匹配超过 N 条时导出到 txt（默认50，0=全显示不存文件）')
 
     # scan
     sp2 = sub.add_parser('scan', help='列出目录下所有文本文件')
@@ -2305,6 +2309,49 @@ def _cmd_search(args) -> int:
     else:
         results = searcher.search()
 
+    # JSONL 大文件结果分流: 超过阈值时导出到 txt，屏幕只显示摘要
+    jsonl_dump_threshold = getattr(args, 'jsonl_dump', 50)
+    jsonl_results = [r for r in results if r.source == 'jsonl']
+    jsonl_total_matches = sum(r.match_count for r in jsonl_results)
+    dump_file = None
+
+    if jsonl_results and jsonl_dump_threshold > 0 and jsonl_total_matches > jsonl_dump_threshold:
+        # 导出详细结果到 txt
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        kw_safe = re.sub(r'[^\w\-]', '_', searcher.pattern_str[:30])
+        dump_file = os.path.join(
+            searcher.target_path,
+            f'.doc_searcher_jsonl_{kw_safe}_{ts}.txt'
+        )
+        try:
+            with open(dump_file, 'w', encoding='utf-8') as f:
+                f.write(f"# JSONL 大文件搜索结果\n")
+                f.write(f"# 关键词: {searcher.pattern_str}\n")
+                f.write(f"# 时间: {datetime.now().isoformat()}\n")
+                f.write(f"# 匹配: {jsonl_total_matches} 条 / {len(jsonl_results)} 个文件\n")
+                f.write(f"# 阈值: {jsonl_dump_threshold} (--jsonl-dump)\n\n")
+                for r in jsonl_results:
+                    f.write(f"=== {r.path} ({format_size(r.size)}) ===\n")
+                    for m in r.matches:
+                        f.write(f"  L{m.get('line', '?')}: {m.get('content', '')}\n")
+                    f.write('\n')
+            logger.debug(f"JSONL 结果导出到: {dump_file}")
+        except OSError as e:
+            logger.warning(f"JSONL 结果导出失败: {e}")
+            dump_file = None
+
+        # 屏幕上只保留 JSONL 的摘要（截断匹配列表，只留前几条）
+        _JSONL_SCREEN_PREVIEW = 5
+        for r in jsonl_results:
+            original_count = r.match_count
+            if original_count > _JSONL_SCREEN_PREVIEW:
+                r.matches = r.matches[:_JSONL_SCREEN_PREVIEW]
+                r.matches.append({
+                    'line': 0,
+                    'content': f'... 还有 {original_count - _JSONL_SCREEN_PREVIEW} 条匹配，'
+                               f'详见: {dump_file}',
+                })
+
     summary = searcher.get_summary()
     fmt = _resolve_format(args)
 
@@ -2317,6 +2364,12 @@ def _cmd_search(args) -> int:
         safe_write(output)
     else:
         safe_print(output)
+
+    # 提示用户导出文件位置
+    if dump_file:
+        safe_print(f"\n[JSONL] {jsonl_total_matches} 条匹配已导出到: {dump_file}",
+                   file=sys.stderr)
+
     return 0
 
 
@@ -2569,10 +2622,17 @@ def _cmd_help(args) -> int:
     --max-results N 最多返回 N 个文件
     -v, --verbose   显示完整匹配内容
 
+  JSONL 大文件:
+    >10MB 的 .jsonl/.ndjson 文件会自动用 Python 流式搜索
+    (递归搜索 JSON 所有字符串值, 最多读取 1000 行)
+    --jsonl-dump N  匹配超过 N 条时导出到 .txt (默认 50, 0=全显示)
+
   示例:
     doc_searcher search "TODO" /project
     doc_searcher search -r "\\bpassw(or)?d\\b" /etc --type config
     doc_searcher search --invert "license" /src --type py
+    doc_searcher search "key" /data --jsonl-dump 100  # JSONL超100条存文件
+    doc_searcher search "key" /data --jsonl-dump 0    # JSONL全部显示
 """,
 
         'date': """
