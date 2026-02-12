@@ -51,6 +51,33 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+# ============================================================
+# 安全输出（Windows GBK 控制台不支持 emoji/box-drawing 等 Unicode）
+# ============================================================
+
+def safe_print(*args, **kwargs):
+    """print() 的安全替代，自动处理 Windows 控制台编码问题"""
+    try:
+        print(*args, **kwargs)
+    except UnicodeEncodeError:
+        # 回退：把不可编码的字符替换为 ?
+        import io
+        text = ' '.join(str(a) for a in args)
+        enc = sys.stdout.encoding or 'utf-8'
+        safe_text = text.encode(enc, errors='replace').decode(enc, errors='replace')
+        print(safe_text, **{k: v for k, v in kwargs.items() if k != 'end'}, end=kwargs.get('end', '\n'))
+
+
+def safe_write(text: str):
+    """sys.stdout.write 的安全替代"""
+    try:
+        sys.stdout.write(text)
+    except UnicodeEncodeError:
+        enc = sys.stdout.encoding or 'utf-8'
+        sys.stdout.write(text.encode(enc, errors='replace').decode(enc, errors='replace'))
+
+
 # ============================================================
 # 常量
 # ============================================================
@@ -611,7 +638,7 @@ class GrepBackend:
 
     @staticmethod
     def _parse_grep_line(line: str) -> Optional[Tuple[str, int, str]]:
-        """
+        r"""
         解析 grep -n 的单行输出，正确处理 Windows 路径
 
         格式: filepath:linenum:content
@@ -2004,9 +2031,9 @@ def _cmd_search(args) -> int:
         custom_template=args.format_str,
     )
     if fmt == 'path0':
-        sys.stdout.write(output)
+        safe_write(output)
     else:
-        print(output)
+        safe_print(output)
     return 0
 
 
@@ -2143,9 +2170,9 @@ def _cmd_scan(args) -> int:
         verbose=getattr(args, 'verbose', False),
     )
     if fmt == 'path0':
-        sys.stdout.write(output)
+        safe_write(output)
     else:
-        print(output)
+        safe_print(output)
     return 0
 
 
@@ -2168,16 +2195,16 @@ def _cmd_translate(args) -> int:
                 })
 
     if args.json:
-        print(json.dumps(results, ensure_ascii=False, indent=2))
+        safe_print(json.dumps(results, ensure_ascii=False, indent=2))
     else:
         if not results:
-            print("无需翻译的文件名。")
+            safe_print("无需翻译的文件名。")
         else:
             w = max(len(r['original']) for r in results)
             for r in results:
-                d = 'ZH→EN' if r['has_chinese'] else 'EN→ZH'
-                print(f"  [{d}] {r['original']:<{w}}  →  {r['translated']}")
-            print(f"\n  共 {len(results)} 个文件名可翻译。")
+                d = 'ZH->EN' if r['has_chinese'] else 'EN->ZH'
+                safe_print(f"  [{d}] {r['original']:<{w}}  ->  {r['translated']}")
+            safe_print(f"\n  共 {len(results)} 个文件名可翻译。")
     return 0
 
 
@@ -2196,15 +2223,15 @@ def _cmd_hash(args) -> int:
             'algorithm': args.algo,
             'matches': [r.to_dict() for r in results],
         }
-        print(json.dumps(out, ensure_ascii=False, indent=2))
+        safe_print(json.dumps(out, ensure_ascii=False, indent=2))
     else:
         if not results:
-            print(f"未找到 hash 匹配的文件: {args.hash_value}")
+            safe_print(f"未找到 hash 匹配的文件: {args.hash_value}")
         else:
-            print(f"找到 {len(results)} 个匹配文件:")
+            safe_print(f"找到 {len(results)} 个匹配文件:")
             for r in results:
                 size_str = format_size(r.size)
-                print(f"  {r.path}  ({size_str})")
+                safe_print(f"  {r.path}  ({size_str})")
     return 0
 
 
@@ -2222,39 +2249,37 @@ def _cmd_base64(args) -> int:
             'query': args.query,
             'matches': [r.to_dict() for r in results],
         }
-        print(json.dumps(out, ensure_ascii=False, indent=2))
+        safe_print(json.dumps(out, ensure_ascii=False, indent=2))
     else:
         if not results:
-            print(f"未找到 base64 相关匹配: {args.query}")
+            safe_print(f"未找到 base64 相关匹配: {args.query}")
         else:
-            print(f"找到 {len(results)} 个文件包含匹配:")
+            safe_print(f"找到 {len(results)} 个文件包含匹配:")
             for r in results:
-                print(f"  {r.path}")
+                safe_print(f"  {r.path}")
                 shown = r.matches[:3] if not args.verbose else r.matches
                 for m in shown:
                     form_tag = f" [{m.get('match_form', '')}]" if m.get('match_form') else ''
-                    print(f"    L{m.get('line', '?')}: {m.get('content', '')[:80]}{form_tag}")
+                    safe_print(f"    L{m.get('line', '?')}: {m.get('content', '')[:80]}{form_tag}")
                 if not args.verbose and len(r.matches) > 3:
-                    print(f"    ... 还有 {len(r.matches) - 3} 处匹配")
+                    safe_print(f"    ... 还有 {len(r.matches) - 3} 处匹配")
     return 0
 
 
 def _cmd_help(args) -> int:
-    """详细帮助 —— 按主题输出使用说明"""
+    """详细帮助 -- 按主题输出使用说明 (纯 ASCII，兼容 Windows GBK 控制台)"""
     topics = {
         'search': """
-╔══════════════════════════════════════════════════════════════╗
-║  search — 搜索文件内容                                      ║
-╚══════════════════════════════════════════════════════════════╝
+=== search -- 搜索文件内容 ===
 
   基本用法:
     doc_searcher search "关键词" [路径]
 
   参数:
     关键词          要搜索的文本
-    路径            搜索目录（默认当前目录，用 - 从 stdin 读文件列表）
+    路径            搜索目录 (默认当前目录, 用 - 从 stdin 读文件列表)
     -r, --regex     关键词作为正则表达式
-    --invert        反查：找不包含关键词的文件
+    --invert        反查: 查找不包含关键词的文件
     -s              区分大小写
     -C N            显示匹配行前后 N 行上下文
     --max-matches N 每文件最多匹配 N 次
@@ -2268,9 +2293,7 @@ def _cmd_help(args) -> int:
 """,
 
         'date': """
-╔══════════════════════════════════════════════════════════════╗
-║  日期筛选 — --after / --before / --created-after/before     ║
-╚══════════════════════════════════════════════════════════════╝
+=== 日期筛选 -- --after / --before / --created-after/before ===
 
   --after  DATE    仅保留修改日期 >= DATE 的文件
   --before DATE    仅保留修改日期 <= DATE 的文件
@@ -2279,31 +2302,29 @@ def _cmd_help(args) -> int:
 
   DATE 支持以下格式:
 
-  ┌────────────┬──────────────────────────────┐
-  │ 格式        │ 说明                          │
-  ├────────────┼──────────────────────────────┤
-  │ 2026-02-12 │ 标准日期 YYYY-MM-DD          │
-  │ 2026/02/12 │ 斜线分隔                      │
-  │ 20260212   │ 紧凑格式                      │
-  │ @170000000 │ Unix 时间戳 (秒)              │
-  ├────────────┼──────────────────────────────┤
-  │ td         │ 今天 00:00 (today)           │
-  │ yd         │ 昨天 00:00 (yesterday)       │
-  │ tw         │ 本周一 00:00 (this week)     │
-  │ lw         │ 上周一 00:00 (last week)     │
-  │ tm         │ 本月 1 日 (this month)       │
-  │ lm         │ 上月 1 日 (last month)       │
-  │ ty         │ 今年 1/1 (this year)         │
-  │ ly         │ 去年 1/1 (last year)         │
-  ├────────────┼──────────────────────────────┤
-  │ 3d         │ 3 天前                        │
-  │ 7d         │ 7 天前                        │
-  │ 30d        │ 30 天前                       │
-  │ 1h         │ 1 小时前                      │
-  │ 6h         │ 6 小时前                      │
-  │ 1w         │ 1 周前                        │
-  │ 2w         │ 2 周前                        │
-  └────────────┴──────────────────────────────┘
+    格式            说明
+    ----------      --------------------------------
+    2026-02-12      标准日期 YYYY-MM-DD
+    2026/02/12      斜线分隔
+    20260212        紧凑格式
+    @170000000      Unix 时间戳 (秒)
+    ----------      --------------------------------
+    td              今天 00:00 (today)
+    yd              昨天 00:00 (yesterday)
+    tw              本周一 00:00 (this week)
+    lw              上周一 00:00 (last week)
+    tm              本月 1 日 (this month)
+    lm              上月 1 日 (last month)
+    ty              今年 1/1 (this year)
+    ly              去年 1/1 (last year)
+    ----------      --------------------------------
+    3d              3 天前
+    7d              7 天前
+    30d             30 天前
+    1h              1 小时前
+    6h              6 小时前
+    1w              1 周前
+    2w              2 周前
 
   示例:
     doc_searcher search "key" . --after td               # 今天修改的
@@ -2316,35 +2337,31 @@ def _cmd_help(args) -> int:
 """,
 
         'type': """
-╔══════════════════════════════════════════════════════════════╗
-║  --type — 文件类型预设                                      ║
-╚══════════════════════════════════════════════════════════════╝
+=== --type -- 文件类型预设 ===
 
   -t TYPE, --type TYPE    按预设类型筛选文件
 
-  ┌──────────┬──────────────────────────────────────────────┐
-  │ 类型      │ 包含扩展名                                    │
-  ├──────────┼──────────────────────────────────────────────┤
-  │ py       │ .py .pyw .pyi                                │
-  │ js       │ .js .jsx .mjs .cjs                           │
-  │ ts       │ .ts .tsx                                      │
-  │ web      │ .html .htm .css .scss .js .ts .vue .svelte   │
-  │ java     │ .java .kt .scala .gradle                     │
-  │ c        │ .c .h .cpp .hpp .cc .cxx                     │
-  │ go       │ .go                                           │
-  │ rust     │ .rs                                           │
-  │ ruby     │ .rb .erb .gemspec                             │
-  │ php      │ .php                                          │
-  │ shell    │ .sh .bash .zsh .fish .bat .cmd .ps1           │
-  │ config   │ .json .yaml .yml .toml .ini .cfg .conf .env  │
-  │ xml      │ .xml .xsl .xsd .svg .plist                   │
-  │ doc      │ .md .rst .txt .tex .adoc .org                │
-  │ data     │ .csv .tsv .jsonl .ndjson                     │
-  │ sql      │ .sql                                          │
-  │ proto    │ .proto .graphql                               │
-  │ log      │ .log .out .err                                │
-  │ all-text │ * (不筛选扩展名，靠内容判定)                    │
-  └──────────┴──────────────────────────────────────────────┘
+    类型        包含扩展名
+    --------    ------------------------------------------
+    py          .py .pyw .pyi
+    js          .js .jsx .mjs .cjs
+    ts          .ts .tsx
+    web         .html .htm .css .scss .js .ts .vue .svelte
+    java        .java .kt .scala .gradle
+    c           .c .h .cpp .hpp .cc .cxx
+    go          .go
+    rust        .rs
+    ruby        .rb .erb .gemspec
+    php         .php
+    shell       .sh .bash .zsh .fish .bat .cmd .ps1
+    config      .json .yaml .yml .toml .ini .cfg .conf .env
+    xml         .xml .xsl .xsd .svg .plist
+    doc         .md .rst .txt .tex .adoc .org
+    data        .csv .tsv .jsonl .ndjson
+    sql         .sql
+    proto       .proto .graphql
+    log         .log .out .err
+    all-text    * (不筛选扩展名, 靠内容判定)
 
   --type 可与 -i (include) 叠加使用。
 
@@ -2355,15 +2372,13 @@ def _cmd_help(args) -> int:
 """,
 
         'hash': """
-╔══════════════════════════════════════════════════════════════╗
-║  hash — 文件 hash 指纹对比 (取证用)                         ║
-╚══════════════════════════════════════════════════════════════╝
+=== hash -- 文件 hash 指纹对比 (取证用) ===
 
   用法: doc_searcher hash <hash值> <搜索目录> [选项]
 
   根据文件的 MD5/SHA1/SHA256/SHA512 查找目录中所有副本。
   算法默认按 hash 长度自动检测:
-    32字符 → MD5 | 40字符 → SHA1 | 64字符 → SHA256 | 128字符 → SHA512
+    32字符 = MD5 | 40字符 = SHA1 | 64字符 = SHA256 | 128字符 = SHA512
 
   选项:
     -a, --algo ALGO   指定算法 (auto/md5/sha1/sha256/sha512)
@@ -2376,16 +2391,14 @@ def _cmd_help(args) -> int:
 """,
 
         'base64': """
-╔══════════════════════════════════════════════════════════════╗
-║  base64 — Base64 双向搜索                                   ║
-╚══════════════════════════════════════════════════════════════╝
+=== base64 -- Base64 双向搜索 ===
 
   用法: doc_searcher base64 <内容> <搜索目录>
 
   同时搜索三种形式:
-    1. 原文           → "secret_key"
-    2. 原文的 base64  → "c2VjcmV0X2tleQ=="
-    3. 若输入本身是 base64，解码后的原文
+    1. 原文           "secret_key"
+    2. 原文的 base64  "c2VjcmV0X2tleQ=="
+    3. 若输入本身是 base64, 解码后的原文
 
   适合取证场景: 在代码中搜索被 base64 编码隐藏的敏感信息。
 
@@ -2395,23 +2408,19 @@ def _cmd_help(args) -> int:
 """,
 
         'format': """
-╔══════════════════════════════════════════════════════════════╗
-║  --format — 输出格式                                        ║
-╚══════════════════════════════════════════════════════════════╝
+=== --format -- 输出格式 ===
 
   --format FORMAT   指定输出格式
 
-  ┌────────┬──────────────────────────────────────────────┐
-  │ 格式    │ 说明                                          │
-  ├────────┼──────────────────────────────────────────────┤
-  │ text   │ 人类可读（默认终端格式，带统计和装饰）        │
-  │ grep   │ path:line:content（grep 兼容，管道自动切换） │
-  │ path   │ 仅文件路径，每行一个                          │
-  │ path0  │ 路径以 \\0 分隔（配合 xargs -0）              │
-  │ csv    │ CSV 格式 path,line,encoding,size,content      │
-  │ json   │ JSON 结构化输出（含统计信息）                 │
-  │ custom │ 自定义模板（需配合 --format-str）             │
-  └────────┴──────────────────────────────────────────────┘
+    格式      说明
+    ------    ------------------------------------------
+    text      人类可读 (默认终端格式, 带统计和装饰)
+    grep      path:line:content (grep 兼容, 管道自动切换)
+    path      仅文件路径, 每行一个
+    path0     路径以 \\0 分隔 (配合 xargs -0)
+    csv       CSV 格式 path,line,encoding,size,content
+    json      JSON 结构化输出 (含统计信息)
+    custom    自定义模板 (需配合 --format-str)
 
   --format-str 占位符: {path} {filename} {line} {content}
                        {encoding} {size} {date} {matches}
@@ -2429,16 +2438,14 @@ def _cmd_help(args) -> int:
 """,
 
         'pipe': """
-╔══════════════════════════════════════════════════════════════╗
-║  管道组合                                                    ║
-╚══════════════════════════════════════════════════════════════╝
+=== 管道组合 ===
 
-  输入管道 (stdin → doc_searcher):
+  输入管道 (stdin -> doc_searcher):
     将其他命令的文件列表输入给 doc_searcher 搜索:
     find /var/log -name "*.log" | doc_searcher search "error" -
     fd ".conf" | doc_searcher search "password" -
 
-  输出管道 (doc_searcher → 其他命令):
+  输出管道 (doc_searcher -> 其他命令):
     doc_searcher search "TODO" . --format path | xargs wc -l
     doc_searcher search "key" . -0 | xargs -0 rm
     doc_searcher scan . --format path | head -20
@@ -2455,19 +2462,17 @@ def _cmd_help(args) -> int:
 """,
 
         'parallel': """
-╔══════════════════════════════════════════════════════════════╗
-║  --parallel — 并行加速搜索                                   ║
-╚══════════════════════════════════════════════════════════════╝
+=== --parallel -- 并行加速搜索 ===
 
-  --parallel N   使用 N 个线程并行搜索（将目录按子目录分 chunk）
+  --parallel N   使用 N 个线程并行搜索 (将目录按子目录分 chunk)
 
-  原理: 将搜索目标的一级子目录拆分为 N 个独立任务，并行执行。
-  适用场景: 大目录 + Python 回退搜索（rg 本身已内置并行）。
+  原理: 将搜索目标的一级子目录拆分为 N 个独立任务, 并行执行。
+  适用场景: 大目录 + Python 回退搜索 (rg 本身已内置并行)。
 
   建议线程数:
-    SSD     →  8-16
-    HDD     →  4-8
-    网络盘  →  2-4
+    SSD      8-16
+    HDD      4-8
+    网络盘   2-4
 
   示例:
     doc_searcher search "keyword" /large/dir --parallel 8
@@ -2475,26 +2480,22 @@ def _cmd_help(args) -> int:
 """,
 
         'version': """
-╔══════════════════════════════════════════════════════════════╗
-║  --version — 版本号筛选                                      ║
-╚══════════════════════════════════════════════════════════════╝
+=== --version -- 版本号筛选 ===
 
   --version SPEC   仅保留路径中含匹配版本号的文件
 
-  从文件路径中提取版本号（如 v1.2.3, 1.0.0-beta），然后匹配。
+  从文件路径中提取版本号 (如 v1.2.3, 1.0.0-beta), 然后匹配。
 
-  ┌──────────┬──────────────────────────────────────────┐
-  │ 规格      │ 含义                                      │
-  ├──────────┼──────────────────────────────────────────┤
-  │ 1.2.3    │ 精确匹配 1.2.3                            │
-  │ 1.2      │ 匹配 1.2 或 1.2.x                        │
-  │ >1.0     │ 版本 > 1.0                                │
-  │ >=2.0    │ 版本 >= 2.0                               │
-  │ <3.0     │ 版本 < 3.0                                │
-  │ <=1.5    │ 版本 <= 1.5                               │
-  │ 1.x      │ 1.开头的任意版本                           │
-  │ 2.3.*    │ 2.3.开头的任意版本                         │
-  └──────────┴──────────────────────────────────────────┘
+    规格        含义
+    --------    --------------------------------
+    1.2.3       精确匹配 1.2.3
+    1.2         匹配 1.2 或 1.2.x
+    >1.0        版本 > 1.0
+    >=2.0       版本 >= 2.0
+    <3.0        版本 < 3.0
+    <=1.5       版本 <= 1.5
+    1.x         1.开头的任意版本
+    2.3.*       2.3.开头的任意版本
 
   示例:
     doc_searcher search "bug" /releases --version ">1.0"
@@ -2506,18 +2507,17 @@ def _cmd_help(args) -> int:
     topic = args.topic.lower() if args.topic else 'all'
 
     if topic == 'all':
-        # 输出概览
-        print("""
-╔══════════════════════════════════════════════════════════════╗
-║          HIDRS 文档内容搜索器 — 完整帮助                     ║
-╚══════════════════════════════════════════════════════════════╝
+        safe_print("""
+============================================================
+    HIDRS 文档内容搜索器 -- 完整帮助
+============================================================
 
   子命令:
-    search     搜索文件内容（关键词/正则/反查）
+    search     搜索文件内容 (关键词/正则/反查)
     scan       列出目录下所有文本文件
     hash       通过 MD5/SHA 查找文件副本
     base64     Base64 双向搜索
-    translate  批量翻译文件名（中↔英）
+    translate  批量翻译文件名 (中<->英)
     help       查看详细帮助
 
   帮助主题 (doc_searcher help <主题>):
@@ -2539,16 +2539,16 @@ def _cmd_help(args) -> int:
     doc_searcher hash <sha256> /dir             hash对比
     doc_searcher base64 "secret" /dir           base64搜索
 
-  搜索后端: ripgrep → grep → findstr(Win) → Python (自动选择)
+  搜索后端: ripgrep -> grep -> findstr(Win) -> Python (自动选择)
   编码检测: UTF-8, GBK, Big5, Shift_JIS, EUC-KR 等自动识别
 """)
         return 0
 
     if topic in topics:
-        print(topics[topic])
+        safe_print(topics[topic])
     else:
-        print(f"未知帮助主题: {topic}")
-        print(f"可用主题: {', '.join(sorted(topics.keys()))}")
+        safe_print(f"未知帮助主题: {topic}")
+        safe_print(f"可用主题: {', '.join(sorted(topics.keys()))}")
         return 1
     return 0
 
