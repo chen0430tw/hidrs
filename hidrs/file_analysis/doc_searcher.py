@@ -998,10 +998,124 @@ def parse_date(date_str: str) -> datetime:
 # ============================================================
 
 class OutputFormatter:
+    """
+    输出格式化器
+
+    预设格式 (--format):
+      grep     grep 兼容格式: path:line:content（可直接管道给其他工具）
+      path     仅输出文件路径，每行一个（管道友好）
+      path0    路径以 \\0 分隔（配合 xargs -0）
+      csv      CSV 格式: path,line,encoding,content
+      custom   自定义模板，用 {path} {line} {content} {encoding} {size} {filename} {date} 占位
+
+    管道检测:
+      stdout 不是终端时自动切换为 grep 格式（无装饰、无统计头）
+    """
+
+    # 预设格式名
+    PRESETS = ('grep', 'path', 'path0', 'csv', 'json', 'text')
+
+    @staticmethod
+    def is_piped() -> bool:
+        """检测 stdout 是否被管道/重定向（不是终端）"""
+        return not sys.stdout.isatty()
+
+    @staticmethod
+    def format_output(results: List[SearchResult], summary: Dict[str, Any],
+                      fmt: str = 'text', verbose: bool = False,
+                      custom_template: Optional[str] = None) -> str:
+        """统一输出入口"""
+        if fmt == 'json':
+            return OutputFormatter.format_json(results, summary)
+        elif fmt == 'grep':
+            return OutputFormatter.format_grep(results)
+        elif fmt == 'path':
+            return OutputFormatter.format_paths(results, separator='\n')
+        elif fmt == 'path0':
+            return OutputFormatter.format_paths(results, separator='\0')
+        elif fmt == 'csv':
+            return OutputFormatter.format_csv(results)
+        elif fmt == 'custom' and custom_template:
+            return OutputFormatter.format_custom(results, custom_template)
+        else:
+            return OutputFormatter.format_text(results, summary, verbose)
+
+    @staticmethod
+    def format_grep(results: List[SearchResult]) -> str:
+        """grep 兼容格式: path:line:content — 可直接管道给 awk/sed/cut 等"""
+        lines = []
+        for r in results:
+            if r.matches:
+                for m in r.matches:
+                    lines.append(f"{r.path}:{m.get('line', 0)}:{m.get('content', '')}")
+            else:
+                lines.append(r.path)
+        return '\n'.join(lines)
+
+    @staticmethod
+    def format_paths(results: List[SearchResult], separator: str = '\n') -> str:
+        """仅输出路径 — 管道给 xargs / while read 等"""
+        return separator.join(r.path for r in results)
+
+    @staticmethod
+    def format_csv(results: List[SearchResult]) -> str:
+        """CSV 格式输出"""
+        lines = ['path,line,encoding,size,content']
+        for r in results:
+            if r.matches:
+                for m in r.matches:
+                    content = m.get('content', '').replace('"', '""')
+                    lines.append(
+                        f'"{r.path}",{m.get("line", 0)},"{r.encoding or ""}",'
+                        f'{r.size},"{content}"'
+                    )
+            else:
+                lines.append(f'"{r.path}",,"{r.encoding or ""}",{r.size},')
+        return '\n'.join(lines)
+
+    @staticmethod
+    def format_custom(results: List[SearchResult], template: str) -> str:
+        """
+        自定义模板格式
+
+        占位符: {path} {filename} {line} {content} {encoding} {size} {date} {matches}
+        示例: --format-str "{path}\t{line}\t{content}"
+        """
+        lines = []
+        for r in results:
+            date_str = (datetime.fromtimestamp(r.modified).strftime('%Y-%m-%d %H:%M')
+                        if r.modified else '')
+            if r.matches:
+                for m in r.matches:
+                    line = template.format(
+                        path=r.path,
+                        filename=os.path.basename(r.path),
+                        line=m.get('line', ''),
+                        content=m.get('content', ''),
+                        encoding=r.encoding or '',
+                        size=r.size,
+                        date=date_str,
+                        matches=r.match_count,
+                    )
+                    lines.append(line)
+            else:
+                line = template.format(
+                    path=r.path,
+                    filename=os.path.basename(r.path),
+                    line='',
+                    content='',
+                    encoding=r.encoding or '',
+                    size=r.size,
+                    date=date_str,
+                    matches=r.match_count,
+                )
+                lines.append(line)
+        return '\n'.join(lines)
 
     @staticmethod
     def format_text(results: List[SearchResult], summary: Dict[str, Any],
                     verbose: bool = False) -> str:
+        """人类可读格式（终端交互用）"""
         lines = []
         sep = '=' * 72
 
@@ -1080,12 +1194,34 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用示例:
+  # 基本搜索
   python doc_searcher.py search "密码" /home/user
   python doc_searcher.py search -r "[\\w.]+@[\\w.]+" /project
   python doc_searcher.py search --invert "copyright" /project
-  python doc_searcher.py search "TODO" . --min-size 1KB --after 2025-01-01 --json
-  python doc_searcher.py scan /home/user/docs
-  python doc_searcher.py translate /home/user/docs
+
+  # 管道组合
+  python doc_searcher.py search "TODO" . --format path | xargs wc -l
+  python doc_searcher.py search "error" . --format grep | sort -t: -k1
+  python doc_searcher.py search "key" . -0 | xargs -0 ls -la
+  find . -name "*.conf" | python doc_searcher.py search "password" -
+
+  # 自定义输出格式
+  python doc_searcher.py search "def " . --format custom --format-str "{filename}:{line} {content}"
+
+  # 格式化输出
+  python doc_searcher.py search "TODO" . --format csv > results.csv
+  python doc_searcher.py search "error" /var/log --json | jq '.results[].path'
+
+输出格式 (--format):
+  text     人类可读（默认，终端交互）
+  grep     path:line:content（兼容 grep，管道友好）
+  path     仅路径，每行一个
+  path0    路径以 \\0 分隔（配合 xargs -0）
+  csv      CSV 格式
+  json     JSON 格式
+  custom   自定义模板（需配合 --format-str）
+
+注: stdout 被管道/重定向时自动切换为 grep 格式
         """)
 
     sub = parser.add_subparsers(dest='command', help='子命令')
@@ -1093,7 +1229,8 @@ def build_parser() -> argparse.ArgumentParser:
     # search
     sp = sub.add_parser('search', help='搜索文件内容')
     sp.add_argument('keyword', help='搜索关键词')
-    sp.add_argument('path', help='搜索路径')
+    sp.add_argument('path', nargs='?', default='.',
+                    help='搜索路径（用 - 从 stdin 读取文件列表）')
     sp.add_argument('-r', '--regex', action='store_true', help='关键词作为正则表达式')
     sp.add_argument('--invert', action='store_true', help='反查：查找不包含关键词的文件')
     sp.add_argument('-s', '--case-sensitive', action='store_true', help='区分大小写')
@@ -1110,9 +1247,18 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument('--sort', default='path', choices=['path', 'name', 'size', 'date', 'matches'])
     sp.add_argument('--desc', action='store_true', help='降序')
     sp.add_argument('--max-results', type=int, default=0, metavar='N')
-    sp.add_argument('--json', action='store_true', help='JSON 输出')
     sp.add_argument('-v', '--verbose', action='store_true', help='详细输出')
     sp.add_argument('--translate', action='store_true', help='文件名中英翻译')
+    # 输出格式
+    sp.add_argument('--json', action='store_true', help='JSON 输出（等同 --format json）')
+    sp.add_argument('-0', '--null', action='store_true',
+                    help='路径以 \\0 分隔输出（等同 --format path0，配合 xargs -0）')
+    sp.add_argument('--format', default=None,
+                    choices=['text', 'grep', 'path', 'path0', 'csv', 'json', 'custom'],
+                    help='输出格式（默认: text，管道时自动切 grep）')
+    sp.add_argument('--format-str', default=None, metavar='TEMPLATE',
+                    help='自定义格式模板，占位符: {path} {filename} {line} {content} '
+                         '{encoding} {size} {date} {matches}')
 
     # scan
     sp2 = sub.add_parser('scan', help='列出目录下所有文本文件')
@@ -1128,8 +1274,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp2.add_argument('--sort', default='path', choices=['path', 'name', 'size', 'date'])
     sp2.add_argument('--desc', action='store_true')
     sp2.add_argument('--max-results', type=int, default=0)
-    sp2.add_argument('--json', action='store_true')
     sp2.add_argument('--translate', action='store_true')
+    sp2.add_argument('--json', action='store_true', help='JSON 输出')
+    sp2.add_argument('-0', '--null', action='store_true', help='\\0 分隔输出')
+    sp2.add_argument('--format', default=None,
+                     choices=['text', 'path', 'path0', 'csv', 'json'],
+                     help='输出格式')
+    sp2.add_argument('-v', '--verbose', action='store_true', help='详细输出')
 
     # translate
     sp3 = sub.add_parser('translate', help='批量翻译文件名（中↔英）')
@@ -1158,14 +1309,50 @@ def cli_main(argv: Optional[List[str]] = None) -> int:
     return 0
 
 
+def _resolve_format(args) -> str:
+    """决定输出格式：显式指定 > 快捷标志 > 管道自动检测 > text"""
+    if args.format:
+        return args.format
+    if args.json:
+        return 'json'
+    if getattr(args, 'null', False):
+        return 'path0'
+    # stdout 被管道/重定向时自动切换为 grep 格式
+    if OutputFormatter.is_piped():
+        return 'grep'
+    return 'text'
+
+
+def _read_stdin_file_list() -> List[str]:
+    """从 stdin 读取文件路径列表（支持换行和 \\0 分隔）"""
+    raw = sys.stdin.read()
+    # 同时支持 \n 和 \0 分隔
+    if '\0' in raw:
+        paths = raw.split('\0')
+    else:
+        paths = raw.split('\n')
+    return [p.strip() for p in paths if p.strip() and os.path.isfile(p.strip())]
+
+
 def _cmd_search(args) -> int:
     min_size = parse_size(args.min_size) if args.min_size else None
     max_size = parse_size(args.max_size) if args.max_size else None
     after = parse_date(args.after) if args.after else None
     before = parse_date(args.before) if args.before else None
 
+    # 管道输入模式：path 为 - 或 stdin 非终端
+    stdin_files = None
+    search_path = args.path
+    if args.path == '-' or (args.path == '.' and not sys.stdin.isatty()):
+        stdin_files = _read_stdin_file_list()
+        if not stdin_files:
+            print("stdin 中无有效文件路径", file=sys.stderr)
+            return 1
+        # 用第一个文件的目录做 target，后续用文件列表覆盖
+        search_path = os.path.dirname(stdin_files[0]) or '.'
+
     searcher = DocSearcher(
-        target_path=args.path,
+        target_path=search_path,
         keyword=None if args.regex else args.keyword,
         regex_pattern=args.keyword if args.regex else None,
         case_sensitive=args.case_sensitive,
@@ -1183,14 +1370,50 @@ def _cmd_search(args) -> int:
         max_results=args.max_results,
     )
 
-    results = searcher.search()
-    summary = searcher.get_summary()
-
-    if args.json:
-        print(OutputFormatter.format_json(results, summary))
+    # stdin 文件列表模式：直接搜索指定文件
+    if stdin_files:
+        results = _search_file_list(searcher, stdin_files)
+        searcher.stats['files_matched'] = len(results)
+        searcher.stats['total_matches'] = sum(r.match_count for r in results)
     else:
-        print(OutputFormatter.format_text(results, summary, verbose=args.verbose))
+        results = searcher.search()
+
+    summary = searcher.get_summary()
+    fmt = _resolve_format(args)
+
+    output = OutputFormatter.format_output(
+        results, summary,
+        fmt=fmt, verbose=args.verbose,
+        custom_template=args.format_str,
+    )
+    # path0 格式不要加末尾换行
+    if fmt == 'path0':
+        sys.stdout.write(output)
+    else:
+        print(output)
     return 0
+
+
+def _search_file_list(searcher: DocSearcher, files: List[str]) -> List[SearchResult]:
+    """对 stdin 传入的文件列表逐个搜索"""
+    results = []
+    for fpath in files:
+        is_text, enc = TextDetector.is_text_file(fpath)
+        searcher.stats['files_scanned'] += 1
+        if not is_text:
+            continue
+        if searcher._py_pattern:
+            r = PythonBackend.search_file(
+                fpath, searcher._py_pattern, enc,
+                invert=searcher.invert,
+                context_lines=searcher.context_lines,
+                max_matches=searcher.max_matches_per_file,
+            )
+            if r:
+                results.append(r)
+        else:
+            results.append(SearchResult(path=fpath, encoding=enc))
+    return results
 
 
 def _cmd_scan(args) -> int:
@@ -1215,10 +1438,16 @@ def _cmd_scan(args) -> int:
     results = searcher.scan_text_files()
     summary = searcher.get_summary()
 
-    if args.json:
-        print(OutputFormatter.format_json(results, summary))
+    # scan 也支持格式选择
+    fmt = _resolve_format(args)
+    output = OutputFormatter.format_output(
+        results, summary, fmt=fmt,
+        verbose=getattr(args, 'verbose', False),
+    )
+    if fmt == 'path0':
+        sys.stdout.write(output)
     else:
-        print(OutputFormatter.format_text(results, summary))
+        print(output)
     return 0
 
 
