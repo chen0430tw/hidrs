@@ -3271,6 +3271,12 @@ class SessionLogSearcher:
                     cmd = str(inp.get('command', '') or '')
                     pattern = str(inp.get('pattern', '') or inp.get('keyword', '') or '')
                     content = str(inp.get('content', '') or '')
+                    # Task 工具特有字段
+                    description = str(inp.get('description', '') or '')
+                    prompt = str(inp.get('prompt', '') or '')
+                    subagent = str(inp.get('subagent_type', '') or '')
+                    # TodoWrite 特有字段
+                    todos = inp.get('todos', [])
                     # 组装摘要
                     parts = []
                     if fp:
@@ -3279,6 +3285,18 @@ class SessionLogSearcher:
                         parts.append(cmd[:200])
                     if pattern:
                         parts.append(f'pattern="{pattern}"')
+                    if description:
+                        tag = f'[{subagent}] ' if subagent else ''
+                        parts.append(f'{tag}{description}')
+                    if prompt and not description:
+                        parts.append(prompt[:200])
+                    if todos and isinstance(todos, list):
+                        todo_summary = '; '.join(
+                            str(t.get('content', ''))[:40]
+                            for t in todos[:5] if isinstance(t, dict)
+                        )
+                        if todo_summary:
+                            parts.append(todo_summary)
                     if content and not fp:
                         parts.append(content[:100])
                     entry.tool_input = ' | '.join(parts) if parts else json.dumps(inp, ensure_ascii=False)[:200]
