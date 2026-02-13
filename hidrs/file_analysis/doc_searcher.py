@@ -2275,6 +2275,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp7.add_argument('--thinking', action='store_true', help='显示 thinking 内容')
     sp7.add_argument('--no-subagents', action='store_true',
                      help='跳过 subagents/ 子代理文件')
+    sp7.add_argument('--full-content', action='store_true',
+                     help='显示 Write/Edit/NotebookEdit 的完整写入内容')
     sp7.add_argument('-v', '--verbose', action='store_true', help='显示完整内容')
     sp7.add_argument('--json', action='store_true', help='JSON 格式输出')
 
@@ -2976,6 +2978,10 @@ def _cmd_help(args) -> int:
     --after TIME      时间下限 (支持快捷符，同时做 mtime 前置过滤)
     --before TIME     时间上限 (支持快捷符)
     --no-subagents    跳过 subagents/ 子代理文件
+    --full-content    显示 Write/Edit/NotebookEdit 的完整写入内容
+                      Write → content (整个文件)
+                      Edit  → old_string + new_string
+                      NotebookEdit → new_source
     --thinking        显示 thinking 内容
     --max-results N   最大返回条数 (默认 50, 0=不限)
     -v, --verbose     显示完整内容
@@ -3028,6 +3034,15 @@ def _cmd_help(args) -> int:
 
     # 跳过子代理转录
     doc_searcher session "error" --no-subagents /path/to/sessions
+
+    # 恢复 Write 写入的文件内容 (提取完整 content)
+    doc_searcher session --tool Write --full-content -v "test_ai_dialogue" /path/to/sessions
+
+    # 查看所有 Edit 操作的完整 diff
+    doc_searcher session --tool Edit --full-content --after yd /path/to/sessions
+
+    # JSON 格式导出完整写入内容 (可用 jq 提取)
+    doc_searcher session --tool Write --full-content --json /path/to/sessions | jq '.results[].write_content'
 
     # 查看 agent 的思考过程
     doc_searcher session "error" --thinking --role assistant /path/to/sessions
@@ -3136,7 +3151,8 @@ class SessionLogEntry:
 
     __slots__ = ('type', 'role', 'tool_name', 'tool_input', 'content_text',
                  'thinking', 'timestamp', 'session_id', 'slug', 'model',
-                 'file_path', 'uuid', 'line_num', 'raw_size')
+                 'file_path', 'uuid', 'line_num', 'raw_size',
+                 'write_content')
 
     def __init__(self):
         self.type: str = ''           # 'assistant', 'user', 'file-history-snapshot'
@@ -3153,6 +3169,7 @@ class SessionLogEntry:
         self.uuid: str = ''
         self.line_num: int = 0        # JSONL 行号
         self.raw_size: int = 0        # 原始 JSON 字节大小
+        self.write_content: str = ''  # Write/Edit/NotebookEdit 的完整文件内容
 
 
 class SessionLogSearcher:
@@ -3182,9 +3199,11 @@ class SessionLogSearcher:
                  max_results: int = 0,
                  content_only: bool = False,
                  show_thinking: bool = False,
-                 skip_subagents: bool = False):
+                 skip_subagents: bool = False,
+                 full_content: bool = False):
 
         self.session_dir = os.path.abspath(session_dir)
+        self.full_content = full_content
         self.keyword = keyword
         self.regex_pattern = regex_pattern
         self.case_sensitive = case_sensitive
@@ -3392,7 +3411,7 @@ class SessionLogSearcher:
                 inp = block.get('input', {})
                 if isinstance(inp, dict):
                     # 提取关键参数（强制 str 防止 JSON 字段类型异常）
-                    fp = str(inp.get('file_path', '') or inp.get('path', '') or '')
+                    fp = str(inp.get('file_path', '') or inp.get('notebook_path', '') or inp.get('path', '') or '')
                     if fp:
                         entry.file_path = fp
                     cmd = str(inp.get('command', '') or '')
@@ -3427,6 +3446,26 @@ class SessionLogSearcher:
                     if content and not fp:
                         parts.append(content[:100])
                     entry.tool_input = ' | '.join(parts) if parts else json.dumps(inp, ensure_ascii=False)[:200]
+
+                    # --full-content: 保存 Write/Edit/NotebookEdit 的完整写入内容
+                    if self.full_content and entry.tool_name in ('Write', 'Edit', 'NotebookEdit'):
+                        wc_parts = []
+                        if content:  # Write.content / NotebookEdit.new_source 共用 'content' 键
+                            wc_parts.append(content)
+                        new_source = str(inp.get('new_source', '') or '')
+                        if new_source:  # NotebookEdit
+                            wc_parts.append(new_source)
+                        old_string = str(inp.get('old_string', '') or '')
+                        new_string = str(inp.get('new_string', '') or '')
+                        if old_string or new_string:  # Edit
+                            edit_parts = []
+                            if old_string:
+                                edit_parts.append(f'--- old_string ---\n{old_string}')
+                            if new_string:
+                                edit_parts.append(f'+++ new_string +++\n{new_string}')
+                            wc_parts.append('\n'.join(edit_parts))
+                        if wc_parts:
+                            entry.write_content = '\n'.join(wc_parts)
 
             elif block_type == 'tool_result':
                 # 用户消息中的 tool_result
@@ -3501,6 +3540,7 @@ class SessionLogSearcher:
                 entry.tool_name,
                 entry.file_path,
                 entry.thinking,
+                entry.write_content,
             ]))
             if not self._pattern.search(searchable):
                 return False
@@ -3617,6 +3657,13 @@ class SessionLogSearcher:
                 for cl in content.split('\n'):
                     lines.append(f"       {cl}")
 
+            # 写入内容: --full-content 时显示
+            if e.write_content:
+                lines.append(f"       ┌── 写入内容 ({len(e.write_content)} 字符) ──")
+                for cl in e.write_content.split('\n'):
+                    lines.append(f"       │ {cl}")
+                lines.append(f"       └──────────────────")
+
             # thinking: --thinking 时始终显示，否则仅当关键词匹配到 thinking 时显示
             if e.thinking:
                 show_it = self.show_thinking
@@ -3643,6 +3690,7 @@ class SessionLogSearcher:
                 'tool_input': e.tool_input or None,
                 'file_path': e.file_path or None,
                 'content': e.content_text[:1000] if e.content_text else None,
+                'write_content': e.write_content if e.write_content else None,
                 'thinking': e.thinking[:500] if e.thinking else None,
                 'timestamp': e.timestamp,
                 'session_id': e.session_id,
@@ -3714,6 +3762,7 @@ def _cmd_session(args) -> int:
         max_results=args.max_results,
         show_thinking=args.thinking,
         skip_subagents=getattr(args, 'no_subagents', False),
+        full_content=getattr(args, 'full_content', False),
     )
 
     results = searcher.search()
