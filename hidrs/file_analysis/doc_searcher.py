@@ -1803,10 +1803,12 @@ def format_size(size_bytes: int) -> str:
 
 def parse_size(size_str: str) -> int:
     size_str = size_str.strip().upper()
-    units = {'B': 1, 'KB': 1024, 'MB': 1024**2, 'GB': 1024**3, 'TB': 1024**4}
+    units = {'TB': 1024**4, 'GB': 1024**3, 'MB': 1024**2, 'KB': 1024,
+             'T': 1024**4, 'G': 1024**3, 'M': 1024**2, 'K': 1024, 'B': 1}
     for unit, multiplier in sorted(units.items(), key=lambda x: -len(x[0])):
         if size_str.endswith(unit):
-            return int(float(size_str[:-len(unit)].strip()) * multiplier)
+            num_part = size_str[:-len(unit)].strip()
+            return int(float(num_part) * multiplier) if num_part else multiplier
     return int(size_str)
 
 
@@ -4311,8 +4313,8 @@ def _cmd_file_history(args) -> int:
     fmt = 'text'
     if getattr(args, 'json', False):
         fmt = 'json'
-    elif OutputFormatter.is_piped():
-        fmt = 'json'  # 管道输出默认 JSON（文件历史不适合 grep 格式）
+    elif OutputFormatter.is_piped() and not args.verbose and not getattr(args, 'diff', False):
+        fmt = 'json'  # 管道输出默认 JSON（但 --verbose/--diff 强制 text）
 
     if fmt == 'json':
         safe_print(searcher.format_json(results))
