@@ -1879,7 +1879,8 @@ def parse_date(date_str: str) -> datetime:
         return datetime.fromtimestamp(int(s[1:]))
 
     # 标准日期格式
-    for fmt in ('%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '%Y/%m/%d', '%Y%m%d'):
+    for fmt in ('%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S',
+                '%Y/%m/%d', '%Y/%m/%d %H:%M:%S', '%Y%m%d'):
         try:
             return datetime.strptime(date_str.strip(), fmt)
         except ValueError:
