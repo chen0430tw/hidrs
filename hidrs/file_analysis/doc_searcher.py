@@ -161,6 +161,22 @@ class TextDetector:
 
     ALLOWED_CONTROL_CHARS = {0x09, 0x0A, 0x0D}
 
+    # 已知的文本格式扩展名 — 跳过控制字符比例检测，直接走编码检测
+    # 这些格式（尤其 JSONL）可能含大量 JSON 转义序列，字节级控制字符比例
+    # 容易超过 5% 阈值被误判为二进制
+    KNOWN_TEXT_EXTENSIONS: Set[str] = {
+        '.json', '.jsonl', '.ndjson',
+        '.csv', '.tsv',
+        '.log', '.out', '.err',
+        '.txt', '.md', '.rst', '.tex',
+        '.py', '.js', '.ts', '.html', '.css', '.xml', '.yaml', '.yml',
+        '.toml', '.ini', '.cfg', '.conf', '.env', '.properties',
+        '.sh', '.bash', '.zsh', '.bat', '.cmd', '.ps1',
+        '.java', '.c', '.h', '.cpp', '.hpp', '.go', '.rs', '.rb', '.php',
+        '.sql', '.proto', '.graphql',
+        '.org', '.adoc',
+    }
+
     @staticmethod
     def is_text_file(file_path: str, sample_size: int = TEXT_DETECT_SAMPLE_SIZE) -> Tuple[bool, Optional[str]]:
         """
@@ -184,18 +200,25 @@ class TextDetector:
             if encoding:
                 return True, encoding
 
+            # 已知文本扩展名：跳过控制字符/空字节启发式检测
+            # JSONL 等格式含 JSON 转义字符，字节级检测会误判
+            trust_ext = ext in TextDetector.KNOWN_TEXT_EXTENSIONS
+
             # 空字节 -> 可能是二进制或 UTF-16 无 BOM
             null_ratio = sample.count(b'\x00') / len(sample) if sample else 0
             if null_ratio > 0.1:
                 encoding = TextDetector._try_utf16_no_bom(sample)
                 if encoding:
                     return True, encoding
-                return False, None
+                if not trust_ext:
+                    return False, None
+                # 已知文本扩展名即使有空字节也继续尝试编码检测
 
-            # 控制字符过多 -> 二进制
-            non_text = sum(1 for b in sample if b < 0x20 and b not in TextDetector.ALLOWED_CONTROL_CHARS)
-            if len(sample) > 0 and non_text / len(sample) > 0.05:
-                return False, None
+            # 控制字符过多 -> 二进制（对已知文本扩展名跳过此检测）
+            if not trust_ext:
+                non_text = sum(1 for b in sample if b < 0x20 and b not in TextDetector.ALLOWED_CONTROL_CHARS)
+                if len(sample) > 0 and non_text / len(sample) > 0.05:
+                    return False, None
 
             # chardet 检测
             if HAS_CHARDET:
@@ -351,6 +374,30 @@ class FilenameTranslator:
                 return result
         except Exception as e:
             logger.debug(f"翻译失败 '{filename}': {e}")
+        return None
+
+    def translate_keyword(self, text: str) -> Optional[str]:
+        """翻译搜索关键词（纯文本，中->英 / 英->中）"""
+        if not self._available:
+            return None
+        text = text.strip()
+        if not text:
+            return None
+        cache_key = f'__kw__{text}'
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+        try:
+            if self.contains_chinese(text):
+                translated = self._translator_zh_en.translate(text)
+            else:
+                translated = self._translator_en_zh.translate(text)
+            if translated and translated.strip().lower() != text.lower():
+                result = translated.strip()
+                if len(self._cache) < self._cache_size:
+                    self._cache[cache_key] = result
+                return result
+        except Exception as e:
+            logger.debug(f"关键词翻译失败 '{text}': {e}")
         return None
 
 
@@ -1263,6 +1310,7 @@ class DocSearcher:
                  sort_by: str = 'path',
                  sort_reverse: bool = False,
                  translate: bool = False,
+                 translate_keyword: bool = False,
                  max_results: int = 0):
 
         self.target_path = os.path.abspath(target_path)
@@ -1306,6 +1354,27 @@ class DocSearcher:
                                "强烈建议安装 ripgrep: "
                                "https://github.com/BurntSushi/ripgrep#installation")
 
+        # 翻译器（文件名翻译 + 关键词翻译共用）
+        self._translator: Optional[FilenameTranslator] = None
+        if translate or translate_keyword:
+            self._translator = FilenameTranslator()
+            if not self._translator.available:
+                logger.warning("翻译库不可用，请安装: pip install deep-translator")
+
+        # 关键词翻译：非正则模式下，将关键词翻译后组合成正则 (原词|翻译)
+        self._translated_keyword: Optional[str] = None
+        if (translate_keyword and self.keyword and not self.is_regex
+                and self._translator and self._translator.available):
+            translated = self._translator.translate_keyword(self.keyword)
+            if translated:
+                self._translated_keyword = translated
+                # 组合原始关键词和翻译结果为正则
+                combined = f"({re.escape(self.keyword)}|{re.escape(translated)})"
+                self.pattern_str = combined
+                self.is_regex = True
+                logger.info(f"关键词翻译: '{self.keyword}' -> '{translated}'，"
+                            f"搜索模式: {combined}")
+
         # 编译 Python 回退用的正则
         flags = 0 if case_sensitive else re.IGNORECASE
         if self.pattern_str:
@@ -1313,13 +1382,6 @@ class DocSearcher:
             self._py_pattern = re.compile(pat, flags)
         else:
             self._py_pattern = None
-
-        # 翻译器
-        self._translator: Optional[FilenameTranslator] = None
-        if translate:
-            self._translator = FilenameTranslator()
-            if not self._translator.available:
-                logger.warning("翻译库不可用，请安装: pip install deep-translator")
 
         self.stats = {
             'backend': 'unknown',
@@ -1722,6 +1784,8 @@ class DocSearcher:
         }
         if self.version_filter:
             summary['version_filter'] = self.version_filter
+        if self._translated_keyword:
+            summary['translated_keyword'] = self._translated_keyword
         return summary
 
 
@@ -1968,7 +2032,10 @@ class OutputFormatter:
         lines.append(sep)
         lines.append(f"  目标路径: {summary['target_path']}")
         if summary.get('keyword'):
-            lines.append(f"  关键词:   {summary['keyword']}")
+            kw_line = f"  关键词:   {summary['keyword']}"
+            if summary.get('translated_keyword'):
+                kw_line += f"  (翻译: {summary['translated_keyword']})"
+            lines.append(kw_line)
         if summary.get('regex'):
             lines.append(f"  正则:     {summary['regex']}")
         if summary.get('invert_mode'):
@@ -2115,6 +2182,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument('--max-results', type=int, default=0, metavar='N')
     sp.add_argument('-v', '--verbose', action='store_true', help='详细输出')
     sp.add_argument('--translate', action='store_true', help='文件名中英翻译')
+    sp.add_argument('--tk', '--translate-keyword', dest='translate_keyword',
+                    action='store_true',
+                    help='搜索关键词自动翻译（中->英/英->中），搜"爬虫"也匹配"crawler"')
     # 输出格式
     sp.add_argument('--json', action='store_true', help='JSON 输出（等同 --format json）')
     sp.add_argument('-0', '--null', action='store_true',
@@ -2295,6 +2365,7 @@ def _cmd_search(args) -> int:
         exclude_dirs=args.exclude_dir,
         sort_by=args.sort, sort_reverse=args.desc,
         translate=args.translate,
+        translate_keyword=getattr(args, 'translate_keyword', False),
         max_results=args.max_results,
     )
 
@@ -2621,6 +2692,7 @@ def _cmd_help(args) -> int:
     --max-matches N 每文件最多匹配 N 次
     --max-results N 最多返回 N 个文件
     -v, --verbose   显示完整匹配内容
+    --tk            搜索关键词自动翻译 (中->英/英->中, 需 deep-translator)
 
   JSONL 大文件:
     >10MB 的 .jsonl/.ndjson 文件会自动用 Python 流式搜索
@@ -2633,6 +2705,8 @@ def _cmd_help(args) -> int:
     doc_searcher search --invert "license" /src --type py
     doc_searcher search "key" /data --jsonl-dump 100  # JSONL超100条存文件
     doc_searcher search "key" /data --jsonl-dump 0    # JSONL全部显示
+    doc_searcher search "爬虫" /project --tk          # 同时搜"爬虫"和"crawler"
+    doc_searcher search "error" /src --tk             # 同时搜"error"和"错误"
 """,
 
         'date': """
