@@ -152,7 +152,27 @@ export default {
 
       let type = this.queryType;
       if (type === 'auto') {
-        type = input.length >= 15 ? 'idcard' : 'mobile';
+        // 智能识别：检测是身份证还是手机号
+        // 大陆身份证: 15位或18位数字
+        // 香港身份证: 1-2个字母 + 6位数字 + 1位校验码 (如 G123456A)
+        // 台湾身份证: 1个字母 + 9位数字 (如 A123456789)
+        // 澳门身份证: 1/5/7开头 + 6位数字 + 1位校验码 (如 12345678)
+        // 手机号: 11位数字，1开头
+        const cleanInput = input.replace(/[\s\(\)（）\/]/g, '').toUpperCase();
+        const isCnIdcard = /^\d{15}$/.test(cleanInput) || /^\d{17}[\dX]$/.test(cleanInput);
+        const isHkIdcard = /^[A-Z]{1,2}\d{6}[\dA]$/.test(cleanInput);
+        const isTwIdcard = /^[A-Z]\d{9}$/.test(cleanInput);
+        const isMoIdcard = /^[157]\d{6}[\dA]$/.test(cleanInput);
+        const isMobile = /^1\d{10}$/.test(cleanInput);
+
+        if (isCnIdcard || isHkIdcard || isTwIdcard || isMoIdcard) {
+          type = 'idcard';
+        } else if (isMobile) {
+          type = 'mobile';
+        } else {
+          // 默认尝试身份证
+          type = cleanInput.length >= 8 ? 'idcard' : 'mobile';
+        }
       }
 
       try {
@@ -200,7 +220,21 @@ export default {
       this.batchResults = [];
 
       for (const num of numbers.slice(0, 500)) {
-        const type = num.length >= 15 ? 'idcard' : 'mobile';
+        // 使用与单个查询相同的智能识别逻辑
+        const cleanNum = num.replace(/[\s\(\)（）\/]/g, '').toUpperCase();
+        const isCnIdcard = /^\d{15}$/.test(cleanNum) || /^\d{17}[\dX]$/.test(cleanNum);
+        const isHkIdcard = /^[A-Z]{1,2}\d{6}[\dA]$/.test(cleanNum);
+        const isTwIdcard = /^[A-Z]\d{9}$/.test(cleanNum);
+        const isMoIdcard = /^[157]\d{6}[\dA]$/.test(cleanNum);
+        const isMobile = /^1\d{10}$/.test(cleanNum);
+        let type;
+        if (isCnIdcard || isHkIdcard || isTwIdcard || isMoIdcard) {
+          type = 'idcard';
+        } else if (isMobile) {
+          type = 'mobile';
+        } else {
+          type = cleanNum.length >= 8 ? 'idcard' : 'mobile';
+        }
         try {
           const endpoint = type === 'mobile' ? '/tools/mobile/lookup' : '/tools/idcard/lookup';
           const res = await axios.post(endpoint, { number: num });
