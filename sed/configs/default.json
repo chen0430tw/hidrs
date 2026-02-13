@@ -2,17 +2,21 @@
     "split": "----",
     "fields": ["email", "password"],
     "regex": {
-        "user": {
-            "re": "(.*?)@(.*?)",
-            "target": "email"
-        },
-        "suffix_email": {
-            "re": ".*?@(.*)",
-            "target": "email"
-        }
+      "user": {
+        "re": "(.*?)@(.*?)",
+        "target": "email"
+      },
+      "suffix_email": {
+        "re": ".*?@(.*)",
+        "target": "email"
+      }
     },
     "custom_field": {
-        "source": "default_leak",
-        "xtime": "202504"
-    }
-}
+      "source": "default_import",
+      "xtime": "202504"
+    },
+    "batch_size": 1000,
+    "use_parallel": true,
+    "file_patterns": ["*.txt", "*.csv", "*.xls", "*.xlsx", "*.sql", "*.mdb", "*.log"],
+    "use_msn": true
+  }

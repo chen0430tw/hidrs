@@ -1,16 +1,22 @@
 {
-  "name": "vue_fronted",
-  "version": "1.0.0",
-  "description": "A fronted",
-  "author": "lizhengjun <leezj9671@gmail.com>",
+  "name": "sed-security-platform",
+  "version": "2.0.0",
+  "description": "SED数据安全平台 - 支持多主题切换",
+  "author": "SED Team",
   "private": true,
   "scripts": {
     "dev": "node build/dev-server.js",
     "start": "node build/dev-server.js",
-    "build": "node build/build.js"
+    "build": "node build/build.js",
+    "serve": "vue-cli-service serve",
+    "lint": "vue-cli-service lint"
   },
   "dependencies": {
-    "vue": "^2.3.3"
+    "vue": "^2.6.14",
+    "vue-router": "^3.5.4",
+    "vuex": "^3.6.2",
+    "axios": "^0.27.2",
+    "echarts": "^5.4.0"
   },
   "devDependencies": {
     "autoprefixer": "^6.7.2",
