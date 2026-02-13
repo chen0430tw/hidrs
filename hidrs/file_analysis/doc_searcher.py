@@ -2257,10 +2257,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     # help (详细帮助)
     # session (Agent 会话日志搜索)
-    sp7 = sub.add_parser('session', help='搜索 Claude Agent 会话日志 (JSONL)')
-    sp7.add_argument('keyword', nargs='?', default=None, help='搜索关键词 (可选)')
+    sp7 = sub.add_parser('session', help='搜索 Claude Agent 会话日志 (JSONL)',
+                         epilog='注意: keyword 和 path 必须写在所有选项之前，'
+                                '例如: session crawler ./logs --role user --json'
+                                '（不可写成 session crawler --role user ./logs）')
+    sp7.add_argument('keyword', nargs='?', default=None,
+                     help='搜索关键词 (可选，须写在选项之前)')
     sp7.add_argument('path', nargs='?', default='.',
-                     help='会话目录或 JSONL 文件路径 (默认当前目录)')
+                     help='会话目录或 JSONL 文件路径 (默认当前目录，须紧跟 keyword 之后)')
     sp7.add_argument('-r', '--regex', action='store_true', help='关键词作为正则')
     sp7.add_argument('-s', '--case-sensitive', action='store_true', help='区分大小写')
     sp7.add_argument('--tool', type=str, default=None,
@@ -4313,8 +4317,6 @@ def _cmd_file_history(args) -> int:
     fmt = 'text'
     if getattr(args, 'json', False):
         fmt = 'json'
-    elif OutputFormatter.is_piped() and not args.verbose and not getattr(args, 'diff', False):
-        fmt = 'json'  # 管道输出默认 JSON（但 --verbose/--diff 强制 text）
 
     if fmt == 'json':
         safe_print(searcher.format_json(results))
