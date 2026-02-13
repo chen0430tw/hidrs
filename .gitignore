@@ -53,6 +53,13 @@ logs/
 Xkeystroke/
 crawler-system/
 
+# Archive files (don't commit large binary archives)
+*.zip
+*.tar.gz
+*.tar
+*.rar
+*.7z
+
 # Test files
 /tmp/test*.txt
 /tmp/eicar*.txt
