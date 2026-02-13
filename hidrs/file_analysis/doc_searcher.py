@@ -2253,9 +2253,32 @@ def build_parser() -> argparse.ArgumentParser:
     sp5.add_argument('-v', '--verbose', action='store_true')
 
     # help (详细帮助)
+    # session (Agent 会话日志搜索)
+    sp7 = sub.add_parser('session', help='搜索 Claude Agent 会话日志 (JSONL)')
+    sp7.add_argument('keyword', nargs='?', default=None, help='搜索关键词 (可选)')
+    sp7.add_argument('path', nargs='?', default='.',
+                     help='会话目录或 JSONL 文件路径 (默认当前目录)')
+    sp7.add_argument('-r', '--regex', action='store_true', help='关键词作为正则')
+    sp7.add_argument('-s', '--case-sensitive', action='store_true', help='区分大小写')
+    sp7.add_argument('--tool', type=str, default=None,
+                     help='按工具名过滤，逗号分隔 (Read,Edit,Write,Bash,Grep,Glob,...)')
+    sp7.add_argument('--role', type=str, default=None, choices=['user', 'assistant'],
+                     help='按角色过滤: user / assistant')
+    sp7.add_argument('--session-id', type=str, default=None, help='按会话 ID 过滤 (部分匹配)')
+    sp7.add_argument('--slug', type=str, default=None, help='按会话 slug 过滤 (部分匹配)')
+    sp7.add_argument('--after', type=str, default=None,
+                     help='时间下限 (ISO格式: 2026-01-25T10:00:00)')
+    sp7.add_argument('--before', type=str, default=None,
+                     help='时间上限 (ISO格式)')
+    sp7.add_argument('--max-results', type=int, default=50, metavar='N',
+                     help='最大返回条数 (默认 50, 0=不限)')
+    sp7.add_argument('--thinking', action='store_true', help='显示 thinking 内容')
+    sp7.add_argument('-v', '--verbose', action='store_true', help='显示完整内容')
+    sp7.add_argument('--json', action='store_true', help='JSON 格式输出')
+
     sp6 = sub.add_parser('help', help='查看详细帮助')
     sp6.add_argument('topic', nargs='?', default='all',
-                     help='帮助主题: search date type hash base64 format pipe parallel version all')
+                     help='帮助主题: search date type hash base64 format pipe parallel session version all')
 
     return parser
 
@@ -2279,6 +2302,23 @@ def cli_main(argv: Optional[List[str]] = None) -> int:
         logger.debug(f"chardet={HAS_CHARDET} translator={HAS_TRANSLATOR}")
         logger.debug(f"平台={sys.platform} 编码={sys.getdefaultencoding()}")
 
+    # 缺失库提示（每个功能首次用到时提醒）
+    _missing_libs = []
+    if not HAS_CHARDET:
+        _missing_libs.append('chardet          - 编码检测 (GBK/Big5/Shift_JIS 等): pip install chardet')
+    if not HAS_TRANSLATOR:
+        _missing_libs.append('deep-translator  - 文件名/关键词翻译:              pip install deep-translator')
+    if _json_lib_name == 'json':
+        _missing_libs.append('orjson/ujson     - 快速 JSON 解析 (JSONL 搜索加速): pip install orjson')
+    rg_check = RipgrepBackend()
+    if not rg_check.available:
+        _missing_libs.append('ripgrep (rg)     - 高速搜索后端:                    https://github.com/BurntSushi/ripgrep')
+    if _missing_libs:
+        safe_print("[提示] 以下可选依赖未安装，安装后可提升功能:", file=sys.stderr)
+        for lib in _missing_libs:
+            safe_print(f"  - {lib}", file=sys.stderr)
+        safe_print("", file=sys.stderr)
+
     if args.command == 'search':
         return _cmd_search(args)
     elif args.command == 'scan':
@@ -2289,6 +2329,8 @@ def cli_main(argv: Optional[List[str]] = None) -> int:
         return _cmd_hash(args)
     elif args.command == 'base64':
         return _cmd_base64(args)
+    elif args.command == 'session':
+        return _cmd_session(args)
     elif args.command == 'help':
         return _cmd_help(args)
     return 0
@@ -2896,6 +2938,61 @@ def _cmd_help(args) -> int:
     doc_searcher search "TODO" . --type py --parallel 4
 """,
 
+        'session': """
+=== session -- Agent 会话日志搜索 ===
+
+  搜索 Claude Code 的 JSONL 会话日志。
+  支持按工具名、角色、关键词、会话 slug、时间范围过滤。
+
+  基本用法:
+    doc_searcher session [关键词] [路径]
+
+  路径可以是:
+    - 单个 .jsonl 文件
+    - 包含 .jsonl 的目录 (递归搜索)
+    - Claude 的 sessions 目录:
+      Windows: C:\\Users\\<user>\\.claude\\projects\\<project>\\sessions
+      macOS:   ~/.claude/projects/<project>/sessions
+
+  参数:
+    --tool NAME       按工具名过滤 (逗号分隔: Read,Edit,Write,Bash,Grep)
+    --role ROLE       按角色过滤: user / assistant
+    --slug TEXT       按会话 slug 过滤 (部分匹配)
+    --session-id ID   按会话 ID 过滤 (部分匹配)
+    --after ISO       时间下限 (2026-01-25T10:00:00)
+    --before ISO      时间上限
+    --thinking        显示 thinking 内容
+    --max-results N   最大返回条数 (默认 50, 0=不限)
+    -v, --verbose     显示完整内容
+    --json            JSON 格式输出
+
+  示例:
+    # 搜索所有 Write 操作
+    doc_searcher session --tool Write /path/to/sessions
+
+    # 搜索包含某关键词的所有消息
+    doc_searcher session "test_vb_model" /path/to/sessions
+
+    # 只看用户发言
+    doc_searcher session --role user /path/to/sessions
+
+    # 搜索特定会话的 Bash 操作
+    doc_searcher session --tool Bash --slug "giggly-foraging" /path/to/sessions
+
+    # 搜索某时间段的 Edit 操作
+    doc_searcher session --tool Edit --after 2026-01-25T10:00:00 /path/to/sessions
+
+    # 查看 agent 的思考过程
+    doc_searcher session "error" --thinking --role assistant /path/to/sessions
+
+    # JSON 格式输出供其他工具处理
+    doc_searcher session --tool Read --json /path/to/sessions | python -m json.tool
+
+  可用工具名 (--tool):
+    Read, Edit, Write, Bash, Grep, Glob, WebFetch, WebSearch,
+    Task, TodoWrite, NotebookEdit, AskUserQuestion
+""",
+
         'version': """
 === --version -- 版本号筛选 ===
 
@@ -2935,6 +3032,7 @@ def _cmd_help(args) -> int:
     hash       通过 MD5/SHA 查找文件副本
     base64     Base64 双向搜索
     translate  批量翻译文件名 (中<->英)
+    session    搜索 Claude Agent 会话日志 (JSONL)
     help       查看详细帮助
 
   帮助主题 (doc_searcher help <主题>):
@@ -2979,6 +3077,500 @@ def _cmd_help(args) -> int:
         safe_print(f"未知帮助主题: {topic}")
         safe_print(f"可用主题: {', '.join(sorted(topics.keys()))}")
         return 1
+    return 0
+
+
+# ============================================================
+# Agent 会话日志搜索器 (Claude Code JSONL Session Logs)
+# ============================================================
+
+class SessionLogEntry:
+    """解析后的单条会话日志"""
+
+    __slots__ = ('type', 'role', 'tool_name', 'tool_input', 'content_text',
+                 'thinking', 'timestamp', 'session_id', 'slug', 'model',
+                 'file_path', 'uuid', 'line_num', 'raw_size')
+
+    def __init__(self):
+        self.type: str = ''           # 'assistant', 'user', 'file-history-snapshot'
+        self.role: str = ''           # 'assistant', 'user'
+        self.tool_name: str = ''      # 'Read', 'Edit', 'Write', 'Bash', 'Grep', 'Glob', ...
+        self.tool_input: str = ''     # 工具输入参数摘要
+        self.content_text: str = ''   # 文本内容 / 工具结果
+        self.thinking: str = ''       # thinking 内容
+        self.timestamp: str = ''      # ISO 时间
+        self.session_id: str = ''
+        self.slug: str = ''
+        self.model: str = ''
+        self.file_path: str = ''      # 涉及的文件路径
+        self.uuid: str = ''
+        self.line_num: int = 0        # JSONL 行号
+        self.raw_size: int = 0        # 原始 JSON 字节大小
+
+
+class SessionLogSearcher:
+    """Claude Code 会话日志搜索器
+
+    支持搜索 ~/.claude/projects/*/sessions/ 下的 JSONL 会话文件。
+    每行一个 JSON 对象，包含 assistant/user 消息、tool_use、tool_result 等。
+    """
+
+    # 已知的工具名称（用于 --tool 过滤提示）
+    KNOWN_TOOLS = {
+        'Read', 'Edit', 'Write', 'Bash', 'Grep', 'Glob',
+        'WebFetch', 'WebSearch', 'Task', 'TodoWrite',
+        'NotebookEdit', 'AskUserQuestion',
+    }
+
+    def __init__(self, session_dir: str, *,
+                 keyword: Optional[str] = None,
+                 regex_pattern: Optional[str] = None,
+                 case_sensitive: bool = False,
+                 tool_filter: Optional[List[str]] = None,
+                 role_filter: Optional[str] = None,
+                 session_id_filter: Optional[str] = None,
+                 slug_filter: Optional[str] = None,
+                 after: Optional[str] = None,
+                 before: Optional[str] = None,
+                 max_results: int = 0,
+                 content_only: bool = False,
+                 show_thinking: bool = False):
+
+        self.session_dir = os.path.abspath(session_dir)
+        self.keyword = keyword
+        self.regex_pattern = regex_pattern
+        self.case_sensitive = case_sensitive
+        self.tool_filter = [t.lower() for t in tool_filter] if tool_filter else None
+        self.role_filter = role_filter  # 'user', 'assistant', None=all
+        self.session_id_filter = session_id_filter
+        self.slug_filter = slug_filter
+        self.after = after
+        self.before = before
+        self.max_results = max_results
+        self.content_only = content_only
+        self.show_thinking = show_thinking
+
+        # 编译搜索模式
+        flags = 0 if case_sensitive else re.IGNORECASE
+        if regex_pattern:
+            self._pattern = re.compile(regex_pattern, flags)
+        elif keyword:
+            self._pattern = re.compile(re.escape(keyword), flags)
+        else:
+            self._pattern = None
+
+        self.stats = {
+            'files_scanned': 0,
+            'lines_scanned': 0,
+            'lines_matched': 0,
+            'lines_parse_error': 0,
+            'scan_time_seconds': 0.0,
+        }
+
+    def _find_session_files(self) -> List[str]:
+        """查找所有 JSONL 会话文件"""
+        files = []
+        target = self.session_dir
+
+        if os.path.isfile(target) and target.endswith('.jsonl'):
+            return [target]
+
+        # 递归搜索 .jsonl 文件
+        for root, dirs, fnames in os.walk(target):
+            # 跳过 file-history 目录（不是聊天记录）
+            dirs[:] = [d for d in dirs if d != 'file-history']
+            for fname in fnames:
+                if fname.endswith('.jsonl'):
+                    fpath = os.path.join(root, fname)
+                    files.append(fpath)
+
+        # 按修改时间排序（最新在前）
+        files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+        return files
+
+    def _parse_entry(self, line: str, line_num: int) -> Optional[SessionLogEntry]:
+        """解析单行 JSONL 为 SessionLogEntry"""
+        try:
+            obj = _fast_json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            self.stats['lines_parse_error'] += 1
+            return None
+
+        if not isinstance(obj, dict):
+            return None
+
+        entry = SessionLogEntry()
+        entry.line_num = line_num
+        entry.raw_size = len(line)
+        entry.type = obj.get('type', '')
+        entry.session_id = obj.get('sessionId', '')
+        entry.slug = obj.get('slug', '')
+        entry.uuid = obj.get('uuid', '')
+        entry.timestamp = obj.get('timestamp', '')
+
+        # 跳过非消息类型
+        if entry.type == 'file-history-snapshot':
+            return None
+
+        # history.jsonl 格式: {"display": "用户输入", "timestamp": epoch_ms, ...}
+        msg = obj.get('message', {})
+        if not msg and 'display' in obj:
+            entry.role = 'user'
+            entry.type = 'history'
+            entry.content_text = obj.get('display', '')
+            # epoch ms -> ISO
+            ts_ms = obj.get('timestamp', 0)
+            if ts_ms:
+                try:
+                    entry.timestamp = datetime.fromtimestamp(ts_ms / 1000).isoformat()
+                except (OSError, ValueError):
+                    pass
+            return entry
+
+        if not msg:
+            return None
+
+        entry.role = msg.get('role', '')
+        entry.model = msg.get('model', '')
+
+        contents = msg.get('content', [])
+        if isinstance(contents, str):
+            # 有时 content 是纯字符串
+            entry.content_text = contents
+            return entry
+
+        if not isinstance(contents, list):
+            return None
+
+        # 解析 content blocks
+        text_parts = []
+        for block in contents:
+            if not isinstance(block, dict):
+                continue
+
+            block_type = block.get('type', '')
+
+            if block_type == 'text':
+                text_parts.append(block.get('text', ''))
+
+            elif block_type == 'thinking':
+                entry.thinking = block.get('thinking', '')
+
+            elif block_type == 'tool_use':
+                entry.tool_name = block.get('name', '')
+                inp = block.get('input', {})
+                if isinstance(inp, dict):
+                    # 提取关键参数
+                    fp = inp.get('file_path', '') or inp.get('path', '')
+                    if fp:
+                        entry.file_path = fp
+                    cmd = inp.get('command', '')
+                    pattern = inp.get('pattern', '') or inp.get('keyword', '')
+                    content = inp.get('content', '')
+                    # 组装摘要
+                    parts = []
+                    if fp:
+                        parts.append(fp)
+                    if cmd:
+                        parts.append(cmd[:200])
+                    if pattern:
+                        parts.append(f'pattern="{pattern}"')
+                    if content and not fp:
+                        parts.append(content[:100])
+                    entry.tool_input = ' | '.join(parts) if parts else json.dumps(inp, ensure_ascii=False)[:200]
+
+            elif block_type == 'tool_result':
+                # 用户消息中的 tool_result
+                result_content = block.get('content', '')
+                if isinstance(result_content, str):
+                    text_parts.append(result_content)
+                elif isinstance(result_content, list):
+                    for rc in result_content:
+                        if isinstance(rc, dict) and rc.get('type') == 'text':
+                            text_parts.append(rc.get('text', ''))
+
+        # 也检查 toolUseResult（旧格式）
+        tool_result = obj.get('toolUseResult', {})
+        if isinstance(tool_result, dict):
+            tr_text = tool_result.get('type', '')
+            if tr_text == 'text':
+                file_info = tool_result.get('file', {})
+                if isinstance(file_info, dict):
+                    fp = file_info.get('filePath', '')
+                    if fp:
+                        entry.file_path = entry.file_path or fp
+                    fc = file_info.get('content', '')
+                    if fc:
+                        text_parts.append(fc[:500])
+
+        entry.content_text = '\n'.join(text_parts)
+        return entry
+
+    def _match_entry(self, entry: SessionLogEntry) -> bool:
+        """检查条目是否匹配所有过滤条件"""
+        # 角色过滤
+        if self.role_filter:
+            if entry.role != self.role_filter:
+                return False
+
+        # 工具过滤
+        if self.tool_filter:
+            if not entry.tool_name:
+                return False
+            if entry.tool_name.lower() not in self.tool_filter:
+                return False
+
+        # 会话 ID 过滤
+        if self.session_id_filter:
+            if self.session_id_filter not in entry.session_id:
+                return False
+
+        # slug 过滤
+        if self.slug_filter:
+            if self.slug_filter.lower() not in entry.slug.lower():
+                return False
+
+        # 日期过滤
+        if self.after or self.before:
+            ts = entry.timestamp
+            if ts:
+                # ISO 格式比较（字符串排序即可）
+                ts_cmp = ts[:19]  # 取 YYYY-MM-DDTHH:MM:SS
+                if self.after and ts_cmp < self.after:
+                    return False
+                if self.before and ts_cmp > self.before:
+                    return False
+
+        # 关键词过滤
+        if self._pattern:
+            searchable = '\n'.join(filter(None, [
+                entry.content_text,
+                entry.tool_input,
+                entry.tool_name,
+                entry.file_path,
+                entry.thinking if self.show_thinking else '',
+            ]))
+            if not self._pattern.search(searchable):
+                return False
+
+        return True
+
+    def search(self) -> List[SessionLogEntry]:
+        """搜索会话日志"""
+        start = time.time()
+        files = self._find_session_files()
+        self.stats['files_scanned'] = len(files)
+
+        results: List[SessionLogEntry] = []
+
+        for fpath in files:
+            try:
+                with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
+                    for line_num, line in enumerate(f, 1):
+                        self.stats['lines_scanned'] += 1
+                        line = line.strip()
+                        if not line:
+                            continue
+
+                        entry = self._parse_entry(line, line_num)
+                        if entry is None:
+                            continue
+
+                        if self._match_entry(entry):
+                            self.stats['lines_matched'] += 1
+                            results.append(entry)
+
+                            if self.max_results > 0 and len(results) >= self.max_results:
+                                break
+            except OSError as e:
+                logger.debug(f"读取会话文件失败: {fpath}: {e}")
+                continue
+
+            if self.max_results > 0 and len(results) >= self.max_results:
+                break
+
+        self.stats['scan_time_seconds'] = round(time.time() - start, 3)
+        return results
+
+    def format_results(self, results: List[SessionLogEntry],
+                       verbose: bool = False) -> str:
+        """格式化搜索结果"""
+        lines = []
+        sep = '=' * 72
+
+        lines.append(sep)
+        lines.append('  HIDRS Agent 会话日志搜索器')
+        lines.append(sep)
+        if self.keyword:
+            lines.append(f"  关键词: {self.keyword}")
+        if self.regex_pattern:
+            lines.append(f"  正则:   {self.regex_pattern}")
+        if self.tool_filter:
+            lines.append(f"  工具:   {', '.join(self.tool_filter)}")
+        if self.role_filter:
+            lines.append(f"  角色:   {self.role_filter}")
+        if self.slug_filter:
+            lines.append(f"  会话:   {self.slug_filter}")
+        lines.append(f"  扫描: {self.stats['files_scanned']} 个文件 | "
+                     f"{self.stats['lines_scanned']} 行 | "
+                     f"命中: {self.stats['lines_matched']} | "
+                     f"解析错误: {self.stats['lines_parse_error']} | "
+                     f"耗时: {self.stats['scan_time_seconds']}s")
+        lines.append(sep)
+
+        if not results:
+            lines.append('  未找到匹配结果。')
+            lines.append(sep)
+            return '\n'.join(lines)
+
+        for idx, e in enumerate(results, 1):
+            lines.append('')
+
+            # 标题行: [序号] 角色/工具 @ 时间
+            ts_short = e.timestamp[:19].replace('T', ' ') if e.timestamp else '?'
+            if e.tool_name:
+                tag = f"{e.role}:{e.tool_name}"
+            else:
+                tag = e.role or e.type
+            slug_tag = f" [{e.slug}]" if e.slug else ''
+            model_tag = f" ({e.model})" if e.model and verbose else ''
+
+            lines.append(f"  [{idx}] {tag}{model_tag}  {ts_short}{slug_tag}")
+
+            # 文件路径
+            if e.file_path:
+                lines.append(f"       文件: {e.file_path}")
+
+            # 工具输入
+            if e.tool_input:
+                inp_display = e.tool_input
+                if not verbose and len(inp_display) > 120:
+                    inp_display = inp_display[:120] + '...'
+                lines.append(f"       输入: {inp_display}")
+
+            # 内容
+            if e.content_text:
+                content = e.content_text
+                if not verbose:
+                    # 截断长内容
+                    content_lines = content.split('\n')
+                    if len(content_lines) > 5:
+                        content = '\n'.join(content_lines[:5]) + f'\n       ... ({len(content_lines)} 行)'
+                    if len(content) > 300:
+                        content = content[:300] + '...'
+                for cl in content.split('\n'):
+                    lines.append(f"       {cl}")
+
+            # thinking
+            if self.show_thinking and e.thinking:
+                thinking = e.thinking
+                if not verbose and len(thinking) > 200:
+                    thinking = thinking[:200] + '...'
+                lines.append(f"       [思考] {thinking}")
+
+        lines.append('')
+        lines.append(sep)
+        return '\n'.join(lines)
+
+    def format_json(self, results: List[SessionLogEntry]) -> str:
+        """JSON 格式输出"""
+        data = []
+        for e in results:
+            d = {
+                'type': e.type,
+                'role': e.role,
+                'tool_name': e.tool_name or None,
+                'tool_input': e.tool_input or None,
+                'file_path': e.file_path or None,
+                'content': e.content_text[:1000] if e.content_text else None,
+                'thinking': e.thinking[:500] if e.thinking else None,
+                'timestamp': e.timestamp,
+                'session_id': e.session_id,
+                'slug': e.slug,
+                'model': e.model or None,
+                'line_num': e.line_num,
+            }
+            data.append(d)
+
+        output = {
+            'stats': self.stats,
+            'results': data,
+        }
+        return json.dumps(output, ensure_ascii=False, indent=2)
+
+    def format_grep(self, results: List[SessionLogEntry]) -> str:
+        """grep 兼容格式: slug:timestamp:tool:content"""
+        lines = []
+        for e in results:
+            content = (e.tool_input or e.content_text or '').replace('\n', ' ')[:200]
+            tool = e.tool_name or e.role
+            ts = e.timestamp[:19] if e.timestamp else '?'
+            slug = e.slug or e.session_id[:8]
+            lines.append(f"{slug}:{ts}:{tool}:{content}")
+        return '\n'.join(lines)
+
+
+def _cmd_session(args) -> int:
+    """session 子命令: 搜索 Claude Agent 会话日志"""
+    # 参数修正: 只传一个参数时，检查 keyword 是否其实是路径
+    # 例: doc_searcher session /path/to/sessions
+    #   -> argparse 把 /path/to/sessions 解析为 keyword，path 为 '.'
+    keyword = args.keyword
+    path = args.path
+    if keyword and os.path.exists(keyword) and path == '.':
+        # keyword 其实是路径
+        path = keyword
+        keyword = None
+    elif keyword and not os.path.exists(path) and path != '.':
+        # 两个参数都给了但 path 不存在 -> 可能顺序搞反了
+        if os.path.exists(keyword):
+            keyword, path = path, keyword
+
+    session_dir = os.path.abspath(path)
+    if not os.path.exists(session_dir):
+        safe_print(f"路径不存在: {session_dir}", file=sys.stderr)
+        return 1
+
+    # 工具过滤
+    tool_filter = None
+    if args.tool:
+        tool_filter = [t.strip() for t in args.tool.split(',')]
+
+    # 日期格式处理（支持简单 ISO 格式）
+    after_ts = args.after
+    before_ts = args.before
+
+    searcher = SessionLogSearcher(
+        session_dir,
+        keyword=None if args.regex else keyword,
+        regex_pattern=keyword if args.regex else None,
+        case_sensitive=args.case_sensitive,
+        tool_filter=tool_filter,
+        role_filter=args.role,
+        session_id_filter=args.session_id,
+        slug_filter=args.slug,
+        after=after_ts,
+        before=before_ts,
+        max_results=args.max_results,
+        show_thinking=args.thinking,
+    )
+
+    results = searcher.search()
+
+    # 输出格式
+    fmt = 'text'
+    if getattr(args, 'json', False):
+        fmt = 'json'
+    elif OutputFormatter.is_piped():
+        fmt = 'grep'
+
+    if fmt == 'json':
+        safe_print(searcher.format_json(results))
+    elif fmt == 'grep':
+        safe_print(searcher.format_grep(results))
+    else:
+        safe_print(searcher.format_results(results, verbose=args.verbose))
+
     return 0
 
 
