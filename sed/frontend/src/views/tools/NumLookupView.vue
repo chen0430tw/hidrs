@@ -2,7 +2,7 @@
   <div class="numlookup-page">
     <div class="page-header">
       <h1>号码归属地查询</h1>
-      <p>支持手机号归属地和身份证地区查询</p>
+      <p>支持手机号归属地和身份证查询（大陆/香港/澳门/台湾）</p>
     </div>
 
     <div class="lookup-container">
@@ -32,6 +32,40 @@
               <div class="result-item" v-if="result.areaCode"><span class="label">区号</span><span class="value">{{ result.areaCode }}</span></div>
               <div class="result-item" v-if="result.zipCode"><span class="label">邮编</span><span class="value">{{ result.zipCode }}</span></div>
             </template>
+            <!-- 大陆身份证 -->
+            <template v-else-if="result.idType === 'CN'">
+              <div class="result-item"><span class="label">证件类型</span><span class="value">{{ result.typeName }}</span></div>
+              <div class="result-item"><span class="label">身份证号</span><span class="value">{{ result.number }}</span></div>
+              <div class="result-item"><span class="label">地区</span><span class="value">{{ result.province }} {{ result.city }} {{ result.district }}</span></div>
+              <div class="result-item"><span class="label">出生日期</span><span class="value">{{ result.birthday }}</span></div>
+              <div class="result-item"><span class="label">性别</span><span class="value">{{ result.gender }}</span></div>
+              <div class="result-item"><span class="label">年龄</span><span class="value">{{ result.age }} 岁</span></div>
+              <div class="result-item" v-if="result.constellation"><span class="label">星座</span><span class="value">{{ result.constellation }}</span></div>
+              <div class="result-item" v-if="result.zodiac"><span class="label">生肖</span><span class="value">{{ result.zodiac }}</span></div>
+            </template>
+            <!-- 香港身份证 -->
+            <template v-else-if="result.idType === 'HK'">
+              <div class="result-item"><span class="label">证件类型</span><span class="value">{{ result.typeName }}</span></div>
+              <div class="result-item"><span class="label">证件号码</span><span class="value">{{ result.formatted || result.number }}</span></div>
+              <div class="result-item"><span class="label">地区</span><span class="value">{{ result.region }}</span></div>
+              <div class="result-item"><span class="label">字母前缀</span><span class="value">{{ result.prefix }}</span></div>
+              <div class="result-item"><span class="label">校验码</span><span class="value">{{ result.checkDigit }}</span></div>
+            </template>
+            <!-- 台湾身份证 -->
+            <template v-else-if="result.idType === 'TW'">
+              <div class="result-item"><span class="label">证件类型</span><span class="value">{{ result.typeName }}</span></div>
+              <div class="result-item"><span class="label">证件号码</span><span class="value">{{ result.number }}</span></div>
+              <div class="result-item"><span class="label">户籍地</span><span class="value">{{ result.region }}</span></div>
+              <div class="result-item"><span class="label">性别</span><span class="value">{{ result.gender }}</span></div>
+            </template>
+            <!-- 澳门身份证 -->
+            <template v-else-if="result.idType === 'MO'">
+              <div class="result-item"><span class="label">证件类型</span><span class="value">{{ result.typeName }}</span></div>
+              <div class="result-item"><span class="label">证件号码</span><span class="value">{{ result.formatted || result.number }}</span></div>
+              <div class="result-item"><span class="label">地区</span><span class="value">{{ result.region }}</span></div>
+              <div class="result-item"><span class="label">首位含义</span><span class="value">{{ result.firstDigitMeaning }}</span></div>
+            </template>
+            <!-- 兼容旧格式 -->
             <template v-else-if="result.type === 'idcard'">
               <div class="result-item"><span class="label">身份证号</span><span class="value">{{ result.number }}</span></div>
               <div class="result-item"><span class="label">地区</span><span class="value">{{ result.province }} {{ result.city }} {{ result.district }}</span></div>
@@ -62,9 +96,9 @@
             <tbody>
               <tr v-for="(item, i) in batchResults.slice(0, 50)" :key="i">
                 <td>{{ item.number }}</td>
-                <td>{{ item.type === 'mobile' ? '手机号' : '身份证' }}</td>
-                <td>{{ item.province }} {{ item.city }}</td>
-                <td>{{ item.carrier || item.district || '' }}</td>
+                <td>{{ item.type === 'mobile' ? '手机号' : (item.typeName || '身份证') }}</td>
+                <td>{{ item.type === 'mobile' ? `${item.province} ${item.city}` : (item.idType === 'CN' ? `${item.province} ${item.city}` : item.region) }}</td>
+                <td>{{ item.type === 'mobile' ? item.carrier : (item.gender || item.firstDigitMeaning || item.district || '') }}</td>
               </tr>
             </tbody>
           </table>
@@ -125,7 +159,8 @@ export default {
         const endpoint = type === 'mobile' ? '/tools/mobile/lookup' : '/tools/idcard/lookup';
         const res = await axios.post(endpoint, { number: input });
         if (res.data.status === 'ok') {
-          this.result = { ...res.data.data, type };
+          // 保留后端返回的type作为idType，前端type用于区分手机/身份证
+          this.result = { ...res.data.data, type, idType: res.data.data.type };
           this.addHistory(input, this.result);
         } else {
           this.errorMsg = res.data.message || '查询失败';
@@ -137,9 +172,15 @@ export default {
       }
     },
     addHistory(input, result) {
-      const summary = result.type === 'mobile'
-        ? `${result.province} ${result.city} ${result.carrier || ''}`
-        : `${result.province} ${result.city} ${result.district || ''}`;
+      let summary;
+      if (result.type === 'mobile') {
+        summary = `${result.province} ${result.city} ${result.carrier || ''}`;
+      } else if (result.idType === 'CN') {
+        summary = `${result.province} ${result.city} ${result.district || ''}`;
+      } else {
+        // 港澳台使用 region 字段
+        summary = `${result.typeName || ''} ${result.region || ''}`;
+      }
       this.queryHistory.unshift({
         input, summary,
         time: new Date().toLocaleString()
@@ -164,17 +205,21 @@ export default {
           const endpoint = type === 'mobile' ? '/tools/mobile/lookup' : '/tools/idcard/lookup';
           const res = await axios.post(endpoint, { number: num });
           if (res.data.status === 'ok') {
-            this.batchResults.push({ ...res.data.data, type, number: num });
+            this.batchResults.push({ ...res.data.data, type, idType: res.data.data.type, number: num });
           }
         } catch (e) { /* skip errors */ }
       }
     },
     exportResults() {
-      const headers = ['号码', '类型', '省份', '城市', '详情'];
-      const rows = this.batchResults.map(r => [
-        r.number, r.type === 'mobile' ? '手机号' : '身份证',
-        r.province || '', r.city || '', r.carrier || r.district || ''
-      ]);
+      const headers = ['号码', '类型', '地区', '详情'];
+      const rows = this.batchResults.map(r => {
+        let typeLabel = r.type === 'mobile' ? '手机号' : (r.typeName || '身份证');
+        let region = r.type === 'mobile'
+          ? `${r.province || ''} ${r.city || ''}`.trim()
+          : (r.idType === 'CN' ? `${r.province || ''} ${r.city || ''} ${r.district || ''}`.trim() : (r.region || ''));
+        let detail = r.type === 'mobile' ? (r.carrier || '') : (r.gender || r.firstDigitMeaning || '');
+        return [r.number, typeLabel, region, detail];
+      });
       const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
       const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a');
