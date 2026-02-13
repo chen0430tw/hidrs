@@ -210,6 +210,61 @@ docs/                 # GitHub Pages mirror of frontend/ (keep in sync)
 - 如果依赖库未安装，应该发出明确警告并降级，而不是静默切换到空壳
 - 任何 `NotImplementedError` 必须在同一次开发中被替换为真实实现，或从调用链中移除
 
+### 虚假修复 (Phantom Fix / Dead Code Path)
+
+**定义**：代码看起来实现了某个功能，各个组件（后端API、前端UI、数据处理）都存在且看起来正确，但由于调用链中的某个环节有bug，导致新功能永远无法被触发。
+
+**本项目的真实案例**：
+- 身份证查询功能添加了港澳台支持
+- 后端完整实现了 HK/MO/TW 的验证算法（真实代码，非空壳）
+- 前端 UI 模板添加了 HK/MO/TW 的显示分支
+- **但是**：前端使用 `input.length >= 15 ? 'idcard' : 'mobile'` 来判断类型
+- 港澳台身份证长度都 < 15 字符（香港8-9字符、台湾10字符、澳门8字符）
+- 结果：所有港澳台身份证都被误判为手机号，发送到错误的 API
+- 后端的 HK/MO/TW 代码永远不会被执行，前端的 HK/MO/TW 模板永远不会被渲染
+
+**虚假修复的3种形态**：
+
+1. **路由断裂** — 后端实现了新功能，但前端的请求永远不会到达该路由。
+   ```javascript
+   // 前端判断逻辑有缺陷
+   const endpoint = input.length >= 15 ? '/idcard' : '/mobile';  // 港澳台 < 15
+   // 后端 /idcard 永远收不到港澳台请求
+   ```
+
+2. **条件永假** — UI 分支存在，但触发条件永远为 false。
+   ```vue
+   <template v-else-if="result.idType === 'HK'">
+     <!-- 这个分支永远不会渲染，因为 idType 永远不会是 'HK' -->
+     <!-- 原因：请求发送到了错误的 API，返回的数据没有 idType 字段 -->
+   </template>
+   ```
+
+3. **数据断层** — 后端返回了正确的数据，但前端没有正确接收或传递。
+   ```javascript
+   // 后端返回 { type: 'HK', region: '香港' }
+   // 前端覆盖了 type: this.result = { ...response.data, type: 'idcard' }
+   // 导致 type 永远是 'idcard'，HK 分支永远不触发
+   ```
+
+**与偷懒实现的区别**：
+- 偷懒实现：代码本身是空壳/模拟，即使被调用也不产生效果
+- 虚假修复：代码本身是真实的，但调用链断裂导致永远不会被执行
+
+**检测方法**：
+1. **端到端测试**：用真实数据（如真实的香港身份证格式）测试完整流程，而不是只测单个函数
+2. **调用链追踪**：从用户输入开始，跟踪数据流向：
+   - 前端如何决定调用哪个 API？
+   - 前端发送的参数后端能正确接收吗？
+   - 后端返回的数据前端能正确显示吗？
+3. **边界值测试**：测试与旧逻辑不同的输入（如短于15位的身份证）
+
+**预防规则**：
+- 添加新功能时，必须测试该功能的**完整调用链**，不能只测试单个组件
+- 修改判断逻辑时，必须检查所有新增的分支是否都能被触发
+- 使用真实的测试数据（港澳台身份证的实际格式），而不是只用大陆格式测试
+- 前后端联调：后端返回的字段名和数据类型必须与前端期望的完全匹配
+
 ## Code Completion Checklist (MANDATORY)
 
 Every time you finish writing or modifying code, you MUST run through this checklist BEFORE telling the user you are done. Do NOT skip any item. These are real bugs that have occurred repeatedly in this project.
@@ -311,6 +366,31 @@ Every time you finish writing or modifying code, you MUST run through this check
   grep -rn "time.sleep" hidrs/ | grep -v "test" | grep -v "#"
   ```
 - The ratio test: if a function has more lines of docstring/comments than lines of actual code (excluding blank lines), flag it for review. This is the #1 indicator of a stub disguised as a feature.
+
+### 15. Phantom Fix Detection (虚假修复检测)
+- After adding support for new data types/formats (e.g., HK/MO/TW ID cards), verify the **routing logic** can actually reach the new code:
+  - If frontend uses length/format checks to decide which API to call, verify the check covers ALL new formats
+  - Test with real examples of the new format, not just the original format
+- After adding new UI branches (`v-if`, `v-else-if`), verify the condition can actually become true:
+  - Trace where the conditional variable comes from
+  - Verify the data source actually produces values that match the condition
+- **End-to-end trace test**: For any new feature, manually trace the complete path:
+  1. User input → frontend validation → API call selection
+  2. Backend receives → processes → returns data
+  3. Frontend receives → displays in correct UI branch
+- Quick verification:
+  ```javascript
+  // If you add a branch like this:
+  <template v-else-if="result.idType === 'HK'">
+
+  // You MUST verify:
+  // 1. What sets result.idType? (check the axios response handling)
+  // 2. Can idType ever be 'HK'? (check backend return value)
+  // 3. Will this request even reach the backend that returns 'HK'? (check routing logic)
+  ```
+- **New format boundary test**: When adding support for formats with different characteristics (length, pattern), test at the boundary:
+  - Old: 18-digit CN ID → length >= 15 works
+  - New: 8-char HK ID → length >= 15 FAILS, need pattern-based detection
 
 ### Self-Verification Command
 After completing code changes, run:
