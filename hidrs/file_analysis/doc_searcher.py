@@ -2945,6 +2945,7 @@ def _cmd_help(args) -> int:
 
   搜索 Claude Code 的 JSONL 会话日志。
   支持按工具名、角色、关键词、会话 slug、时间范围过滤。
+  内置多层前置过滤 (session-id 文件名匹配、mtime 跳过、rg 预筛) 加速搜索。
 
   基本用法:
     doc_searcher session [关键词] [路径]
@@ -2952,25 +2953,60 @@ def _cmd_help(args) -> int:
   路径可以是:
     - 单个 .jsonl 文件
     - 包含 .jsonl 的目录 (递归搜索)
-    - Claude 的 sessions 目录:
-      Windows: C:\\Users\\<user>\\.claude\\projects\\<project>\\sessions
-      macOS:   ~/.claude/projects/<project>/sessions
+    - Claude 项目目录 (自动发现 .jsonl):
+      Windows: C:\\Users\\<user>\\.claude\\projects\\C--Users-<user>-<project>
+      macOS:   ~/.claude/projects/-Users-<user>-<project>
+      Linux:   ~/.claude/projects/-home-<user>-<project>
+
+  Claude Code 会话目录结构:
+    ~/.claude/projects/{encoded-path}/
+    ├── {session-uuid}.jsonl           # 主会话文件 (文件名 = UUID)
+    ├── {session-uuid}/
+    │   └── subagents/
+    │       └── agent-{hash}.jsonl     # 子代理 (Task 工具) 转录
+    └── ...
+
+    注: 一个 JSONL 可包含多个 sessionId (--continue/--resume 追加)
 
   参数:
     --tool NAME       按工具名过滤 (逗号分隔: Read,Edit,Write,Bash,Grep)
     --role ROLE       按角色过滤: user / assistant
     --slug TEXT       按会话 slug 过滤 (部分匹配)
-    --session-id ID   按会话 ID 过滤 (部分匹配)
-    --after ISO       时间下限 (2026-01-25T10:00:00)
-    --before ISO      时间上限
+    --session-id ID   按会话 ID 过滤 (部分匹配，同时做文件名前置过滤)
+    --after TIME      时间下限 (支持快捷符，同时做 mtime 前置过滤)
+    --before TIME     时间上限 (支持快捷符)
+    --no-subagents    跳过 subagents/ 子代理文件
     --thinking        显示 thinking 内容
     --max-results N   最大返回条数 (默认 50, 0=不限)
     -v, --verbose     显示完整内容
     --json            JSON 格式输出
 
+  时间快捷符 (--after / --before):
+    td / today       今天 00:00
+    yd / yesterday   昨天 00:00
+    Nd               N 天前 (3d=3天前, 7d=一周前, 30d=一个月前)
+    Nh               N 小时前 (1h, 6h, 24h)
+    Nw               N 周前 (1w, 2w)
+    tw / thisweek    本周一 00:00
+    lw / lastweek    上周一 00:00
+    tm / thismonth   本月1日
+    lm / lastmonth   上月1日
+    ty / thisyear    今年1月1日
+    ly / lastyear    去年1月1日
+    @1700000000      Unix 时间戳
+    YYYY-MM-DD       标准日期格式
+    YYYY-MM-DD HH:MM:SS  完整时间戳
+
+  前置过滤机制:
+    搜索大量 JSONL 文件时，以下过滤会在逐行读取前执行:
+    1. --session-id  → 文件名/目录名匹配 (JSONL 文件名即 UUID)
+    2. --after       → 跳过 mtime < after 的文件 (JSONL 追加写入)
+    3. 关键词        → rg --files-with-matches 预筛 (需安装 ripgrep)
+    4. --no-subagents → 跳过 subagents/ 目录
+
   示例:
     # 搜索所有 Write 操作
-    doc_searcher session --tool Write /path/to/sessions
+    doc_searcher session --tool Write ~/.claude/projects/-home-user-myproject
 
     # 搜索包含某关键词的所有消息
     doc_searcher session "test_vb_model" /path/to/sessions
@@ -2981,9 +3017,17 @@ def _cmd_help(args) -> int:
     # 搜索特定会话的 Bash 操作
     doc_searcher session --tool Bash --slug "giggly-foraging" /path/to/sessions
 
-    # 搜索某时间段的 Edit 操作 (支持快捷符: yd=昨天 3d=3天前 tw=本周 等)
+    # 搜索昨天的 Edit 操作
     doc_searcher session --tool Edit --after yd /path/to/sessions
-    doc_searcher session --tool Edit --after 2026-01-25T10:00:00 /path/to/sessions
+
+    # 搜索最近3天的内容
+    doc_searcher session --after 3d /path/to/sessions
+
+    # 按 session-id 快速定位 (文件名前置过滤)
+    doc_searcher session --session-id 90b8d0a0 /path/to/sessions
+
+    # 跳过子代理转录
+    doc_searcher session "error" --no-subagents /path/to/sessions
 
     # 查看 agent 的思考过程
     doc_searcher session "error" --thinking --role assistant /path/to/sessions
