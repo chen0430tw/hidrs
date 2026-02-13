@@ -1144,13 +1144,47 @@ class HIDRSFirewall:
         """
         EasyTier Mesh 拓扑变化回调
 
-        当新节点加入或离开时触发。
-        可用于：自动将防御策略同步到新节点的 OpenWrt 路由器。
+        当新节点加入或离开时触发：
+        - 新节点上线：同步当前黑名单到该节点对应的OpenWrt路由器
+        - 节点离线：记录告警，更新拓扑状态
         """
         if added:
             logger.info(f"[HIDRSFirewall] Mesh 新节点: {added}")
+
+            # 将当前黑名单IP同步到新节点的OpenWrt路由器
+            if self._openwrt_enabled and self.openwrt_fleet:
+                blacklisted_ips = list(self.reputation_system.blacklist)
+                if blacklisted_ips:
+                    logger.info(
+                        f"[HIDRSFirewall] 同步 {len(blacklisted_ips)} 个黑名单IP到新节点"
+                    )
+                    # 找到新节点对应的路由器（通过Peer IP匹配路由器region）
+                    peer_map = {p.peer_id: p for p in peers}
+                    for peer_id in added:
+                        peer = peer_map.get(peer_id)
+                        if not peer:
+                            continue
+                        # 尝试找到该Peer IP对应的路由器
+                        for router_id, router_info in self.openwrt_fleet._routers.items():
+                            if router_info.host == peer.ipv4 or router_info.alias == peer_id:
+                                self.openwrt_fleet.deploy_batch_block(
+                                    blacklisted_ips,
+                                    reason="aegis_blacklist_sync",
+                                    target_routers=[router_id],
+                                )
+                                break
+
         if removed:
             logger.warning(f"[HIDRSFirewall] Mesh 节点离线: {removed}")
+
+            # 节点离线可能意味着该节点被攻击或网络分区
+            # 如果剩余节点数过低，提升整体威胁等级
+            total_expected = len(peers) + len(removed)
+            if total_expected > 0 and len(removed) / total_expected > 0.3:
+                logger.critical(
+                    f"[HIDRSFirewall] 超过30%节点离线 "
+                    f"({len(removed)}/{total_expected})，可能遭受网络攻击"
+                )
 
     def deploy_block_to_openwrt(self, ip: str, reason: str = "", ttl: int = 3600) -> bool:
         """
@@ -1550,6 +1584,14 @@ class HIDRSFirewall:
             if should_defend:
                 action = 'block'
                 reason = 'Critical threat'
+
+                # 同步封锁到OpenWrt路由器集群
+                if self._openwrt_enabled and self.openwrt_fleet:
+                    self.deploy_block_to_openwrt(
+                        src_ip,
+                        reason=f"CRITICAL: {analysis.get('attack_type', 'unknown')}",
+                        ttl=3600,
+                    )
 
                 # 可选：反射攻击
                 if self.reflector.enable_reflection:
