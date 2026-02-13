@@ -3341,14 +3341,14 @@ class SessionLogSearcher:
                 if self.before and ts_cmp > self.before:
                     return False
 
-        # 关键词过滤
+        # 关键词过滤（thinking 始终参与搜索，不受 --thinking 显示开关影响）
         if self._pattern:
             searchable = '\n'.join(filter(None, [
                 entry.content_text,
                 entry.tool_input,
                 entry.tool_name,
                 entry.file_path,
-                entry.thinking if self.show_thinking else '',
+                entry.thinking,
             ]))
             if not self._pattern.search(searchable):
                 return False
@@ -3461,12 +3461,16 @@ class SessionLogSearcher:
                 for cl in content.split('\n'):
                     lines.append(f"       {cl}")
 
-            # thinking
-            if self.show_thinking and e.thinking:
-                thinking = e.thinking
-                if not verbose and len(thinking) > 200:
-                    thinking = thinking[:200] + '...'
-                lines.append(f"       [思考] {thinking}")
+            # thinking: --thinking 时始终显示，否则仅当关键词匹配到 thinking 时显示
+            if e.thinking:
+                show_it = self.show_thinking
+                if not show_it and self._pattern and self._pattern.search(e.thinking):
+                    show_it = True  # 关键词命中了 thinking，自动显示
+                if show_it:
+                    thinking = e.thinking
+                    if not verbose and len(thinking) > 200:
+                        thinking = thinking[:200] + '...'
+                    lines.append(f"       [思考] {thinking}")
 
         lines.append('')
         lines.append(sep)
