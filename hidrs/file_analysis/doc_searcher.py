@@ -2267,9 +2267,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp7.add_argument('--session-id', type=str, default=None, help='按会话 ID 过滤 (部分匹配)')
     sp7.add_argument('--slug', type=str, default=None, help='按会话 slug 过滤 (部分匹配)')
     sp7.add_argument('--after', type=str, default=None,
-                     help='时间下限 (ISO格式: 2026-01-25T10:00:00)')
+                     help='时间下限 (支持快捷: td yd 3d 7d tw lw tm lm 或 ISO格式)')
     sp7.add_argument('--before', type=str, default=None,
-                     help='时间上限 (ISO格式)')
+                     help='时间上限 (支持快捷: td yd 3d 7d tw lw tm lm 或 ISO格式)')
     sp7.add_argument('--max-results', type=int, default=50, metavar='N',
                      help='最大返回条数 (默认 50, 0=不限)')
     sp7.add_argument('--thinking', action='store_true', help='显示 thinking 内容')
@@ -2979,7 +2979,8 @@ def _cmd_help(args) -> int:
     # 搜索特定会话的 Bash 操作
     doc_searcher session --tool Bash --slug "giggly-foraging" /path/to/sessions
 
-    # 搜索某时间段的 Edit 操作
+    # 搜索某时间段的 Edit 操作 (支持快捷符: yd=昨天 3d=3天前 tw=本周 等)
+    doc_searcher session --tool Edit --after yd /path/to/sessions
     doc_searcher session --tool Edit --after 2026-01-25T10:00:00 /path/to/sessions
 
     # 查看 agent 的思考过程
@@ -3130,8 +3131,8 @@ class SessionLogSearcher:
                  role_filter: Optional[str] = None,
                  session_id_filter: Optional[str] = None,
                  slug_filter: Optional[str] = None,
-                 after: Optional[str] = None,
-                 before: Optional[str] = None,
+                 after: Optional[datetime] = None,
+                 before: Optional[datetime] = None,
                  max_results: int = 0,
                  content_only: bool = False,
                  show_thinking: bool = False):
@@ -3352,16 +3353,19 @@ class SessionLogSearcher:
             if self.slug_filter.lower() not in entry.slug.lower():
                 return False
 
-        # 日期过滤
+        # 日期过滤（datetime 对象比较）
         if self.after or self.before:
             ts = entry.timestamp
             if ts:
-                # ISO 格式比较（字符串排序即可）
-                ts_cmp = ts[:19]  # 取 YYYY-MM-DDTHH:MM:SS
-                if self.after and ts_cmp < self.after:
-                    return False
-                if self.before and ts_cmp > self.before:
-                    return False
+                try:
+                    # 解析 ISO 格式时间戳
+                    ts_dt = datetime.fromisoformat(ts[:19])
+                    if self.after and ts_dt < self.after:
+                        return False
+                    if self.before and ts_dt > self.before:
+                        return False
+                except (ValueError, TypeError):
+                    pass  # 时间戳格式异常时不过滤
 
         # 关键词过滤（thinking 始终参与搜索，不受 --thinking 显示开关影响）
         if self._pattern:
@@ -3563,9 +3567,9 @@ def _cmd_session(args) -> int:
     if args.tool:
         tool_filter = [t.strip() for t in args.tool.split(',')]
 
-    # 日期格式处理（支持简单 ISO 格式）
-    after_ts = args.after
-    before_ts = args.before
+    # 日期格式处理（支持快捷符: td yd 3d 7d tw lw tm lm 等）
+    after_ts = parse_date(args.after) if args.after else None
+    before_ts = parse_date(args.before) if args.before else None
 
     searcher = SessionLogSearcher(
         session_dir,
