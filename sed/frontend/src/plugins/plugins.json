@@ -1,0 +1,32 @@
+{
+  "plugins": [
+    {
+      "id": "fuzzy_search",
+      "name": "模糊搜索",
+      "version": "1.0.0",
+      "enabled": false,
+      "description": "高级模糊匹配搜索插件"
+    },
+    {
+      "id": "num_lookup",
+      "name": "号码查询",
+      "version": "1.0.0",
+      "enabled": true,
+      "description": "手机号和身份证归属地查询"
+    },
+    {
+      "id": "format_manager",
+      "name": "格式管理",
+      "version": "1.0.0",
+      "enabled": true,
+      "description": "自定义数据格式模板管理"
+    },
+    {
+      "id": "llm_analysis",
+      "name": "AI分析",
+      "version": "1.0.0",
+      "enabled": false,
+      "description": "大模型辅助数据分析"
+    }
+  ]
+}

@@ -1,210 +1,218 @@
-# 创建文件 backend/chunk_import.py
+"""
+银狼数据安全平台 - 分块导入工具
+支持100MB+大文件的分块处理和导入
+"""
 import os
 import sys
 import json
 import time
 import logging
-import argparse
-import hashlib
 from datetime import datetime
-from es_utils import ESClient
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
-)
 logger = logging.getLogger(__name__)
 
-def parse_line(line, split_sign, fields, custom_fields):
-    """解析单行数据"""
-    try:
-        line = line.strip()
-        if not line:
-            return None
-            
-        parts = line.split(split_sign)
-        if len(parts) < len(fields):
-            return None
-            
-        record = custom_fields.copy()
-        
-        for i, field in enumerate(fields):
-            record[field] = parts[i].strip()
-            
-        # 处理邮箱
-        if 'email' in record:
-            email_parts = record['email'].split('@')
-            if len(email_parts) > 1:
-                record['user'] = record.get('user', email_parts[0])
-                record['suffix_email'] = email_parts[1].lower()
-                
-        # 处理密码哈希
-        if 'password' in record and 'passwordHash' not in record:
-            record['passwordHash'] = hashlib.md5(record['password'].encode('utf-8')).hexdigest()
-            
-        # 添加时间戳
-        record['create_time'] = time.strftime('%Y/%m/%d %H:%M:%S', time.localtime())
-        
-        return record
-    except Exception as e:
-        return None
 
-def process_chunk(file_path, start_pos, chunk_size, chunk_number, config, es_client):
-    """处理文件的一个块"""
-    split_sign = config.get('split', '----')
-    fields = config.get('fields', ['email', 'password'])
-    custom_fields = config.get('custom_field', {})
-    batch_size = 1000
+class ChunkImporter:
+    """分块导入器"""
     
-    success_count = 0
-    error_count = 0
-    line_count = 0
-    batch = []
+    def __init__(self, es_client, chunk_size_mb=100, batch_size=5000):
+        self.es = es_client
+        self.chunk_size = chunk_size_mb * 1024 * 1024  # 转换为字节
+        self.batch_size = batch_size
+        self.stats = {
+            'total_lines': 0,
+            'success': 0,
+            'error': 0,
+            'chunks_processed': 0,
+            'start_time': None,
+            'end_time': None
+        }
     
-    logger.info(f"开始处理块 #{chunk_number} - 起始位置: {start_pos}, 大小: {chunk_size} 字节")
-    start_time = datetime.now()
-    
-    try:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            # 移动到起始位置
-            f.seek(start_pos)
-            
-            # 如果不是文件开头，读取并丢弃第一行(可能是不完整的)
-            if start_pos > 0:
-                f.readline()
-            
-            # 读取数据直到达到块大小
-            bytes_read = 0
-            while bytes_read < chunk_size:
-                line = f.readline()
-                if not line:  # 文件结束
-                    break
-                    
-                bytes_read += len(line.encode('utf-8'))
-                line_count += 1
-                
-                record = parse_line(line, split_sign, fields, custom_fields)
-                if not record:
-                    continue
-                
-                # 创建引用记录
-                ref_record = {
-                    "user": record.get("user", ""),
-                    "email": record.get("email", ""),
-                    "suffix_email": record.get("suffix_email", ""),
-                    "passwordHash": record.get("passwordHash", ""),
-                    "source": record.get("source", ""),
-                    "xtime": record.get("xtime", ""),
-                    "create_time": record.get("create_time", ""),
-                    # 引用信息
-                    "reference": {
-                        "file": os.path.basename(file_path),
-                        "line": line_count + (start_pos > 0)
-                    }
-                }
-                
-                batch.append(ref_record)
-                
-                # 批量导入
-                if len(batch) >= batch_size:
-                    s, e = es_client.bulk_insert(batch)
-                    success_count += s
-                    error_count += e
-                    batch = []
-                    
-                    # 输出进度
-                    if line_count % 10000 == 0:
-                        elapsed = datetime.now() - start_time
-                        rate = line_count / elapsed.total_seconds() if elapsed.total_seconds() > 0 else 0
-                        logger.info(f"块 #{chunk_number} - 已处理 {line_count} 行, 成功: {success_count}, 速度: {rate:.2f} 行/秒")
-            
-            # 处理剩余数据
-            if batch:
-                s, e = es_client.bulk_insert(batch)
-                success_count += s
-                error_count += e
+    def import_file(self, filepath, parse_func, index_name='socialdb',
+                    template=None, custom_fields=None, callback=None):
+        """
+        分块导入文件
         
-        # 输出块处理结果
-        elapsed = datetime.now() - start_time
-        rate = line_count / elapsed.total_seconds() if elapsed.total_seconds() > 0 else 0
-        logger.info(f"块 #{chunk_number} 处理完成 - 行数: {line_count}, 成功: {success_count}, 失败: {error_count}, 时间: {elapsed}, 速度: {rate:.2f} 行/秒")
+        Args:
+            filepath: 文件路径
+            parse_func: 行解析函数 (line) -> dict
+            index_name: ES索引名
+            template: 格式模板（可选）
+            custom_fields: 自定义固定字段（可选）
+            callback: 进度回调函数 (stats) -> None
+        """
+        self.stats['start_time'] = datetime.now().isoformat()
+        file_size = os.path.getsize(filepath)
+        total_chunks = max(1, file_size // self.chunk_size + 1)
         
-        # 返回下一块的起始位置
-        return start_pos + bytes_read, success_count, error_count
+        logger.info(f"开始导入文件: {filepath}")
+        logger.info(f"文件大小: {file_size / (1024*1024):.1f} MB, 预计分块: {total_chunks}")
+        
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                chunk_num = 0
+                batch = []
+                bytes_read = 0
+                
+                for line_num, line in enumerate(f, 1):
+                    bytes_read += len(line.encode('utf-8', errors='ignore'))
+                    line = line.strip()
+                    
+                    if not line:
+                        continue
+                    
+                    self.stats['total_lines'] += 1
+                    
+                    try:
+                        # 解析行
+                        record = parse_func(line)
+                        
+                        if record:
+                            # 添加自定义字段
+                            if custom_fields:
+                                record.update(custom_fields)
+                            
+                            # 添加元数据
+                            record['_import_time'] = datetime.now().isoformat()
+                            record['_source_file'] = os.path.basename(filepath)
+                            record['_line_number'] = line_num
+                            
+                            batch.append(record)
+                            
+                            # 批次满了就写入
+                            if len(batch) >= self.batch_size:
+                                success, errors = self._bulk_index(batch, index_name)
+                                self.stats['success'] += success
+                                self.stats['error'] += errors
+                                batch = []
+                    
+                    except Exception as e:
+                        self.stats['error'] += 1
+                        if self.stats['error'] <= 10:
+                            logger.warning(f"行 {line_num} 解析失败: {e}")
+                    
+                    # 检查是否到了新的分块边界
+                    if bytes_read >= (chunk_num + 1) * self.chunk_size:
+                        chunk_num += 1
+                        self.stats['chunks_processed'] = chunk_num
+                        logger.info(f"已处理分块 {chunk_num}/{total_chunks}, "
+                                   f"成功: {self.stats['success']}, 失败: {self.stats['error']}")
+                        
+                        if callback:
+                            callback(self.stats.copy())
+                
+                # 处理最后一批
+                if batch:
+                    success, errors = self._bulk_index(batch, index_name)
+                    self.stats['success'] += success
+                    self.stats['error'] += errors
+                
+                self.stats['chunks_processed'] = chunk_num + 1
+        
+        except Exception as e:
+            logger.error(f"文件导入失败: {e}")
+            raise
+        finally:
+            self.stats['end_time'] = datetime.now().isoformat()
+        
+        logger.info(f"导入完成 - 成功: {self.stats['success']}, "
+                    f"失败: {self.stats['error']}, "
+                    f"总行数: {self.stats['total_lines']}")
+        
+        return self.stats
     
-    except Exception as e:
-        logger.error(f"处理块 #{chunk_number} 时出错: {str(e)}")
-        return start_pos, success_count, error_count
+    def _bulk_index(self, records, index_name):
+        """批量索引"""
+        if not records:
+            return 0, 0
+        
+        try:
+            actions = []
+            for record in records:
+                actions.append({'index': {'_index': index_name}})
+                actions.append(record)
+            
+            body = '\n'.join(json.dumps(a, ensure_ascii=False) for a in actions) + '\n'
+            
+            response = self.es.bulk(body=body, index=index_name, refresh=False)
+            
+            success = 0
+            errors = 0
+            if response.get('errors'):
+                for item in response.get('items', []):
+                    if 'error' in item.get('index', {}):
+                        errors += 1
+                    else:
+                        success += 1
+            else:
+                success = len(records)
+            
+            return success, errors
+        
+        except Exception as e:
+            logger.error(f"批量索引失败: {e}")
+            return 0, len(records)
+
 
 def main():
-    parser = argparse.ArgumentParser(description='大文件分块导入工具')
-    parser.add_argument('-f', '--file', required=True, help='要导入的大文件')
-    parser.add_argument('-c', '--config', required=True, help='配置文件')
-    parser.add_argument('--chunk-size', type=int, default=100*1024*1024, help='块大小(字节), 默认100MB')
-    parser.add_argument('--start-chunk', type=int, default=0, help='起始块编号(从0开始)')
-    parser.add_argument('--max-chunks', type=int, default=0, help='最大处理块数量(0表示全部)')
-    parser.add_argument('--create-index', action='store_true', help='创建索引')
+    """命令行入口"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='银狼平台 - 分块数据导入工具')
+    parser.add_argument('file', help='要导入的文件路径')
+    parser.add_argument('--index', default='socialdb', help='ES索引名')
+    parser.add_argument('--chunk-size', type=int, default=100, help='分块大小(MB)')
+    parser.add_argument('--batch-size', type=int, default=5000, help='每批次记录数')
+    parser.add_argument('--split', default='----', help='字段分隔符')
+    parser.add_argument('--fields', default='email,password', help='字段列表,逗号分隔')
+    parser.add_argument('--source', default='', help='数据来源标记')
+    parser.add_argument('--es-host', default='localhost', help='ES主机')
+    parser.add_argument('--es-port', type=int, default=9200, help='ES端口')
+    
     args = parser.parse_args()
     
-    # 检查文件
-    if not os.path.isfile(args.file):
-        logger.error(f"文件不存在: {args.file}")
-        return
+    if not os.path.exists(args.file):
+        print(f"文件不存在: {args.file}")
+        sys.exit(1)
     
-    # 获取文件大小
-    file_size = os.path.getsize(args.file)
-    logger.info(f"文件大小: {file_size/1024/1024:.2f} MB")
+    from elasticsearch import Elasticsearch
+    es = Elasticsearch([{'host': args.es_host, 'port': args.es_port}])
     
-    # 加载配置
-    try:
-        with open(args.config, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-            logger.info(f"成功加载配置文件: {args.config}")
-    except Exception as e:
-        logger.error(f"加载配置文件失败: {str(e)}")
-        return
+    fields = args.fields.split(',')
+    split_char = args.split
+    custom_fields = {}
+    if args.source:
+        custom_fields['source'] = args.source
     
-    # 创建ES客户端
-    es_client = ESClient()
+    def parse_line(line):
+        parts = line.split(split_char)
+        record = {}
+        for i, field in enumerate(fields):
+            if i < len(parts):
+                record[field] = parts[i].strip()
+        return record if record else None
     
-    # 创建索引
-    if args.create_index:
-        es_client.create_index_if_not_exists()
-        logger.info("索引创建成功")
+    importer = ChunkImporter(es, chunk_size_mb=args.chunk_size, batch_size=args.batch_size)
     
-    # 计算块数
-    total_chunks = (file_size + args.chunk_size - 1) // args.chunk_size
-    max_chunks = args.max_chunks if args.max_chunks > 0 else total_chunks
-    chunks_to_process = min(max_chunks, total_chunks - args.start_chunk)
+    def progress_callback(stats):
+        print(f"进度: 分块 {stats['chunks_processed']}, "
+              f"成功 {stats['success']}, 失败 {stats['error']}, "
+              f"总行数 {stats['total_lines']}")
     
-    logger.info(f"将处理 {chunks_to_process} 个块, 每块 {args.chunk_size/1024/1024:.2f} MB")
+    stats = importer.import_file(
+        args.file,
+        parse_line,
+        index_name=args.index,
+        custom_fields=custom_fields,
+        callback=progress_callback
+    )
     
-    # 处理块
-    start_pos = args.start_chunk * args.chunk_size
-    total_success = 0
-    total_error = 0
-    
-    start_time = datetime.now()
-    
-    for i in range(chunks_to_process):
-        chunk_number = args.start_chunk + i
-        next_pos, success, error = process_chunk(args.file, start_pos, args.chunk_size, chunk_number, config, es_client)
-        
-        start_pos = next_pos
-        total_success += success
-        total_error += error
-    
-    # 输出总结
-    elapsed = datetime.now() - start_time
-    logger.info("=" * 60)
-    logger.info(f"分块导入完成")
-    logger.info(f"总共处理 {chunks_to_process} 个块")
-    logger.info(f"成功导入: {total_success} 条记录")
-    logger.info(f"失败: {total_error} 条记录")
-    logger.info(f"总耗时: {elapsed}")
-    logger.info("=" * 60)
+    print(f"\n===== 导入完成 =====")
+    print(f"总行数: {stats['total_lines']}")
+    print(f"成功: {stats['success']}")
+    print(f"失败: {stats['error']}")
+    print(f"分块数: {stats['chunks_processed']}")
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     main()
