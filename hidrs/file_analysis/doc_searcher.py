@@ -1193,14 +1193,14 @@ def _search_jsonl_file(fpath: str, pattern: 're.Pattern',
                             lines_read += 1
                             if lines_read > max_lines:
                                 break
+                            # 首行剥离 BOM
+                            if lines_read == 1 and line_bytes.startswith(b'\xef\xbb\xbf'):
+                                line_bytes = line_bytes[3:]
                             line = line_bytes.decode('utf-8', errors='replace').strip()
                             if not line:
                                 continue
                             try:
                                 obj = _fast_json.loads(line)
-                                if isinstance(obj, bytes):
-                                    # orjson.loads returns bytes for strings
-                                    obj = json.loads(line)
                             except (ValueError, TypeError):
                                 # 非 JSON 行，用纯文本搜索
                                 if pattern.search(line):
@@ -1221,7 +1221,7 @@ def _search_jsonl_file(fpath: str, pattern: 're.Pattern',
                 use_mmap = False
 
         if not use_mmap:
-            with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
+            with open(fpath, 'r', encoding='utf-8-sig', errors='replace') as f:
                 for line in f:
                     lines_read += 1
                     if lines_read > max_lines:
@@ -1231,8 +1231,6 @@ def _search_jsonl_file(fpath: str, pattern: 're.Pattern',
                         continue
                     try:
                         obj = _fast_json.loads(line)
-                        if isinstance(obj, bytes):
-                            obj = json.loads(line)
                     except (ValueError, TypeError):
                         if pattern.search(line):
                             matches.append({
@@ -3192,7 +3190,7 @@ class SessionLogSearcher:
         """解析单行 JSONL 为 SessionLogEntry"""
         try:
             obj = _fast_json.loads(line)
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, ValueError, TypeError):
             self.stats['lines_parse_error'] += 1
             return None
 
@@ -3365,7 +3363,8 @@ class SessionLogSearcher:
 
         for fpath in files:
             try:
-                with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
+                # utf-8-sig 自动剥离 BOM (Windows 记事本等生成的文件可能有 BOM)
+                with open(fpath, 'r', encoding='utf-8-sig', errors='replace') as f:
                     for line_num, line in enumerate(f, 1):
                         self.stats['lines_scanned'] += 1
                         line = line.strip()
