@@ -1193,14 +1193,14 @@ def _search_jsonl_file(fpath: str, pattern: 're.Pattern',
                             lines_read += 1
                             if lines_read > max_lines:
                                 break
+                            # 首行剥离 BOM
+                            if lines_read == 1 and line_bytes.startswith(b'\xef\xbb\xbf'):
+                                line_bytes = line_bytes[3:]
                             line = line_bytes.decode('utf-8', errors='replace').strip()
                             if not line:
                                 continue
                             try:
                                 obj = _fast_json.loads(line)
-                                if isinstance(obj, bytes):
-                                    # orjson.loads returns bytes for strings
-                                    obj = json.loads(line)
                             except (ValueError, TypeError):
                                 # 非 JSON 行，用纯文本搜索
                                 if pattern.search(line):
@@ -1221,7 +1221,7 @@ def _search_jsonl_file(fpath: str, pattern: 're.Pattern',
                 use_mmap = False
 
         if not use_mmap:
-            with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
+            with open(fpath, 'r', encoding='utf-8-sig', errors='replace') as f:
                 for line in f:
                     lines_read += 1
                     if lines_read > max_lines:
@@ -1231,8 +1231,6 @@ def _search_jsonl_file(fpath: str, pattern: 're.Pattern',
                         continue
                     try:
                         obj = _fast_json.loads(line)
-                        if isinstance(obj, bytes):
-                            obj = json.loads(line)
                     except (ValueError, TypeError):
                         if pattern.search(line):
                             matches.append({
@@ -1372,6 +1370,8 @@ class DocSearcher:
                 combined = f"({re.escape(self.keyword)}|{re.escape(translated)})"
                 self.pattern_str = combined
                 self.is_regex = True
+                # 更新 regex_pattern 以确保 _parallel_search 子搜索器也用翻译后的模式
+                self.regex_pattern = combined
                 logger.info(f"关键词翻译: '{self.keyword}' -> '{translated}'，"
                             f"搜索模式: {combined}")
 
@@ -3152,12 +3152,16 @@ class SessionLogSearcher:
 
         # 编译搜索模式
         flags = 0 if case_sensitive else re.IGNORECASE
-        if regex_pattern:
-            self._pattern = re.compile(regex_pattern, flags)
-        elif keyword:
-            self._pattern = re.compile(re.escape(keyword), flags)
-        else:
-            self._pattern = None
+        try:
+            if regex_pattern:
+                self._pattern = re.compile(regex_pattern, flags)
+            elif keyword:
+                self._pattern = re.compile(re.escape(keyword), flags)
+            else:
+                self._pattern = None
+        except re.error as e:
+            logger.warning(f"正则编译失败: {e}，改用纯文本搜索")
+            self._pattern = re.compile(re.escape(regex_pattern or keyword), flags)
 
         self.stats = {
             'files_scanned': 0,
@@ -3192,7 +3196,7 @@ class SessionLogSearcher:
         """解析单行 JSONL 为 SessionLogEntry"""
         try:
             obj = _fast_json.loads(line)
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, ValueError, TypeError):
             self.stats['lines_parse_error'] += 1
             return None
 
@@ -3260,13 +3264,13 @@ class SessionLogSearcher:
                 entry.tool_name = block.get('name', '')
                 inp = block.get('input', {})
                 if isinstance(inp, dict):
-                    # 提取关键参数
-                    fp = inp.get('file_path', '') or inp.get('path', '')
+                    # 提取关键参数（强制 str 防止 JSON 字段类型异常）
+                    fp = str(inp.get('file_path', '') or inp.get('path', '') or '')
                     if fp:
                         entry.file_path = fp
-                    cmd = inp.get('command', '')
-                    pattern = inp.get('pattern', '') or inp.get('keyword', '')
-                    content = inp.get('content', '')
+                    cmd = str(inp.get('command', '') or '')
+                    pattern = str(inp.get('pattern', '') or inp.get('keyword', '') or '')
+                    content = str(inp.get('content', '') or '')
                     # 组装摘要
                     parts = []
                     if fp:
@@ -3296,10 +3300,10 @@ class SessionLogSearcher:
             if tr_text == 'text':
                 file_info = tool_result.get('file', {})
                 if isinstance(file_info, dict):
-                    fp = file_info.get('filePath', '')
+                    fp = str(file_info.get('filePath', '') or '')
                     if fp:
                         entry.file_path = entry.file_path or fp
-                    fc = file_info.get('content', '')
+                    fc = str(file_info.get('content', '') or '')
                     if fc:
                         text_parts.append(fc[:500])
 
@@ -3365,7 +3369,8 @@ class SessionLogSearcher:
 
         for fpath in files:
             try:
-                with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
+                # utf-8-sig 自动剥离 BOM (Windows 记事本等生成的文件可能有 BOM)
+                with open(fpath, 'r', encoding='utf-8-sig', errors='replace') as f:
                     for line_num, line in enumerate(f, 1):
                         self.stats['lines_scanned'] += 1
                         line = line.strip()
