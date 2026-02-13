@@ -2273,6 +2273,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp7.add_argument('--max-results', type=int, default=50, metavar='N',
                      help='最大返回条数 (默认 50, 0=不限)')
     sp7.add_argument('--thinking', action='store_true', help='显示 thinking 内容')
+    sp7.add_argument('--no-subagents', action='store_true',
+                     help='跳过 subagents/ 子代理文件')
     sp7.add_argument('-v', '--verbose', action='store_true', help='显示完整内容')
     sp7.add_argument('--json', action='store_true', help='JSON 格式输出')
 
@@ -3135,7 +3137,8 @@ class SessionLogSearcher:
                  before: Optional[datetime] = None,
                  max_results: int = 0,
                  content_only: bool = False,
-                 show_thinking: bool = False):
+                 show_thinking: bool = False,
+                 skip_subagents: bool = False):
 
         self.session_dir = os.path.abspath(session_dir)
         self.keyword = keyword
@@ -3150,6 +3153,7 @@ class SessionLogSearcher:
         self.max_results = max_results
         self.content_only = content_only
         self.show_thinking = show_thinking
+        self.skip_subagents = skip_subagents
 
         # 编译搜索模式
         flags = 0 if case_sensitive else re.IGNORECASE
@@ -3165,7 +3169,8 @@ class SessionLogSearcher:
             self._pattern = re.compile(re.escape(regex_pattern or keyword), flags)
 
         self.stats = {
-            'files_scanned': 0,
+            'files_found': 0,     # 前置过滤后的文件数
+            'files_scanned': 0,   # 实际逐行读取的文件数
             'lines_scanned': 0,
             'lines_matched': 0,
             'lines_parse_error': 0,
@@ -3173,24 +3178,101 @@ class SessionLogSearcher:
         }
 
     def _find_session_files(self) -> List[str]:
-        """查找所有 JSONL 会话文件"""
+        """
+        查找所有 JSONL 会话文件，支持多层前置过滤以减少 I/O:
+
+        1. session-id 文件名过滤: Claude Code JSONL 文件名即 UUID，
+           --session-id 可直接匹配文件名，跳过无关文件
+        2. mtime 前置过滤: --after 时文件 mtime < after 的肯定没有新条目可跳过
+        3. rg 关键词预筛: 有搜索关键词时先用 ripgrep --files-with-matches
+           找出包含关键词的文件，避免 Python 逐行读不匹配的大文件
+        """
         files = []
         target = self.session_dir
 
         if os.path.isfile(target) and target.endswith('.jsonl'):
             return [target]
 
-        # 递归搜索 .jsonl 文件
+        # --- 阶段 1: 收集 .jsonl 文件 ---
+        # 跳过 file-history 目录（文件编辑备份，不是聊天记录）
+        _skip_dirs = {'file-history'}
+        if self.skip_subagents:
+            _skip_dirs.add('subagents')
         for root, dirs, fnames in os.walk(target):
-            # 跳过 file-history 目录（不是聊天记录）
-            dirs[:] = [d for d in dirs if d != 'file-history']
+            dirs[:] = [d for d in dirs if d not in _skip_dirs]
             for fname in fnames:
                 if fname.endswith('.jsonl'):
-                    fpath = os.path.join(root, fname)
-                    files.append(fpath)
+                    files.append(os.path.join(root, fname))
+
+        if not files:
+            return []
+
+        # --- 阶段 2: session-id 文件名前置过滤 ---
+        # Claude Code 的 JSONL 文件名格式: {session-uuid}.jsonl
+        # 子代理文件: subagents/agent-{shortHash}.jsonl
+        # 一个 JSONL 内可能有多个 sessionId（--continue/--resume 追加），
+        # 但文件名 UUID 是首个 session 的 ID，部分匹配仍可缩小范围
+        if self.session_id_filter:
+            sid = self.session_id_filter.lower()
+            filtered = [f for f in files
+                        if sid in os.path.basename(f).lower()
+                        or sid in os.path.basename(os.path.dirname(f)).lower()]
+            if filtered:
+                files = filtered
+                logger.debug(f"session-id 文件名过滤: {len(files)} 个文件匹配 '{sid}'")
+            else:
+                # 文件名没匹配到，可能是 --continue 追加的 sessionId，
+                # 回退到全量扫描让行级过滤处理
+                logger.debug(f"session-id '{sid}' 未匹配任何文件名，回退全量扫描")
+
+        # --- 阶段 3: mtime 前置过滤 ---
+        # 如果设了 --after，文件最后修改时间 < after 的文件中
+        # 不可能有 after 之后的条目（JSONL 是追加写入的）
+        if self.after:
+            after_ts = self.after.timestamp()
+            before_count = len(files)
+            files = [f for f in files if os.path.getmtime(f) >= after_ts]
+            skipped = before_count - len(files)
+            if skipped > 0:
+                logger.debug(f"mtime 前置过滤: 跳过 {skipped} 个旧文件")
+
+        if not files:
+            return []
+
+        # --- 阶段 4: ripgrep 关键词预筛 ---
+        # 有搜索关键词且 rg 可用时，先用 rg --files-with-matches 快速筛出
+        # 包含关键词的文件，避免 Python 逐行读大量不匹配的 JSONL
+        pattern = self.keyword or self.regex_pattern
+        if pattern and len(files) > 1:
+            rg_bin = shutil.which('rg')
+            if rg_bin:
+                try:
+                    cmd = [rg_bin, '--files-with-matches', '--no-messages']
+                    if not (self.regex_pattern):
+                        cmd.append('--fixed-strings')
+                    if not self.case_sensitive:
+                        cmd.append('--ignore-case')
+                    cmd.append(pattern)
+                    cmd.extend(files)
+                    proc = subprocess.run(
+                        cmd, capture_output=True, text=True, timeout=30)
+                    if proc.returncode == 0 and proc.stdout.strip():
+                        rg_files = set(proc.stdout.strip().splitlines())
+                        before_count = len(files)
+                        files = [f for f in files if f in rg_files]
+                        skipped = before_count - len(files)
+                        if skipped > 0:
+                            logger.debug(f"rg 预筛: 跳过 {skipped} 个无匹配文件")
+                    elif proc.returncode == 1:
+                        # rg 返回 1 表示没有任何匹配
+                        logger.debug("rg 预筛: 所有文件均无匹配")
+                        return []
+                except (subprocess.TimeoutExpired, OSError) as e:
+                    logger.debug(f"rg 预筛失败，回退全量扫描: {e}")
 
         # 按修改时间排序（最新在前）
         files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+        self.stats['files_found'] = len(files)
         return files
 
     def _parse_entry(self, line: str, line_num: int) -> Optional[SessionLogEntry]:
@@ -3438,7 +3520,10 @@ class SessionLogSearcher:
             lines.append(f"  角色:   {self.role_filter}")
         if self.slug_filter:
             lines.append(f"  会话:   {self.slug_filter}")
-        lines.append(f"  扫描: {self.stats['files_scanned']} 个文件 | "
+        found = self.stats.get('files_found', 0)
+        scanned = self.stats['files_scanned']
+        pre_filter = f" (预筛后 {found})" if found and found != scanned else ""
+        lines.append(f"  扫描: {scanned} 个文件{pre_filter} | "
                      f"{self.stats['lines_scanned']} 行 | "
                      f"命中: {self.stats['lines_matched']} | "
                      f"解析错误: {self.stats['lines_parse_error']} | "
@@ -3584,6 +3669,7 @@ def _cmd_session(args) -> int:
         before=before_ts,
         max_results=args.max_results,
         show_thinking=args.thinking,
+        skip_subagents=getattr(args, 'no_subagents', False),
     )
 
     results = searcher.search()
