@@ -2280,9 +2280,31 @@ def build_parser() -> argparse.ArgumentParser:
     sp7.add_argument('-v', '--verbose', action='store_true', help='显示完整内容')
     sp7.add_argument('--json', action='store_true', help='JSON 格式输出')
 
+    # file-history (文件历史备份搜索)
+    sp8 = sub.add_parser('file-history', help='搜索 Claude Code 文件历史备份 (file-history)')
+    sp8.add_argument('path', nargs='?', default='.',
+                     help='Claude 项目目录 (含 JSONL 的目录，默认当前目录)')
+    sp8.add_argument('--file', type=str, default=None, metavar='PATTERN',
+                     help='按文件路径过滤 (子串匹配)')
+    sp8.add_argument('--session-id', type=str, default=None,
+                     help='按会话 ID 过滤 (部分匹配)')
+    sp8.add_argument('--after', type=str, default=None,
+                     help='时间下限 (支持快捷符)')
+    sp8.add_argument('--before', type=str, default=None,
+                     help='时间上限 (支持快捷符)')
+    sp8.add_argument('--cat', type=str, default=None, metavar='FILE_PATH',
+                     help='输出指定文件最新备份的完整内容 (可配合 --version)')
+    sp8.add_argument('--version', type=int, default=None, metavar='N',
+                     help='配合 --cat 指定版本号')
+    sp8.add_argument('--diff', action='store_true',
+                     help='显示相邻版本之间的 diff')
+    sp8.add_argument('-v', '--verbose', action='store_true',
+                     help='显示文件内容预览')
+    sp8.add_argument('--json', action='store_true', help='JSON 格式输出')
+
     sp6 = sub.add_parser('help', help='查看详细帮助')
     sp6.add_argument('topic', nargs='?', default='all',
-                     help='帮助主题: search date type hash base64 format pipe parallel session version all')
+                     help='帮助主题: search date type hash base64 format pipe parallel session file-history version all')
 
     return parser
 
@@ -2335,6 +2357,8 @@ def cli_main(argv: Optional[List[str]] = None) -> int:
         return _cmd_base64(args)
     elif args.command == 'session':
         return _cmd_session(args)
+    elif args.command == 'file-history':
+        return _cmd_file_history(args)
     elif args.command == 'help':
         return _cmd_help(args)
     return 0
@@ -3055,6 +3079,64 @@ def _cmd_help(args) -> int:
     Task, TodoWrite, NotebookEdit, AskUserQuestion
 """,
 
+        'file-history': """
+=== file-history -- 文件历史备份搜索 ===
+
+  搜索 Claude Code 的 file-history 备份。
+  解析 JSONL 中的 file-history-snapshot 条目，交叉引用
+  ~/.claude/file-history/{sessionId}/ 下的物理备份文件。
+
+  Claude Code 修改文件时会自动创建备份:
+    ~/.claude/file-history/{sessionId}/{sha256_16}@v{version}
+
+  JSONL 中 file-history-snapshot 条目记录了:
+    - trackedFileBackups: 文件相对路径 → backupFileName 映射
+    - messageId: 关联到哪条 assistant 消息
+    - version: 每次修改递增
+
+  基本用法:
+    doc_searcher file-history [项目目录]
+
+  项目目录: 包含 JSONL 会话文件的 Claude 项目目录
+    ~/.claude/projects/-home-user-myproject/
+
+  参数:
+    --file PATTERN    按文件路径过滤 (子串匹配)
+    --session-id ID   按会话 ID 过滤 (部分匹配)
+    --after TIME      时间下限 (支持快捷符: td yd 3d 7d 等)
+    --before TIME     时间上限
+    --cat FILE_PATH   输出指定文件最新备份的完整内容
+    --version N       配合 --cat 指定版本号
+    --diff            显示相邻版本之间的 diff
+    -v, --verbose     显示文件内容预览
+    --json            JSON 格式输出
+
+  示例:
+    # 列出所有文件历史备份
+    doc_searcher file-history ~/.claude/projects/-home-user-myproject
+
+    # 搜索特定文件的备份
+    doc_searcher file-history --file "test_ai_dialogue.py" ~/.claude/projects/...
+
+    # 查看特定文件最新备份的完整内容
+    doc_searcher file-history --cat "tests/test_ai_dialogue.py" ~/.claude/projects/...
+
+    # 查看特定版本
+    doc_searcher file-history --cat "tests/test_ai_dialogue.py" --version 3 ~/.claude/projects/...
+
+    # 恢复文件 (重定向到目标路径)
+    doc_searcher file-history --cat "src/app.py" ~/.claude/projects/... > src/app.py
+
+    # 查看文件各版本之间的 diff
+    doc_searcher file-history --file "crawler.py" --diff ~/.claude/projects/...
+
+    # 只看最近一天的备份
+    doc_searcher file-history --after yd ~/.claude/projects/...
+
+    # JSON 输出供脚本处理
+    doc_searcher file-history --json ~/.claude/projects/... | jq '.files | keys'
+""",
+
         'version': """
 === --version -- 版本号筛选 ===
 
@@ -3094,8 +3176,9 @@ def _cmd_help(args) -> int:
     hash       通过 MD5/SHA 查找文件副本
     base64     Base64 双向搜索
     translate  批量翻译文件名 (中<->英)
-    session    搜索 Claude Agent 会话日志 (JSONL)
-    help       查看详细帮助
+    session       搜索 Claude Agent 会话日志 (JSONL)
+    file-history  搜索 Claude Code 文件历史备份
+    help          查看详细帮助
 
   帮助主题 (doc_searcher help <主题>):
     search     搜索功能详解
@@ -3105,8 +3188,10 @@ def _cmd_help(args) -> int:
     base64     Base64 搜索
     format     输出格式
     pipe       管道组合
-    parallel   并行加速
-    version    版本号筛选
+    parallel      并行加速
+    session       Agent 会话日志搜索
+    file-history  文件历史备份搜索
+    version       版本号筛选
 
   参数顺序 (重要):
     doc_searcher [全局选项] <子命令> [子命令选项] [参数]
@@ -3780,6 +3865,462 @@ def _cmd_session(args) -> int:
         safe_print(searcher.format_grep(results))
     else:
         safe_print(searcher.format_results(results, verbose=args.verbose))
+
+    return 0
+
+
+# ============================================================
+# file-history: Claude Code 文件历史备份搜索
+# ============================================================
+
+class FileHistoryEntry:
+    """单条文件历史备份记录"""
+
+    __slots__ = ('file_path', 'backup_filename', 'version', 'backup_time',
+                 'message_id', 'session_id', 'session_slug',
+                 'backup_full_path', 'exists', 'is_deleted')
+
+    def __init__(self):
+        self.file_path: str = ''         # 文件相对路径 (相对于项目 cwd)
+        self.backup_filename: str = ''   # hash@v{n}
+        self.version: int = 0
+        self.backup_time: str = ''       # ISO 时间戳
+        self.message_id: str = ''        # 关联的消息 UUID
+        self.session_id: str = ''        # 会话 UUID (来自 JSONL 文件名)
+        self.session_slug: str = ''
+        self.backup_full_path: str = ''  # 备份文件物理路径
+        self.exists: bool = False        # 备份文件是否存在
+        self.is_deleted: bool = False    # 该快照表示文件被删除 (backupFileName=null)
+
+
+class FileHistorySearcher:
+    """Claude Code 文件历史备份搜索器
+
+    解析 JSONL 中的 file-history-snapshot 条目，交叉引用
+    ~/.claude/file-history/{sessionId}/ 下的物理备份文件。
+    """
+
+    def __init__(self, project_dir: str, *,
+                 file_pattern: Optional[str] = None,
+                 session_id_filter: Optional[str] = None,
+                 after: Optional[datetime] = None,
+                 before: Optional[datetime] = None):
+
+        self.project_dir = os.path.abspath(project_dir)
+        self.file_pattern = file_pattern.lower() if file_pattern else None
+        self.session_id_filter = session_id_filter
+        self.after = after
+        self.before = before
+
+        # Claude Code 的 file-history 根目录
+        claude_home = os.environ.get('CLAUDE_CONFIG_DIR',
+                                     os.path.expanduser('~/.claude'))
+        self.file_history_root = os.path.join(claude_home, 'file-history')
+
+        self.stats = {
+            'jsonl_files': 0,
+            'snapshots_parsed': 0,
+            'entries_total': 0,
+            'entries_matched': 0,
+            'backups_found': 0,
+            'backups_missing': 0,
+        }
+
+    def _find_jsonl_files(self) -> List[str]:
+        """在项目目录下找到所有 JSONL 文件"""
+        files = []
+        skip_dirs = {'file-history'}
+        target = self.project_dir
+
+        if os.path.isfile(target) and target.endswith('.jsonl'):
+            return [target]
+
+        for root, dirs, fnames in os.walk(target):
+            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            for fname in fnames:
+                if fname.endswith('.jsonl'):
+                    files.append(os.path.join(root, fname))
+
+        # session-id 前置过滤：JSONL 文件名即 session UUID
+        if self.session_id_filter and files:
+            sid = self.session_id_filter.lower()
+            filtered = [f for f in files
+                        if sid in os.path.basename(f).lower()
+                        or sid in os.path.basename(os.path.dirname(f)).lower()]
+            if filtered:
+                files = filtered
+
+        return files
+
+    def _extract_session_id_from_path(self, jsonl_path: str) -> str:
+        """从 JSONL 文件路径提取 session UUID
+
+        文件名格式: {session-uuid}.jsonl
+        子代理路径: {session-uuid}/subagents/agent-{hash}.jsonl
+        """
+        fname = os.path.basename(jsonl_path)
+        stem = fname.rsplit('.', 1)[0]  # 去掉 .jsonl
+
+        # 主会话文件: 文件名本身就是 UUID
+        # 检测 UUID 格式 (8-4-4-4-12)
+        if len(stem) == 36 and stem.count('-') == 4:
+            return stem
+
+        # 子代理文件: 从父级目录取 session UUID
+        parent = os.path.basename(os.path.dirname(jsonl_path))
+        if len(parent) == 36 and parent.count('-') == 4:
+            return parent
+
+        # 再往上一级（subagents/ 的父目录）
+        grandparent = os.path.basename(
+            os.path.dirname(os.path.dirname(jsonl_path)))
+        if len(grandparent) == 36 and grandparent.count('-') == 4:
+            return grandparent
+
+        return stem  # 回退
+
+    def _parse_snapshots(self, jsonl_path: str) -> List[FileHistoryEntry]:
+        """从单个 JSONL 文件解析 file-history-snapshot 条目"""
+        entries = []
+        session_id = self._extract_session_id_from_path(jsonl_path)
+
+        # 快速预检: 文件中是否有 file-history-snapshot
+        try:
+            with open(jsonl_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+            if 'file-history-snapshot' not in content:
+                return []
+        except (OSError, IOError):
+            return []
+
+        # 从文件中提取 slug（读第一行获取）
+        slug = ''
+        for raw_line in content.split('\n'):
+            if not raw_line.strip():
+                continue
+            try:
+                first_obj = json.loads(raw_line)
+                slug = first_obj.get('sessionSlug', '') or first_obj.get('slug', '')
+                if slug:
+                    break
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        for line_text in content.split('\n'):
+            if 'file-history-snapshot' not in line_text:
+                continue
+            try:
+                obj = json.loads(line_text)
+            except (json.JSONDecodeError, ValueError):
+                continue
+
+            if obj.get('type') != 'file-history-snapshot':
+                continue
+
+            self.stats['snapshots_parsed'] += 1
+            snapshot = obj.get('snapshot', {})
+            if not isinstance(snapshot, dict):
+                continue
+
+            message_id = snapshot.get('messageId', '') or obj.get('messageId', '')
+            snap_ts = snapshot.get('timestamp', '') or ''
+            tracked = snapshot.get('trackedFileBackups', {})
+            if not isinstance(tracked, dict):
+                continue
+
+            for rel_path, backup_info in tracked.items():
+                if not isinstance(backup_info, dict):
+                    continue
+
+                e = FileHistoryEntry()
+                e.file_path = rel_path
+                e.session_id = session_id
+                e.session_slug = slug
+                e.message_id = message_id
+                e.backup_time = backup_info.get('backupTime', snap_ts) or snap_ts
+
+                bfn = backup_info.get('backupFileName')
+                if bfn is None:
+                    # backupFileName=null 表示文件在此快照时不存在（被删除）
+                    e.is_deleted = True
+                    e.version = backup_info.get('version', 0) or 0
+                else:
+                    e.backup_filename = str(bfn)
+                    e.version = backup_info.get('version', 0) or 0
+                    # 构建物理备份路径
+                    e.backup_full_path = os.path.join(
+                        self.file_history_root, session_id, e.backup_filename)
+                    e.exists = os.path.isfile(e.backup_full_path)
+
+                entries.append(e)
+                self.stats['entries_total'] += 1
+
+        return entries
+
+    def _match_entry(self, entry: FileHistoryEntry) -> bool:
+        """过滤单条记录"""
+        # 文件路径过滤
+        if self.file_pattern:
+            if self.file_pattern not in entry.file_path.lower():
+                return False
+
+        # session-id 过滤
+        if self.session_id_filter:
+            if self.session_id_filter not in entry.session_id:
+                return False
+
+        # 时间过滤
+        if (self.after or self.before) and entry.backup_time:
+            try:
+                ts_str = entry.backup_time
+                if ts_str.endswith('Z'):
+                    ts_str = ts_str[:-1]
+                ts_dt = datetime.fromisoformat(ts_str[:19])
+                if self.after and ts_dt < self.after:
+                    return False
+                if self.before and ts_dt > self.before:
+                    return False
+            except (ValueError, TypeError):
+                pass
+
+        return True
+
+    def search(self) -> List[FileHistoryEntry]:
+        """搜索文件历史备份"""
+        jsonl_files = self._find_jsonl_files()
+        self.stats['jsonl_files'] = len(jsonl_files)
+
+        all_entries = []
+        for jf in jsonl_files:
+            entries = self._parse_snapshots(jf)
+            for e in entries:
+                if self._match_entry(e):
+                    all_entries.append(e)
+                    self.stats['entries_matched'] += 1
+                    if e.exists:
+                        self.stats['backups_found'] += 1
+                    elif not e.is_deleted:
+                        self.stats['backups_missing'] += 1
+
+        # 按时间排序（最新在前），然后按文件路径分组
+        all_entries.sort(key=lambda e: (e.file_path, e.backup_time or ''))
+        return all_entries
+
+    def read_backup(self, entry: FileHistoryEntry) -> Optional[str]:
+        """读取备份文件内容"""
+        if not entry.exists or not entry.backup_full_path:
+            return None
+        try:
+            with open(entry.backup_full_path, 'r', encoding='utf-8',
+                      errors='replace') as f:
+                return f.read()
+        except (OSError, IOError) as e:
+            logger.warning(f"读取备份文件失败: {entry.backup_full_path}: {e}")
+            return None
+
+    def find_entry(self, file_path: str,
+                   version: Optional[int] = None) -> Optional[FileHistoryEntry]:
+        """查找指定文件（可选版本）的备份记录"""
+        results = self.search()
+        fp_lower = file_path.lower()
+        candidates = [e for e in results
+                      if fp_lower in e.file_path.lower() and not e.is_deleted]
+
+        if not candidates:
+            return None
+
+        if version is not None:
+            for c in candidates:
+                if c.version == version:
+                    return c
+            return None
+
+        # 默认返回最高版本
+        candidates.sort(key=lambda e: e.version, reverse=True)
+        return candidates[0]
+
+    def get_file_timeline(self, results: List[FileHistoryEntry]
+                          ) -> Dict[str, List[FileHistoryEntry]]:
+        """将结果按文件路径分组为时间线"""
+        timeline: Dict[str, List[FileHistoryEntry]] = {}
+        for e in results:
+            timeline.setdefault(e.file_path, []).append(e)
+        # 每个文件内按版本排序
+        for entries in timeline.values():
+            entries.sort(key=lambda e: e.version)
+        return timeline
+
+    def format_results(self, results: List[FileHistoryEntry], *,
+                       verbose: bool = False,
+                       show_diff: bool = False) -> str:
+        """文本格式输出"""
+        lines = []
+        sep = '─' * 72
+
+        # 统计头
+        lines.append(sep)
+        lines.append(f"  file-history | JSONL: {self.stats['jsonl_files']} 个 | "
+                     f"快照: {self.stats['snapshots_parsed']} 条 | "
+                     f"备份: {self.stats['backups_found']} 存在 / "
+                     f"{self.stats['backups_missing']} 缺失")
+        lines.append(sep)
+
+        if not results:
+            lines.append('  未找到文件历史备份。')
+            lines.append(sep)
+            return '\n'.join(lines)
+
+        timeline = self.get_file_timeline(results)
+
+        for fp, entries in sorted(timeline.items()):
+            lines.append('')
+            lines.append(f"  {fp}  ({len(entries)} 个版本)")
+
+            prev_content = None
+            for e in entries:
+                ts_short = ''
+                if e.backup_time:
+                    ts_short = e.backup_time[:19].replace('T', ' ')
+
+                if e.is_deleted:
+                    status = '[已删除]'
+                elif e.exists:
+                    status = '[存在]'
+                else:
+                    status = '[缺失]'
+
+                slug_tag = f" [{e.session_slug}]" if e.session_slug else ''
+                sid_short = e.session_id[:8] if e.session_id else ''
+
+                lines.append(
+                    f"    v{e.version}  {ts_short}  {status}  "
+                    f"{e.backup_filename or '(null)'}{slug_tag}  @{sid_short}")
+
+                if verbose and e.exists:
+                    content = self.read_backup(e)
+                    if content is not None:
+                        preview_lines = content.split('\n')
+                        if len(preview_lines) > 10:
+                            for cl in preview_lines[:10]:
+                                lines.append(f"      │ {cl}")
+                            lines.append(
+                                f"      │ ... ({len(preview_lines)} 行, "
+                                f"{len(content)} 字符)")
+                        else:
+                            for cl in preview_lines:
+                                lines.append(f"      │ {cl}")
+
+                if show_diff and e.exists and prev_content is not None:
+                    curr_content = self.read_backup(e)
+                    if curr_content is not None:
+                        import difflib
+                        prev_lines = prev_content.split('\n')
+                        curr_lines = curr_content.split('\n')
+                        diff = difflib.unified_diff(
+                            prev_lines, curr_lines,
+                            fromfile=f'v{e.version - 1}',
+                            tofile=f'v{e.version}',
+                            lineterm='')
+                        diff_lines = list(diff)
+                        if diff_lines:
+                            for dl in diff_lines[:30]:
+                                lines.append(f"      {dl}")
+                            if len(diff_lines) > 30:
+                                lines.append(
+                                    f"      ... ({len(diff_lines)} 行 diff)")
+                        prev_content = curr_content
+
+                if show_diff and e.exists and prev_content is None:
+                    prev_content = self.read_backup(e)
+
+        lines.append('')
+        lines.append(sep)
+        return '\n'.join(lines)
+
+    def format_json(self, results: List[FileHistoryEntry]) -> str:
+        """JSON 格式输出"""
+        timeline = self.get_file_timeline(results)
+        data = {}
+        for fp, entries in timeline.items():
+            data[fp] = []
+            for e in entries:
+                d = {
+                    'version': e.version,
+                    'backup_filename': e.backup_filename or None,
+                    'backup_time': e.backup_time or None,
+                    'session_id': e.session_id,
+                    'session_slug': e.session_slug or None,
+                    'message_id': e.message_id or None,
+                    'backup_path': e.backup_full_path or None,
+                    'exists': e.exists,
+                    'is_deleted': e.is_deleted,
+                }
+                data[fp].append(d)
+
+        output = {
+            'stats': self.stats,
+            'file_history_root': self.file_history_root,
+            'files': data,
+        }
+        return json.dumps(output, ensure_ascii=False, indent=2)
+
+
+def _cmd_file_history(args) -> int:
+    """file-history 子命令: 搜索 Claude Code 文件历史备份"""
+    project_dir = os.path.abspath(args.path)
+
+    if not os.path.exists(project_dir):
+        safe_print(f"错误: 路径不存在: {project_dir}", file=sys.stderr)
+        return 1
+
+    after_ts = parse_date(args.after) if args.after else None
+    before_ts = parse_date(args.before) if args.before else None
+
+    searcher = FileHistorySearcher(
+        project_dir,
+        file_pattern=getattr(args, 'file', None),
+        session_id_filter=args.session_id,
+        after=after_ts,
+        before=before_ts,
+    )
+
+    # --cat 模式: 输出指定文件的备份内容
+    cat_path = getattr(args, 'cat', None)
+    if cat_path:
+        entry = searcher.find_entry(cat_path, version=args.version)
+        if entry is None:
+            safe_print(f"错误: 未找到 '{cat_path}' 的备份"
+                       + (f" (v{args.version})" if args.version else ''),
+                       file=sys.stderr)
+            return 1
+        if not entry.exists:
+            safe_print(f"错误: 备份文件不存在: {entry.backup_full_path}",
+                       file=sys.stderr)
+            return 1
+        content = searcher.read_backup(entry)
+        if content is None:
+            safe_print("错误: 无法读取备份文件", file=sys.stderr)
+            return 1
+        safe_print(content)
+        return 0
+
+    # 列表模式
+    results = searcher.search()
+
+    fmt = 'text'
+    if getattr(args, 'json', False):
+        fmt = 'json'
+    elif OutputFormatter.is_piped():
+        fmt = 'json'  # 管道输出默认 JSON（文件历史不适合 grep 格式）
+
+    if fmt == 'json':
+        safe_print(searcher.format_json(results))
+    else:
+        safe_print(searcher.format_results(
+            results,
+            verbose=args.verbose,
+            show_diff=getattr(args, 'diff', False),
+        ))
 
     return 0
 
