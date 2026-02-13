@@ -30,6 +30,23 @@ from .dns_defense import (
     DNSAnomalySignature
 )
 
+from .easytier_manager import (
+    EasyTierManager,
+    EasyTierCLI,
+    EasyTierPeer,
+    EasyTierRoute,
+    EasyTierNodeInfo,
+)
+
+from .openwrt_controller import (
+    OpenWrtFleetManager,
+    OpenWrtFirewallController,
+    OpenWrtSystemMonitor,
+    UbusSession,
+    RouterInfo,
+    FirewallRule,
+)
+
 __all__ = [
     # 反向GFW防火墙
     'HIDRSFirewall',
@@ -51,5 +68,20 @@ __all__ = [
     'DNSHijackingDetector',
     'ReverseDNSHijacker',
     'DNSRecord',
-    'DNSAnomalySignature'
+    'DNSAnomalySignature',
+
+    # EasyTier Mesh VPN
+    'EasyTierManager',
+    'EasyTierCLI',
+    'EasyTierPeer',
+    'EasyTierRoute',
+    'EasyTierNodeInfo',
+
+    # OpenWrt 远程控制
+    'OpenWrtFleetManager',
+    'OpenWrtFirewallController',
+    'OpenWrtSystemMonitor',
+    'UbusSession',
+    'RouterInfo',
+    'FirewallRule',
 ]

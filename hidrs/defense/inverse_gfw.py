@@ -901,6 +901,10 @@ class HIDRSFirewall:
         enable_fast_filters: bool = True,  # 启用快速过滤清单
         enable_packet_capture: bool = False,  # 启用真实封包捕获（需要NFQueue+scapy+root）
         nfqueue_num: int = 0,  # NFQueue队列编号
+        enable_easytier: bool = False,  # 启用EasyTier Mesh VPN
+        easytier_config: Dict[str, Any] = None,  # EasyTier配置
+        enable_openwrt: bool = False,  # 启用OpenWrt路由器集群管理
+        openwrt_routers: List[Dict[str, Any]] = None,  # OpenWrt路由器列表
         simulation_mode: bool = False,  # 模拟模式
         test_mode: bool = False,  # 测试模式
         test_whitelist_ips: List[str] = None,  # 测试白名单IP
@@ -1014,6 +1018,56 @@ class HIDRSFirewall:
                 self.filter_lists = None
                 self._filter_lists_enabled = False
 
+        # EasyTier Mesh VPN 管理
+        self.easytier_manager = None
+        self._easytier_enabled = False
+        if enable_easytier and not simulation_mode:
+            try:
+                from .easytier_manager import EasyTierManager
+                et_config = easytier_config or {}
+                self.easytier_manager = EasyTierManager(
+                    network_name=et_config.get('network_name', 'hidrs-aegis'),
+                    network_secret=et_config.get('network_secret', ''),
+                    ipv4=et_config.get('ipv4', ''),
+                    listeners=et_config.get('listeners', []),
+                    peers=et_config.get('peers', []),
+                    proxy_networks=et_config.get('proxy_networks', []),
+                    core_path=et_config.get('core_path'),
+                    cli_path=et_config.get('cli_path'),
+                    rpc_portal=et_config.get('rpc_portal', '127.0.0.1:15888'),
+                    config_file=et_config.get('config_file'),
+                )
+
+                # 注册拓扑变化回调：新节点上线时记录日志
+                self.easytier_manager.on_topology_change(self._on_mesh_topology_change)
+                self._easytier_enabled = True
+            except Exception as e:
+                logger.warning(f"[HIDRSFirewall] EasyTier初始化失败: {e}")
+
+        # OpenWrt 路由器集群管理
+        self.openwrt_fleet = None
+        self._openwrt_enabled = False
+        if enable_openwrt and not simulation_mode:
+            try:
+                from .openwrt_controller import OpenWrtFleetManager, RouterInfo
+                self.openwrt_fleet = OpenWrtFleetManager()
+
+                # 注册路由器
+                for router_cfg in (openwrt_routers or []):
+                    self.openwrt_fleet.add_router(RouterInfo(
+                        host=router_cfg['host'],
+                        port=router_cfg.get('port', 80),
+                        username=router_cfg.get('username', 'root'),
+                        password=router_cfg.get('password', ''),
+                        use_https=router_cfg.get('use_https', False),
+                        alias=router_cfg.get('alias', ''),
+                        region=router_cfg.get('region', ''),
+                    ))
+
+                self._openwrt_enabled = True
+            except Exception as e:
+                logger.warning(f"[HIDRSFirewall] OpenWrt集群初始化失败: {e}")
+
         # 连接追踪
         self.connections = {}  # ip -> ConnectionProfile
 
@@ -1029,9 +1083,12 @@ class HIDRSFirewall:
             'resource_scheduler_enabled': self._scheduler_enabled,
             'attack_memory_sosa': self._attack_memory_sosa,
             'fast_filters_enabled': self._filter_lists_enabled,
+            'easytier_enabled': self._easytier_enabled,
+            'openwrt_enabled': self._openwrt_enabled,
             'filter_list_blocks': 0,  # 快速过滤阻断次数
             'spamhaus_blocks': 0,  # Spamhaus阻断次数
             'email_phishing_blocks': 0,  # 邮件钓鱼阻断次数
+            'openwrt_rules_deployed': 0,  # OpenWrt规则部署次数
         }
 
         # 自动清理线程
@@ -1069,7 +1126,65 @@ class HIDRSFirewall:
             logger.info(f"  封包捕获: ✅ NFQueue (队列={nfqueue_num})")
         else:
             logger.info(f"  封包捕获: ❌ (手动输入模式)")
+
+        # EasyTier + OpenWrt
+        if self._easytier_enabled:
+            et_net = easytier_config.get('network_name', 'hidrs-aegis') if easytier_config else 'hidrs-aegis'
+            logger.info(f"  EasyTier: ✅ Mesh VPN (网络={et_net})")
+        else:
+            logger.info(f"  EasyTier: ❌")
+        if self._openwrt_enabled:
+            n_routers = len(openwrt_routers or [])
+            logger.info(f"  OpenWrt:  ✅ 路由器集群 ({n_routers}台)")
+        else:
+            logger.info(f"  OpenWrt:  ❌")
         logger.info("=" * 60)
+
+    def _on_mesh_topology_change(self, added, removed, peers, routes):
+        """
+        EasyTier Mesh 拓扑变化回调
+
+        当新节点加入或离开时触发。
+        可用于：自动将防御策略同步到新节点的 OpenWrt 路由器。
+        """
+        if added:
+            logger.info(f"[HIDRSFirewall] Mesh 新节点: {added}")
+        if removed:
+            logger.warning(f"[HIDRSFirewall] Mesh 节点离线: {removed}")
+
+    def deploy_block_to_openwrt(self, ip: str, reason: str = "", ttl: int = 3600) -> bool:
+        """
+        将封锁规则部署到所有 OpenWrt 路由器
+
+        参数:
+            ip: 要封锁的IP
+            reason: 封锁原因
+            ttl: 有效期（秒），默认1小时
+
+        返回:
+            是否至少有一台路由器部署成功
+        """
+        if not self._openwrt_enabled or not self.openwrt_fleet:
+            return False
+
+        results = self.openwrt_fleet.deploy_block_rule(ip, reason=reason, ttl=ttl)
+        success_count = sum(1 for v in results.values() if v)
+
+        if success_count > 0:
+            self.stats['openwrt_rules_deployed'] += 1
+
+        return success_count > 0
+
+    def get_mesh_topology(self) -> Optional[Dict[str, Any]]:
+        """
+        获取 EasyTier Mesh 网络拓扑（HLIG 格式）
+
+        返回可直接传给 TopologyBuilder 的节点+边数据。
+        """
+        if not self._easytier_enabled or not self.easytier_manager:
+            return None
+
+        return self.easytier_manager.get_topology_for_hlig()
 
     def start(self):
         """启动防火墙"""
@@ -1082,6 +1197,26 @@ class HIDRSFirewall:
         # 启动封包捕获（如果启用）
         if self.enable_packet_capture:
             self._start_packet_capture()
+
+        # 启动 EasyTier Mesh VPN
+        if self._easytier_enabled and self.easytier_manager:
+            if self.easytier_manager.core_path:
+                if self.easytier_manager.start_core():
+                    logger.info("[HIDRSFirewall] EasyTier Mesh VPN 已启动")
+                else:
+                    logger.warning("[HIDRSFirewall] EasyTier 启动失败")
+            elif self.easytier_manager.cli.available:
+                # core 已经在外部运行，只启动拓扑监控
+                self.easytier_manager._running = True
+                self.easytier_manager._start_topology_poll()
+                logger.info("[HIDRSFirewall] EasyTier 拓扑监控已启动（外部core）")
+
+        # 连接 OpenWrt 路由器集群
+        if self._openwrt_enabled and self.openwrt_fleet:
+            connect_results = self.openwrt_fleet.connect_all()
+            connected = sum(1 for v in connect_results.values() if v)
+            total = len(connect_results)
+            logger.info(f"[HIDRSFirewall] OpenWrt 路由器集群: {connected}/{total} 已连接")
 
         logger.info("[HIDRSFirewall] 防火墙已启动"
                      f" ({'封包捕获模式' if self._packet_capture else '手动输入模式'})")
@@ -1126,6 +1261,16 @@ class HIDRSFirewall:
         if self._packet_capture:
             self._packet_capture.stop()
             logger.info(f"[HIDRSFirewall] 封包捕获已停止 (stats={self._packet_capture.get_stats()})")
+
+        # 停止 EasyTier
+        if self._easytier_enabled and self.easytier_manager:
+            self.easytier_manager.stop_core()
+            logger.info("[HIDRSFirewall] EasyTier 已停止")
+
+        # 断开 OpenWrt 连接
+        if self._openwrt_enabled and self.openwrt_fleet:
+            self.openwrt_fleet.disconnect_all()
+            logger.info("[HIDRSFirewall] OpenWrt 路由器已断开")
 
         # 保存攻击记忆
         if self.attack_memory:
@@ -1524,6 +1669,14 @@ class HIDRSFirewall:
         if self.attack_memory:
             memory_stats = self.attack_memory.get_stats()
             stats['attack_memory'] = memory_stats
+
+        # 添加 EasyTier 统计
+        if self._easytier_enabled and self.easytier_manager:
+            stats['easytier'] = self.easytier_manager.get_stats()
+
+        # 添加 OpenWrt 统计
+        if self._openwrt_enabled and self.openwrt_fleet:
+            stats['openwrt'] = self.openwrt_fleet.stats
 
         return stats
 
