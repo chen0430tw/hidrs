@@ -67,9 +67,22 @@ import atexit
 
 logger = logging.getLogger(__name__)
 
+# ============================================================
+# Windows 控制台 UTF-8 强制（解决 GBK/cp936 中文乱码）
+# ============================================================
+if sys.platform == 'win32':
+    # reconfigure（Python 3.7+）让 stdout/stderr 直接输出 UTF-8
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
+    except (AttributeError, OSError):
+        # 旧版 Python 或特殊环境，设环境变量让子进程也用 UTF-8
+        os.environ.setdefault('PYTHONUTF8', '1')
+        os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
+
 
 # ============================================================
-# 安全输出（Windows GBK 控制台不支持 emoji/box-drawing 等 Unicode）
+# 安全输出（编码不兼容时优雅降级）
 # ============================================================
 
 def safe_print(*args, **kwargs):
@@ -3860,10 +3873,11 @@ def _cmd_session(args) -> int:
     results = searcher.search()
 
     # 输出格式
+    # --verbose / --full-content 强制 text（不走 grep 缩略格式）
     fmt = 'text'
     if getattr(args, 'json', False):
         fmt = 'json'
-    elif OutputFormatter.is_piped():
+    elif OutputFormatter.is_piped() and not args.verbose and not getattr(args, 'full_content', False):
         fmt = 'grep'
 
     if fmt == 'json':
@@ -4299,10 +4313,24 @@ def _cmd_file_history(args) -> int:
             safe_print(f"错误: 未找到 '{cat_path}' 的备份"
                        + (f" (v{args.version})" if args.version else ''),
                        file=sys.stderr)
+            safe_print(f"  JSONL 搜索目录: {project_dir}", file=sys.stderr)
+            safe_print(f"  备份文件根目录: {searcher.file_history_root}", file=sys.stderr)
+            # 提示可用文件
+            all_results = searcher.search()
+            all_files = sorted(set(e.file_path for e in all_results if e.file_path))
+            if all_files:
+                safe_print(f"  可用文件 ({len(all_files)} 个):", file=sys.stderr)
+                for fp in all_files[:10]:
+                    safe_print(f"    - {fp}", file=sys.stderr)
+                if len(all_files) > 10:
+                    safe_print(f"    ... 还有 {len(all_files)-10} 个", file=sys.stderr)
+            else:
+                safe_print("  (未找到任何文件历史记录)", file=sys.stderr)
             return 1
         if not entry.exists:
             safe_print(f"错误: 备份文件不存在: {entry.backup_full_path}",
                        file=sys.stderr)
+            safe_print(f"  备份文件根目录: {searcher.file_history_root}", file=sys.stderr)
             return 1
         content = searcher.read_backup(entry)
         if content is None:
