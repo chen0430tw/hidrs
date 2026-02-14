@@ -3558,8 +3558,9 @@ class SessionLogSearcher:
                         parts.append(content[:100])
                     entry.tool_input = ' | '.join(parts) if parts else json.dumps(inp, ensure_ascii=False)[:200]
 
-                    # --full-content: 保存 Write/Edit/NotebookEdit 的完整写入内容
-                    if self.full_content and entry.tool_name in ('Write', 'Edit', 'NotebookEdit'):
+                    # 保存 Write/Edit/NotebookEdit 的写入内容
+                    # --full-content 时保存完整内容，否则保存摘要（前3行）
+                    if entry.tool_name in ('Write', 'Edit', 'NotebookEdit'):
                         wc_parts = []
                         if content:  # Write.content / NotebookEdit.new_source 共用 'content' 键
                             wc_parts.append(content)
@@ -3576,7 +3577,19 @@ class SessionLogSearcher:
                                 edit_parts.append(f'+++ new_string +++\n{new_string}')
                             wc_parts.append('\n'.join(edit_parts))
                         if wc_parts:
-                            entry.write_content = '\n'.join(wc_parts)
+                            full_wc = '\n'.join(wc_parts)
+                            if self.full_content:
+                                entry.write_content = full_wc
+                            else:
+                                # 默认摘要: 前3行 + 总行数/字符数
+                                wc_lines = full_wc.split('\n')
+                                if len(wc_lines) > 3 or len(full_wc) > 200:
+                                    preview = '\n'.join(wc_lines[:3])
+                                    if len(preview) > 200:
+                                        preview = preview[:200]
+                                    entry.write_content = preview + f'\n... (共 {len(wc_lines)} 行, {len(full_wc)} 字符)'
+                                else:
+                                    entry.write_content = full_wc
 
             elif block_type == 'tool_result':
                 # 用户消息中的 tool_result
@@ -3696,6 +3709,30 @@ class SessionLogSearcher:
         self.stats['scan_time_seconds'] = round(time.time() - start, 3)
         return results
 
+    @staticmethod
+    def _relative_time(ts_str: str) -> str:
+        """将 ISO 时间戳转换为相对时间描述，如 '3天前'、'2小时前'"""
+        try:
+            ts_dt = datetime.fromisoformat(ts_str[:19])
+            delta = datetime.now() - ts_dt
+            secs = int(delta.total_seconds())
+            if secs < 0:
+                return ''
+            if secs < 60:
+                return f'{secs}秒前'
+            if secs < 3600:
+                return f'{secs // 60}分钟前'
+            if secs < 86400:
+                return f'{secs // 3600}小时前'
+            days = secs // 86400
+            if days < 30:
+                return f'{days}天前'
+            if days < 365:
+                return f'{days // 30}个月前'
+            return f'{days // 365}年前'
+        except (ValueError, TypeError):
+            return ''
+
     def format_results(self, results: List[SessionLogEntry],
                        verbose: bool = False) -> str:
         """格式化搜索结果"""
@@ -3733,16 +3770,18 @@ class SessionLogSearcher:
         for idx, e in enumerate(results, 1):
             lines.append('')
 
-            # 标题行: [序号] 角色/工具 @ 时间
+            # 标题行: [序号] 角色/工具 @ 时间 (相对时间) [slug]
             ts_short = e.timestamp[:19].replace('T', ' ') if e.timestamp else '?'
+            rel_time = self._relative_time(e.timestamp) if e.timestamp else ''
+            rel_tag = f' ({rel_time})' if rel_time else ''
             if e.tool_name:
                 tag = f"{e.role}:{e.tool_name}"
             else:
                 tag = e.role or e.type
-            slug_tag = f" [{e.slug}]" if e.slug else ''
+            slug_tag = f" [{e.slug or '(unknown)'}]"
             model_tag = f" ({e.model})" if e.model and verbose else ''
 
-            lines.append(f"  [{idx}] {tag}{model_tag}  {ts_short}{slug_tag}")
+            lines.append(f"  [{idx}] {tag}{model_tag}  {ts_short}{rel_tag}{slug_tag}")
 
             # 文件路径
             if e.file_path:
@@ -3768,10 +3807,17 @@ class SessionLogSearcher:
                 for cl in content.split('\n'):
                     lines.append(f"       {cl}")
 
-            # 写入内容: --full-content 时显示
+            # 写入内容: 始终显示（--full-content 时完整，默认摘要前3行）
             if e.write_content:
-                lines.append(f"       ┌── 写入内容 ({len(e.write_content)} 字符) ──")
-                for cl in e.write_content.split('\n'):
+                wc_lines = e.write_content.split('\n')
+                is_truncated = any(l.startswith('... (共 ') for l in wc_lines)
+                if self.full_content:
+                    lines.append(f"       ┌── 写入内容 ({len(e.write_content)} 字符) ──")
+                elif is_truncated:
+                    lines.append(f"       ┌── 写入内容摘要 (--full-content 查看完整) ──")
+                else:
+                    lines.append(f"       ┌── 写入内容 ({len(e.write_content)} 字符) ──")
+                for cl in wc_lines:
                     lines.append(f"       │ {cl}")
                 lines.append(f"       └──────────────────")
 
