@@ -3230,6 +3230,12 @@ def _cmd_help(args) -> int:
     doc_searcher -d search "key" .              调试模式
     doc_searcher hash <sha256> /dir             hash对比
     doc_searcher base64 "secret" /dir           base64搜索
+    doc_searcher session "关键词" /会话目录      搜索会话日志
+    doc_searcher session --tool Write /会话目录  按工具过滤
+    doc_searcher file-history /项目目录          列出文件备份
+    doc_searcher file-history --cat "src/app.py" /项目目录    查看备份内容
+    doc_searcher file-history --cat "src/app.py" /项目目录 > src/app.py  恢复文件
+    doc_searcher file-history --diff /项目目录   查看版本差异
 
   搜索后端 (自动降级):
     ripgrep (rg) -> grep -> findstr (Win) -> Python
