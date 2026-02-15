@@ -64,12 +64,26 @@ except ImportError:
 # 内存映射
 import mmap
 import atexit
+import threading
 
 logger = logging.getLogger(__name__)
 
+# ============================================================
+# Windows 控制台 UTF-8 强制（解决 GBK/cp936 中文乱码）
+# ============================================================
+if sys.platform == 'win32':
+    # reconfigure（Python 3.7+）让 stdout/stderr 直接输出 UTF-8
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
+    except (AttributeError, OSError):
+        # 旧版 Python 或特殊环境，设环境变量让子进程也用 UTF-8
+        os.environ.setdefault('PYTHONUTF8', '1')
+        os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
+
 
 # ============================================================
-# 安全输出（Windows GBK 控制台不支持 emoji/box-drawing 等 Unicode）
+# 安全输出（编码不兼容时优雅降级）
 # ============================================================
 
 def safe_print(*args, **kwargs):
@@ -97,6 +111,76 @@ def safe_write(text: str):
     except UnicodeEncodeError:
         enc = sys.stdout.encoding or 'utf-8'
         sys.stdout.write(text.encode(enc, errors='replace').decode(enc, errors='replace'))
+
+
+# ============================================================
+# 进度指示器（搜索等待时的动态状态行）
+# ============================================================
+
+class ProgressIndicator:
+    """终端进度指示器，在 stderr 输出动态状态行。
+
+    仅在 stderr 连接到终端时启用（管道时静默）。
+    使用 \\r 回车符覆写同一行，搜索完成后清除。
+    内置后台线程自动每 0.3s 旋转一次，无需手动 tick。
+
+    用法:
+        with ProgressIndicator("搜索中") as prog:
+            prog.update("扫描 100 个文件...")
+            # 自动旋转，无需手动 tick
+    """
+
+    _SPINNER = ('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
+
+    def __init__(self, label: str = '搜索中'):
+        self._label = label
+        self._enabled = sys.stderr.isatty()
+        self._spin_idx = 0
+        self._detail = ''
+        self._last_msg = ''
+        self._start_time = time.time()
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def __enter__(self):
+        if self._enabled:
+            self._render()
+            self._thread = threading.Thread(target=self._auto_tick, daemon=True)
+            self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        if self._enabled:
+            self._stop_event.set()
+            if self._thread:
+                self._thread.join(timeout=1)
+            # 清除状态行
+            clear_len = len(self._last_msg.encode('utf-8', errors='replace')) + 10
+            safe_print(f"\r{' ' * clear_len}\r", end='', file=sys.stderr)
+            sys.stderr.flush()
+
+    def _render(self):
+        """渲染当前状态行"""
+        self._spin_idx = (self._spin_idx + 1) % len(self._SPINNER)
+        elapsed = time.time() - self._start_time
+        msg = f"  {self._SPINNER[self._spin_idx]} {self._label} ({elapsed:.1f}s)"
+        if self._detail:
+            msg += f"  {self._detail}"
+        self._last_msg = msg
+        try:
+            sys.stderr.write(f"\r{msg}")
+            sys.stderr.flush()
+        except (OSError, UnicodeEncodeError):
+            pass
+
+    def _auto_tick(self):
+        """后台线程: 每 0.3s 刷新一次旋转器"""
+        while not self._stop_event.wait(0.3):
+            self._render()
+
+    def update(self, msg: str):
+        """更新状态消息（下次渲染时生效）"""
+        self._detail = msg
 
 
 # ============================================================
@@ -1085,47 +1169,50 @@ _MMAP_THRESHOLD = 50 * 1024 * 1024
 # 缓存有效期 (7 天)
 _JSONL_CACHE_TTL = 7 * 24 * 3600
 
-# 全局 JSONL 缓存
+# 全局 JSONL 缓存（线程安全）
 _jsonl_cache: Dict[str, Any] = {}
 _jsonl_cache_path: Optional[str] = None
 _jsonl_cache_dirty = False
+_jsonl_cache_lock = threading.Lock()
 
 
 def _load_jsonl_cache(search_dir: str) -> None:
     """加载 JSONL 索引缓存"""
     global _jsonl_cache, _jsonl_cache_path, _jsonl_cache_dirty
-    cache_file = os.path.join(search_dir, '.doc_searcher_jsonl_cache.json')
-    _jsonl_cache_path = cache_file
-    if os.path.isfile(cache_file):
-        try:
-            with open(cache_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            # 清除过期条目
-            now = time.time()
-            _jsonl_cache = {
-                k: v for k, v in data.items()
-                if now - v.get('cached_at', 0) < _JSONL_CACHE_TTL
-            }
-            logger.debug(f"加载 JSONL 缓存: {len(_jsonl_cache)} 条记录")
-        except (json.JSONDecodeError, OSError) as e:
-            logger.debug(f"JSONL 缓存加载失败: {e}")
+    with _jsonl_cache_lock:
+        cache_file = os.path.join(search_dir, '.doc_searcher_jsonl_cache.json')
+        _jsonl_cache_path = cache_file
+        if os.path.isfile(cache_file):
+            try:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                # 清除过期条目
+                now = time.time()
+                _jsonl_cache = {
+                    k: v for k, v in data.items()
+                    if now - v.get('cached_at', 0) < _JSONL_CACHE_TTL
+                }
+                logger.debug(f"加载 JSONL 缓存: {len(_jsonl_cache)} 条记录")
+            except (json.JSONDecodeError, OSError) as e:
+                logger.debug(f"JSONL 缓存加载失败: {e}")
+                _jsonl_cache = {}
+        else:
             _jsonl_cache = {}
-    else:
-        _jsonl_cache = {}
 
 
 def _save_jsonl_cache() -> None:
     """保存 JSONL 索引缓存到磁盘"""
     global _jsonl_cache_dirty
-    if not _jsonl_cache_dirty or not _jsonl_cache_path:
-        return
-    try:
-        with open(_jsonl_cache_path, 'w', encoding='utf-8') as f:
-            json.dump(_jsonl_cache, f, ensure_ascii=False, indent=2)
-        logger.debug(f"保存 JSONL 缓存: {len(_jsonl_cache)} 条记录")
-        _jsonl_cache_dirty = False
-    except OSError as e:
-        logger.debug(f"JSONL 缓存保存失败: {e}")
+    with _jsonl_cache_lock:
+        if not _jsonl_cache_dirty or not _jsonl_cache_path:
+            return
+        try:
+            with open(_jsonl_cache_path, 'w', encoding='utf-8') as f:
+                json.dump(_jsonl_cache, f, ensure_ascii=False, indent=2)
+            logger.debug(f"保存 JSONL 缓存: {len(_jsonl_cache)} 条记录")
+            _jsonl_cache_dirty = False
+        except OSError as e:
+            logger.debug(f"JSONL 缓存保存失败: {e}")
 
 
 # 程序退出时自动保存缓存
@@ -1173,11 +1260,12 @@ def _search_jsonl_file(fpath: str, pattern: 're.Pattern',
 
     # 检查缓存: 如果 mtime 没变且上次搜索无命中，跳过
     cache_key = fpath
-    if cache_key in _jsonl_cache:
-        cached = _jsonl_cache[cache_key]
-        if cached.get('mtime') == file_mtime and not cached.get('had_matches', True):
-            logger.debug(f"JSONL 缓存命中 (无匹配): {fpath}")
-            return None
+    with _jsonl_cache_lock:
+        if cache_key in _jsonl_cache:
+            cached = _jsonl_cache[cache_key]
+            if cached.get('mtime') == file_mtime and not cached.get('had_matches', True):
+                logger.debug(f"JSONL 缓存命中 (无匹配): {fpath}")
+                return None
 
     matches = []
     lines_read = 0
@@ -1248,13 +1336,14 @@ def _search_jsonl_file(fpath: str, pattern: 're.Pattern',
         return None
 
     # 更新缓存
-    _jsonl_cache[cache_key] = {
-        'mtime': file_mtime,
-        'size': file_size,
-        'had_matches': len(matches) > 0,
-        'cached_at': time.time(),
-    }
-    _jsonl_cache_dirty = True
+    with _jsonl_cache_lock:
+        _jsonl_cache[cache_key] = {
+            'mtime': file_mtime,
+            'size': file_size,
+            'had_matches': len(matches) > 0,
+            'cached_at': time.time(),
+        }
+        _jsonl_cache_dirty = True
 
     if matches:
         r = SearchResult(path=fpath, source='jsonl')
@@ -1803,6 +1892,8 @@ def format_size(size_bytes: int) -> str:
 
 def parse_size(size_str: str) -> int:
     size_str = size_str.strip().upper()
+    if not size_str:
+        raise ValueError("空的大小字符串")
     units = {'TB': 1024**4, 'GB': 1024**3, 'MB': 1024**2, 'KB': 1024,
              'T': 1024**4, 'G': 1024**3, 'M': 1024**2, 'K': 1024, 'B': 1}
     for unit, multiplier in sorted(units.items(), key=lambda x: -len(x[0])):
@@ -2204,7 +2295,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help=f'文件类型预设: {type_names}')
     # 并行加速
     sp.add_argument('--parallel', type=int, default=0, metavar='N',
-                    help='并行分群搜索线程数（0=不启用，建议 4-16）')
+                    help='并行分群搜索线程数（0=不启用，建议 4-16，上限 32）')
     # JSONL 大文件结果导出阈值
     sp.add_argument('--jsonl-dump', type=int, default=50, metavar='N',
                     help='JSONL 大文件匹配超过 N 条时导出到 txt（默认50，0=全显示不存文件）')
@@ -2273,6 +2364,10 @@ def build_parser() -> argparse.ArgumentParser:
                      help='按角色过滤: user / assistant')
     sp7.add_argument('--session-id', type=str, default=None, help='按会话 ID 过滤 (部分匹配)')
     sp7.add_argument('--slug', type=str, default=None, help='按会话 slug 过滤 (部分匹配)')
+    sp7.add_argument('--model', type=str, default=None,
+                     help='按模型过滤 (部分匹配，如 opus, sonnet, haiku)')
+    sp7.add_argument('--file', type=str, default=None, metavar='PATTERN',
+                     help='按文件路径过滤 (子串匹配，如 src/app.py)')
     sp7.add_argument('--after', type=str, default=None,
                      help='时间下限 (支持快捷: td yd 3d 7d tw lw tm lm 或 ISO格式)')
     sp7.add_argument('--before', type=str, default=None,
@@ -2447,15 +2542,19 @@ def _cmd_search(args) -> int:
     )
 
     # stdin 文件列表模式
-    if stdin_files:
-        results = _search_file_list(searcher, stdin_files)
-        searcher.stats['files_matched'] = len(results)
-        searcher.stats['total_matches'] = sum(r.match_count for r in results)
-    # 并行分群搜索模式
-    elif args.parallel > 0:
-        results = _parallel_search(searcher, args)
-    else:
-        results = searcher.search()
+    with ProgressIndicator("搜索中") as prog:
+        prog.update(f"目标: {os.path.basename(search_path)}/  关键词: {args.keyword or '(scan)'}")
+        if stdin_files:
+            prog.update(f"stdin 文件列表: {len(stdin_files)} 个文件")
+            results = _search_file_list(searcher, stdin_files)
+            searcher.stats['files_matched'] = len(results)
+            searcher.stats['total_matches'] = sum(r.match_count for r in results)
+        # 并行分群搜索模式
+        elif args.parallel > 0:
+            prog.update(f"并行搜索 (线程: {min(args.parallel, 32)})")
+            results = _parallel_search(searcher, args)
+        else:
+            results = searcher.search()
 
     # JSONL 大文件结果分流: 超过阈值时导出到 txt，屏幕只显示摘要
     jsonl_dump_threshold = getattr(args, 'jsonl_dump', 50)
@@ -2524,7 +2623,7 @@ def _cmd_search(args) -> int:
 def _parallel_search(searcher: DocSearcher, args) -> List[SearchResult]:
     """并行分群搜索：将目录按子目录分 chunk，每个 chunk 独立搜索"""
     target = searcher.target_path
-    max_workers = args.parallel
+    max_workers = min(args.parallel, 32)  # 上限 32 线程
 
     # 收集一级子目录
     chunks = []
@@ -2644,7 +2743,9 @@ def _cmd_scan(args) -> int:
         max_results=args.max_results,
     )
 
-    results = searcher.scan_text_files()
+    with ProgressIndicator("扫描中") as prog:
+        prog.update(f"目标: {os.path.basename(args.path)}/")
+        results = searcher.scan_text_files()
     summary = searcher.get_summary()
 
     # scan 也支持格式选择
@@ -2699,7 +2800,9 @@ def _cmd_hash(args) -> int:
         safe_print(f"路径不存在: {target}", file=sys.stderr)
         return 1
 
-    results = HashMatcher.find_by_hash(target, args.hash_value, algorithm=args.algo)
+    with ProgressIndicator("Hash 搜索") as prog:
+        prog.update(f"目标: {os.path.basename(target)}/  算法: {args.algo}")
+        results = HashMatcher.find_by_hash(target, args.hash_value, algorithm=args.algo)
 
     if args.json:
         out = {
@@ -2726,7 +2829,9 @@ def _cmd_base64(args) -> int:
         safe_print(f"路径不存在: {target}", file=sys.stderr)
         return 1
 
-    results = HashMatcher.find_by_base64(target, args.query)
+    with ProgressIndicator("Base64 搜索") as prog:
+        prog.update(f"目标: {os.path.basename(target)}/  查询: {args.query}")
+        results = HashMatcher.find_by_base64(target, args.query)
 
     if args.json:
         out = {
@@ -3006,6 +3111,8 @@ def _cmd_help(args) -> int:
     --role ROLE       按角色过滤: user / assistant
     --slug TEXT       按会话 slug 过滤 (部分匹配)
     --session-id ID   按会话 ID 过滤 (部分匹配，同时做文件名前置过滤)
+    --model TEXT      按模型过滤 (部分匹配: opus, sonnet, haiku)
+    --file PATTERN    按文件路径过滤 (子串匹配: src/app.py)
     --after TIME      时间下限 (支持快捷符，同时做 mtime 前置过滤)
     --before TIME     时间上限 (支持快捷符)
     --no-subagents    跳过 subagents/ 子代理文件
@@ -3217,6 +3324,12 @@ def _cmd_help(args) -> int:
     doc_searcher -d search "key" .              调试模式
     doc_searcher hash <sha256> /dir             hash对比
     doc_searcher base64 "secret" /dir           base64搜索
+    doc_searcher session "关键词" /会话目录      搜索会话日志
+    doc_searcher session --tool Write /会话目录  按工具过滤
+    doc_searcher file-history /项目目录          列出文件备份
+    doc_searcher file-history --cat "src/app.py" /项目目录    查看备份内容
+    doc_searcher file-history --cat "src/app.py" /项目目录 > src/app.py  恢复文件
+    doc_searcher file-history --diff /项目目录   查看版本差异
 
   搜索后端 (自动降级):
     ripgrep (rg) -> grep -> findstr (Win) -> Python
@@ -3286,6 +3399,8 @@ class SessionLogSearcher:
                  role_filter: Optional[str] = None,
                  session_id_filter: Optional[str] = None,
                  slug_filter: Optional[str] = None,
+                 model_filter: Optional[str] = None,
+                 file_filter: Optional[str] = None,
                  after: Optional[datetime] = None,
                  before: Optional[datetime] = None,
                  max_results: int = 0,
@@ -3303,6 +3418,8 @@ class SessionLogSearcher:
         self.role_filter = role_filter  # 'user', 'assistant', None=all
         self.session_id_filter = session_id_filter
         self.slug_filter = slug_filter
+        self.model_filter = model_filter.lower() if model_filter else None
+        self.file_filter = file_filter
         self.after = after
         self.before = before
         self.max_results = max_results
@@ -3539,8 +3656,9 @@ class SessionLogSearcher:
                         parts.append(content[:100])
                     entry.tool_input = ' | '.join(parts) if parts else json.dumps(inp, ensure_ascii=False)[:200]
 
-                    # --full-content: 保存 Write/Edit/NotebookEdit 的完整写入内容
-                    if self.full_content and entry.tool_name in ('Write', 'Edit', 'NotebookEdit'):
+                    # 保存 Write/Edit/NotebookEdit 的写入内容
+                    # --full-content 时保存完整内容，否则保存摘要（前3行）
+                    if entry.tool_name in ('Write', 'Edit', 'NotebookEdit'):
                         wc_parts = []
                         if content:  # Write.content / NotebookEdit.new_source 共用 'content' 键
                             wc_parts.append(content)
@@ -3557,7 +3675,19 @@ class SessionLogSearcher:
                                 edit_parts.append(f'+++ new_string +++\n{new_string}')
                             wc_parts.append('\n'.join(edit_parts))
                         if wc_parts:
-                            entry.write_content = '\n'.join(wc_parts)
+                            full_wc = '\n'.join(wc_parts)
+                            if self.full_content:
+                                entry.write_content = full_wc
+                            else:
+                                # 默认摘要: 前3行 + 总行数/字符数
+                                wc_lines = full_wc.split('\n')
+                                if len(wc_lines) > 3 or len(full_wc) > 200:
+                                    preview = '\n'.join(wc_lines[:3])
+                                    if len(preview) > 200:
+                                        preview = preview[:200]
+                                    entry.write_content = preview + f'\n... (共 {len(wc_lines)} 行, {len(full_wc)} 字符)'
+                                else:
+                                    entry.write_content = full_wc
 
             elif block_type == 'tool_result':
                 # 用户消息中的 tool_result
@@ -3608,6 +3738,16 @@ class SessionLogSearcher:
         # slug 过滤
         if self.slug_filter:
             if self.slug_filter.lower() not in entry.slug.lower():
+                return False
+
+        # 模型过滤
+        if self.model_filter:
+            if not entry.model or self.model_filter not in entry.model.lower():
+                return False
+
+        # 文件路径过滤
+        if self.file_filter:
+            if not entry.file_path or self.file_filter.lower() not in entry.file_path.lower():
                 return False
 
         # 日期过滤（datetime 对象比较）
@@ -3677,6 +3817,30 @@ class SessionLogSearcher:
         self.stats['scan_time_seconds'] = round(time.time() - start, 3)
         return results
 
+    @staticmethod
+    def _relative_time(ts_str: str) -> str:
+        """将 ISO 时间戳转换为相对时间描述，如 '3天前'、'2小时前'"""
+        try:
+            ts_dt = datetime.fromisoformat(ts_str[:19])
+            delta = datetime.now() - ts_dt
+            secs = int(delta.total_seconds())
+            if secs < 0:
+                return ''
+            if secs < 60:
+                return f'{secs}秒前'
+            if secs < 3600:
+                return f'{secs // 60}分钟前'
+            if secs < 86400:
+                return f'{secs // 3600}小时前'
+            days = secs // 86400
+            if days < 30:
+                return f'{days}天前'
+            if days < 365:
+                return f'{days // 30}个月前'
+            return f'{days // 365}年前'
+        except (ValueError, TypeError):
+            return ''
+
     def format_results(self, results: List[SessionLogEntry],
                        verbose: bool = False) -> str:
         """格式化搜索结果"""
@@ -3696,6 +3860,10 @@ class SessionLogSearcher:
             lines.append(f"  角色:   {self.role_filter}")
         if self.slug_filter:
             lines.append(f"  会话:   {self.slug_filter}")
+        if self.model_filter:
+            lines.append(f"  模型:   {self.model_filter}")
+        if self.file_filter:
+            lines.append(f"  文件:   {self.file_filter}")
         found = self.stats.get('files_found', 0)
         scanned = self.stats['files_scanned']
         pre_filter = f" (预筛后 {found})" if found and found != scanned else ""
@@ -3714,16 +3882,18 @@ class SessionLogSearcher:
         for idx, e in enumerate(results, 1):
             lines.append('')
 
-            # 标题行: [序号] 角色/工具 @ 时间
+            # 标题行: [序号] 角色/工具 @ 时间 (相对时间) [slug]
             ts_short = e.timestamp[:19].replace('T', ' ') if e.timestamp else '?'
+            rel_time = self._relative_time(e.timestamp) if e.timestamp else ''
+            rel_tag = f' ({rel_time})' if rel_time else ''
             if e.tool_name:
                 tag = f"{e.role}:{e.tool_name}"
             else:
                 tag = e.role or e.type
-            slug_tag = f" [{e.slug}]" if e.slug else ''
+            slug_tag = f" [{e.slug or '(unknown)'}]"
             model_tag = f" ({e.model})" if e.model and verbose else ''
 
-            lines.append(f"  [{idx}] {tag}{model_tag}  {ts_short}{slug_tag}")
+            lines.append(f"  [{idx}] {tag}{model_tag}  {ts_short}{rel_tag}{slug_tag}")
 
             # 文件路径
             if e.file_path:
@@ -3749,10 +3919,17 @@ class SessionLogSearcher:
                 for cl in content.split('\n'):
                     lines.append(f"       {cl}")
 
-            # 写入内容: --full-content 时显示
+            # 写入内容: 始终显示（--full-content 时完整，默认摘要前3行）
             if e.write_content:
-                lines.append(f"       ┌── 写入内容 ({len(e.write_content)} 字符) ──")
-                for cl in e.write_content.split('\n'):
+                wc_lines = e.write_content.split('\n')
+                is_truncated = any(l.startswith('... (共 ') for l in wc_lines)
+                if self.full_content:
+                    lines.append(f"       ┌── 写入内容 ({len(e.write_content)} 字符) ──")
+                elif is_truncated:
+                    lines.append(f"       ┌── 写入内容摘要 (--full-content 查看完整) ──")
+                else:
+                    lines.append(f"       ┌── 写入内容 ({len(e.write_content)} 字符) ──")
+                for cl in wc_lines:
                     lines.append(f"       │ {cl}")
                 lines.append(f"       └──────────────────")
 
@@ -3772,7 +3949,7 @@ class SessionLogSearcher:
         return '\n'.join(lines)
 
     def format_json(self, results: List[SessionLogEntry]) -> str:
-        """JSON 格式输出"""
+        """JSON 格式输出（完整数据，不截断）"""
         data = []
         for e in results:
             d = {
@@ -3781,9 +3958,9 @@ class SessionLogSearcher:
                 'tool_name': e.tool_name or None,
                 'tool_input': e.tool_input or None,
                 'file_path': e.file_path or None,
-                'content': e.content_text[:1000] if e.content_text else None,
-                'write_content': e.write_content if e.write_content else None,
-                'thinking': e.thinking[:500] if e.thinking else None,
+                'content': e.content_text or None,
+                'write_content': e.write_content or None,
+                'thinking': e.thinking or None,
                 'timestamp': e.timestamp,
                 'session_id': e.session_id,
                 'slug': e.slug,
@@ -3849,6 +4026,8 @@ def _cmd_session(args) -> int:
         role_filter=args.role,
         session_id_filter=args.session_id,
         slug_filter=args.slug,
+        model_filter=getattr(args, 'model', None),
+        file_filter=getattr(args, 'file', None),
         after=after_ts,
         before=before_ts,
         max_results=args.max_results,
@@ -3857,13 +4036,17 @@ def _cmd_session(args) -> int:
         full_content=getattr(args, 'full_content', False),
     )
 
-    results = searcher.search()
+    with ProgressIndicator("会话搜索") as prog:
+        kw_hint = keyword or '(全部)'
+        prog.update(f"关键词: {kw_hint}  目录: {os.path.basename(session_dir)}/")
+        results = searcher.search()
 
     # 输出格式
+    # --verbose / --full-content 强制 text（不走 grep 缩略格式）
     fmt = 'text'
     if getattr(args, 'json', False):
         fmt = 'json'
-    elif OutputFormatter.is_piped():
+    elif OutputFormatter.is_piped() and not args.verbose and not getattr(args, 'full_content', False):
         fmt = 'grep'
 
     if fmt == 'json':
@@ -4203,42 +4386,42 @@ class FileHistorySearcher:
                     f"    v{e.version}  {ts_short}  {status}  "
                     f"{e.backup_filename or '(null)'}{slug_tag}  @{sid_short}")
 
-                if verbose and e.exists:
-                    content = self.read_backup(e)
-                    if content is not None:
-                        preview_lines = content.split('\n')
-                        if len(preview_lines) > 10:
-                            for cl in preview_lines[:10]:
-                                lines.append(f"      │ {cl}")
-                            lines.append(
-                                f"      │ ... ({len(preview_lines)} 行, "
-                                f"{len(content)} 字符)")
-                        else:
-                            for cl in preview_lines:
-                                lines.append(f"      │ {cl}")
-
-                if show_diff and e.exists and prev_content is not None:
+                # 读一次，verbose 和 diff 共用
+                curr_content = None
+                if e.exists and (verbose or show_diff):
                     curr_content = self.read_backup(e)
-                    if curr_content is not None:
-                        import difflib
-                        prev_lines = prev_content.split('\n')
-                        curr_lines = curr_content.split('\n')
-                        diff = difflib.unified_diff(
-                            prev_lines, curr_lines,
-                            fromfile=f'v{e.version - 1}',
-                            tofile=f'v{e.version}',
-                            lineterm='')
-                        diff_lines = list(diff)
-                        if diff_lines:
-                            for dl in diff_lines[:30]:
-                                lines.append(f"      {dl}")
-                            if len(diff_lines) > 30:
-                                lines.append(
-                                    f"      ... ({len(diff_lines)} 行 diff)")
-                        prev_content = curr_content
 
-                if show_diff and e.exists and prev_content is None:
-                    prev_content = self.read_backup(e)
+                if verbose and curr_content is not None:
+                    preview_lines = curr_content.split('\n')
+                    if len(preview_lines) > 10:
+                        for cl in preview_lines[:10]:
+                            lines.append(f"      │ {cl}")
+                        lines.append(
+                            f"      │ ... ({len(preview_lines)} 行, "
+                            f"{len(curr_content)} 字符)")
+                    else:
+                        for cl in preview_lines:
+                            lines.append(f"      │ {cl}")
+
+                if show_diff and curr_content is not None and prev_content is not None:
+                    import difflib
+                    prev_lines = prev_content.split('\n')
+                    curr_lines = curr_content.split('\n')
+                    diff = difflib.unified_diff(
+                        prev_lines, curr_lines,
+                        fromfile=f'v{e.version - 1}',
+                        tofile=f'v{e.version}',
+                        lineterm='')
+                    diff_lines = list(diff)
+                    if diff_lines:
+                        for dl in diff_lines[:30]:
+                            lines.append(f"      {dl}")
+                        if len(diff_lines) > 30:
+                            lines.append(
+                                f"      ... ({len(diff_lines)} 行 diff)")
+
+                if show_diff and curr_content is not None:
+                    prev_content = curr_content
 
         lines.append('')
         lines.append(sep)
@@ -4299,20 +4482,42 @@ def _cmd_file_history(args) -> int:
             safe_print(f"错误: 未找到 '{cat_path}' 的备份"
                        + (f" (v{args.version})" if args.version else ''),
                        file=sys.stderr)
+            safe_print(f"  JSONL 搜索目录: {project_dir}", file=sys.stderr)
+            safe_print(f"  备份文件根目录: {searcher.file_history_root}", file=sys.stderr)
+            # 提示可用文件
+            all_results = searcher.search()
+            all_files = sorted(set(e.file_path for e in all_results if e.file_path))
+            if all_files:
+                safe_print(f"  可用文件 ({len(all_files)} 个):", file=sys.stderr)
+                for fp in all_files[:10]:
+                    safe_print(f"    - {fp}", file=sys.stderr)
+                if len(all_files) > 10:
+                    safe_print(f"    ... 还有 {len(all_files)-10} 个", file=sys.stderr)
+            else:
+                safe_print("  (未找到任何文件历史记录)", file=sys.stderr)
             return 1
         if not entry.exists:
             safe_print(f"错误: 备份文件不存在: {entry.backup_full_path}",
                        file=sys.stderr)
+            safe_print(f"  备份文件根目录: {searcher.file_history_root}", file=sys.stderr)
             return 1
         content = searcher.read_backup(entry)
         if content is None:
             safe_print("错误: 无法读取备份文件", file=sys.stderr)
             return 1
+        # stderr 输出版本元信息（不影响 stdout 管道重定向）
+        ts_short = entry.backup_time[:19].replace('T', ' ') if entry.backup_time else '?'
+        slug_tag = f" [{entry.session_slug}]" if entry.session_slug else ''
+        safe_print(f"[file-history] v{entry.version}  {ts_short}{slug_tag}  "
+                   f"{entry.file_path}  ({len(content)} 字符)",
+                   file=sys.stderr)
         safe_print(content)
         return 0
 
     # 列表模式
-    results = searcher.search()
+    with ProgressIndicator("文件历史") as prog:
+        prog.update(f"扫描 JSONL: {os.path.basename(project_dir)}/")
+        results = searcher.search()
 
     fmt = 'text'
     if getattr(args, 'json', False):
